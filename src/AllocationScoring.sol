@@ -1,0 +1,211 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.24;
+
+import { AuctionTypes } from "./AuctionTypes.sol";
+
+/**
+ * @title AllocationScoring
+ * @notice Scoring algorithms for allocation evaluation and selection
+ * @author Clock-Proxy Auction Team
+ */
+library AllocationScoring {
+	/// @notice Error when allocation validation fails
+	error InvalidAllocation();
+	error DuplicateBundle();
+	error InvalidBundle();
+	error InsufficientValue();
+
+	/**
+	 * @notice Score an allocation based on predefined criteria
+	 * @param allocation The allocation to score
+	 * @param bundles Array of all submitted bundles
+	 * @param totalBidders Total number of bidders
+	 * @return score The allocation score
+	 */
+	function scoreAllocation(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles,
+		uint256 totalBidders
+	) internal pure returns (uint256 score) {
+		// Validate allocation
+		if (!isValidAllocation(allocation, bundles)) {
+			revert InvalidAllocation();
+		}
+
+		// TODO: Implement scoring algorithm
+		// This will be designed based on auction requirements
+		// Possible criteria: total value, fairness, efficiency, etc.
+		
+		// Placeholder: return total value as base score
+		score = allocation.totalValue;
+	}
+
+	/**
+	 * @notice Validate that an allocation is feasible
+	 * @param allocation The allocation to validate
+	 * @param bundles Array of all submitted bundles
+	 * @return isValid True if the allocation is valid
+	 */
+	function isValidAllocation(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles
+	) internal pure returns (bool isValid) {
+		// Check for duplicate bundles
+		if (hasDuplicateBundles(allocation)) {
+			return false;
+		}
+
+		// Check that all bundles exist
+		if (!allBundlesExist(allocation, bundles)) {
+			return false;
+		}
+
+		// Check that total value matches bundle values
+		if (!validateTotalValue(allocation, bundles)) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * @notice Check if allocation has duplicate bundles
+	 * @param allocation The allocation to check
+	 * @return hasDuplicates True if duplicates found
+	 */
+	function hasDuplicateBundles(
+		AuctionTypes.Allocation memory allocation
+	) internal pure returns (bool hasDuplicates) {
+		uint256[] memory bundleIds = allocation.bundleIds;
+		
+		for (uint256 i = 0; i < bundleIds.length; i++) {
+			for (uint256 j = i + 1; j < bundleIds.length; j++) {
+				if (bundleIds[i] == bundleIds[j]) {
+					return true;
+				}
+			}
+		}
+		
+		return false;
+	}
+
+	/**
+	 * @notice Check if all bundles in allocation exist
+	 * @param allocation The allocation to check
+	 * @param bundles Array of all bundles
+	 * @return allExist True if all bundles exist
+	 */
+	function allBundlesExist(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles
+	) internal pure returns (bool allExist) {
+		uint256[] memory allocationBundleIds = allocation.bundleIds;
+		
+		for (uint256 i = 0; i < allocationBundleIds.length; i++) {
+			bool bundleFound = false;
+			
+			for (uint256 j = 0; j < bundles.length; j++) {
+				if (bundles[j].bundleId == allocationBundleIds[i]) {
+					bundleFound = true;
+					break;
+				}
+			}
+			
+			if (!bundleFound) {
+				return false;
+			}
+		}
+		
+		return true;
+	}
+
+	/**
+	 * @notice Validate that total value matches sum of bundle values
+	 * @param allocation The allocation to validate
+	 * @param bundles Array of all bundles
+	 * @return isValid True if values match
+	 */
+	function validateTotalValue(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles
+	) internal pure returns (bool isValid) {
+		uint256 calculatedValue = 0;
+		uint256[] memory allocationBundleIds = allocation.bundleIds;
+		
+		for (uint256 i = 0; i < allocationBundleIds.length; i++) {
+			for (uint256 j = 0; j < bundles.length; j++) {
+				if (bundles[j].bundleId == allocationBundleIds[i]) {
+					calculatedValue += bundles[j].maxValue;
+					break;
+				}
+			}
+		}
+		
+		return calculatedValue == allocation.totalValue;
+	}
+
+	/**
+	 * @notice Count unique bidders in an allocation
+	 * @param allocation The allocation to analyze
+	 * @param bundles Array of all bundles
+	 * @return uniqueCount Number of unique bidders
+	 */
+	function countUniqueBidders(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles
+	) internal pure returns (uint256 uniqueCount) {
+		// TODO: Implement unique bidder counting
+		// This needs to track which commit hash each bundle belongs to
+		// and count unique commit hashes
+		
+		// Placeholder: return bundle count as proxy
+		return allocation.bundleIds.length;
+	}
+
+	/**
+	 * @notice Select the winning allocation from multiple proposals
+	 * @param allocations Array of allocation proposals
+	 * @param bundles Array of all bundles
+	 * @param totalBidders Total number of bidders
+	 * @return winningIndex Index of the winning allocation
+	 */
+	function selectWinningAllocation(
+		AuctionTypes.Allocation[] memory allocations,
+		AuctionTypes.Bundle[] memory bundles,
+		uint256 totalBidders
+	) internal pure returns (uint256 winningIndex) {
+		uint256 bestScore = 0;
+		uint256 bestIndex = 0;
+		
+		for (uint256 i = 0; i < allocations.length; i++) {
+			if (isValidAllocation(allocations[i], bundles)) {
+				uint256 score = scoreAllocation(allocations[i], bundles, totalBidders);
+				
+				if (score > bestScore) {
+					bestScore = score;
+					bestIndex = i;
+				}
+			}
+		}
+		
+		return bestIndex;
+	}
+
+	/**
+	 * @notice Check if an allocation is Pareto optimal
+	 * @param allocation The allocation to check
+	 * @param bundles Array of all bundles
+	 * @return isParetoOptimal True if allocation is Pareto optimal
+	 */
+	function isParetoOptimal(
+		AuctionTypes.Allocation memory allocation,
+		AuctionTypes.Bundle[] memory bundles
+	) internal pure returns (bool isParetoOptimal) {
+		// TODO: Implement Pareto optimality check
+		// This requires complex analysis of whether any group of bidders
+		// could deviate profitably from the allocation
+		
+		// Placeholder: return false for now
+		return false;
+	}
+}
