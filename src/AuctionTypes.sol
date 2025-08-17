@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+
 /**
  * @title AuctionTypes
  * @notice Type definitions and structs for the Clock-Proxy Auction system
@@ -75,10 +77,7 @@ library AuctionTypes {
 
 	/// @notice Pool information structure
 	struct PoolInfo {
-		address poolAddress;        // Address of the V4 pool
-		address poolHook;           // Address of the pool hook
-		address token0;             // Token0 address
-		address token1;             // Token1 address
+		PoolKey key;                // Pool key
 		uint256 currentPrice;       // Current price in the pool
 		uint256 depositAmount;      // Amount deposited for auction
 		uint256 excessDemand;       // Current excess demand

@@ -135,7 +135,7 @@ library AllocationScoring {
 		for (uint256 i = 0; i < allocationBundleIds.length; i++) {
 			for (uint256 j = 0; j < bundles.length; j++) {
 				if (bundles[j].bundleId == allocationBundleIds[i]) {
-					calculatedValue += bundles[j].maxValue;
+					calculatedValue += bundles[j].value;
 					break;
 				}
 			}
@@ -200,7 +200,7 @@ library AllocationScoring {
 	function isParetoOptimal(
 		AuctionTypes.Allocation memory allocation,
 		AuctionTypes.Bundle[] memory bundles
-	) internal pure returns (bool isParetoOptimal) {
+	) internal pure returns (bool) {
 		// TODO: Implement Pareto optimality check
 		// This requires complex analysis of whether any group of bidders
 		// could deviate profitably from the allocation

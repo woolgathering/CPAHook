@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { BaseHook } from "@v4-periphery/utils/BaseHook.sol";
-import { IPoolManager } from "@v4-core/interfaces/IPoolManager.sol";
-import { Hooks } from "@v4-core/libraries/Hooks.sol";
-import { PoolKey } from "@v4-core/types/PoolKey.sol";
+import { BaseHook, ModifyLiquidityParams, SwapParams } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
+import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+
+// import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+
 
 /**
  * @title PoolHook
@@ -98,46 +101,30 @@ contract PoolHook is BaseHook {
 	}
 
 	/**
-	 * @notice Hook that runs before swaps
-	 * @param sender Address of the caller
-	 * @param key Pool key containing pool parameters
-	 * @param zeroForOne Whether swapping token0 for token1
-	 * @param amountSpecified The amount specified for the swap
-	 * @param sqrtPriceLimitX96 The sqrt price limit
-	 * @param hookData Additional data for the hook
-	 * @return selector The hook selector
+	 * @notice Hook that runs before swa
 	 */
-	function _beforeSwap(
-		address sender,
-		PoolKey calldata key,
-		bool zeroForOne,
-		int256 amountSpecified,
-		uint160 sqrtPriceLimitX96,
-		bytes calldata hookData
-	) internal view override returns (bytes4) {
-		if (_isBlocked()) {
-			if (auctionActive) revert AuctionActive();
-			if (auctionPaused) revert AuctionPaused();
-			if (auctionCancelled) revert AuctionCancelled();
-		}
+	// function _beforeSwap(
+	// 	address sender,
+	// 	PoolKey calldata key,
+	// 	SwapParams calldata params,
+	// 	bytes calldata hookData
+	// ) internal view override returns (bytes4) {
+	// 	if (_isBlocked()) {
+	// 		if (auctionActive) revert AuctionActive();
+	// 		if (auctionPaused) revert AuctionPaused();
+	// 		if (auctionCancelled) revert AuctionCancelled();
+	// 	}
 		
-		return BaseHook.beforeSwap.selector;
-	}
+	// 	return BaseHook.beforeSwap.selector;
+	// }
 
 	/**
 	 * @notice Hook that runs before adding liquidity
-	 * @param sender Address of the caller
-	 * @param key Pool key containing pool parameters
-	 * @param liquidity The liquidity to add
-	 * @param tickLower The lower tick
-	 * @param tickUpper The upper tick
-	 * @param hookData Additional data for the hook
-	 * @return selector The hook selector
 	 */
 	function _beforeAddLiquidity(
 		address sender,
 		PoolKey calldata key,
-		IPoolManager.ModifyLiquidityParams calldata params,
+		ModifyLiquidityParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
 		if (_isBlocked()) {
@@ -151,18 +138,11 @@ contract PoolHook is BaseHook {
 
 	/**
 	 * @notice Hook that runs before removing liquidity
-	 * @param sender Address of the caller
-	 * @param key Pool key containing pool parameters
-	 * @param liquidity The liquidity to remove
-	 * @param tickLower The lower tick
-	 * @param tickUpper The upper tick
-	 * @param hookData Additional data for the hook
-	 * @return selector The hook selector
 	 */
 	function _beforeRemoveLiquidity(
 		address sender,
 		PoolKey calldata key,
-		IPoolManager.ModifyLiquidityParams calldata params,
+		ModifyLiquidityParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
 		if (_isBlocked()) {
