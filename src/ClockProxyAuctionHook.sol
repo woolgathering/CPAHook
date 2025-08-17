@@ -14,7 +14,9 @@ import { PoolHook } from "./PoolHook.sol";
 import { IClockProxyAuction } from "./interfaces/IClockProxyAuction.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+// wanted to use Ownable2Step but we were getting some errors
+// review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol"; 
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
 import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
