@@ -1,6 +1,80 @@
 # Clock-Proxy Auction Hook Implementation Roadmap
 
+## Hook-Native Architecture Design
+
+### Core Hook-Native Approach
+The Clock-Proxy Auction is designed to be integral to the V4 hook system, not bolted on top. The auction phases map directly to hook behaviors:
+
+- Setup phase: `beforeInitialize` places initial liquidity
+- Clock phase: `beforeAddLiquidity` and `afterAddLiquidity` capture liquidity deposits for bidding
+  - We may need a special addLiquidityAsBid function a la customAccounting in OZ. Research needed.
+- Proxy phase: Bundle submission through `submitBundle()` (no hook interaction)
+- Allocation phase: Allocator competition through `submitAllocation()` (no hook interaction)
+- Reveal phase: Identity disclosure and stake management (no hook interaction)
+- Claim phase: `beforeSwap` intercepts claims and processes item transfers
+- Settlement phase: Final liquidity distribution and pool opening
+
+### Architecture Overview
+```plaintext
+ClockProxyAuctionHook (hook contract) - pool: numeraire <-> CPA
+    ↓ controls
+PoolHook1 (for Item1) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
+PoolHook2 (for Item2) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
+PoolHook3 (for Item3) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
+```
+
+### CPA Token Mechanism
+- ClockProxyAuctionHook's pool trades `numeraire <-> CPA`
+- Fixed supply of CPA tokens in the pool
+- Fees accrue as numeraire liquidity during auction
+- CPA price appreciates with auction success
+- Performance-based fees: Auctioneer/allocator get fixed CPA percentages
+- Auction owner benefits from fee revenue through CPA appreciation
+
+### Item Sub-Pool Structure
+- Item sub-pools created between `item<>numeraire` with starting price of 1:1
+- Starting price provides baseline for later price manipulation
+- Final prices set through Doppler-style manipulation at clock phase end
+- Items deposited as LP positions at a price <= final price to ensure sufficient liquidity at the correct price.
+
+### Liquidity-as-Stake Mechanism
+- Bidders stake through single-sided liquidity deposits in numeraire in the ClockProxyAuctionHook
+- Hook contract owns all deposited liquidity during auction
+- LP token mapping tracks bidder->stake relationship
+- Stake used for item purchases or penalty application
+- Contract controls liquidity until auction end
+
+### Bidding Mechanism
+- Option A: Bidders call `poolManager.modifyLiquidity()` with demands encoded in `hookData`
+- Option B: Custom `addLiquidityWithBid()` function with integrated bid processing
+- Hook captures numeraire amount and stores LP token mapping
+- Bid points calculated as 1:1 ratio with deposited numeraire
+- Contract owns deposited liquidity until auction end
+
+### Claim Mechanism
+- Bidders claim through swap on ClockProxyAuctionHook pool
+- Hook intercepts in `beforeSwap` and validates eligibility
+- Hook processes claim using deposited stake
+- Execute swaps in item pools using stake as payment
+- Stake converted to liquidity in item pools on auctioneer's behalf
+- Helper function provided for insufficient stake calculations
+
+### Hook-Native Benefits
+- Auction lives in V4's lifecycle - Not bolted on top
+- Natural gas efficiency - Hook operations are optimized
+- Atomic operations - Bids and price updates happen atomically
+- Native integration - Works seamlessly with V4's architecture
+- Performance-aligned fees - Auctioneer/allocator fees scale with auction success
+
 ## Overview
+This auction design ensures that:
+- During the Clock Phase: The mapping between bidders and their proxies is hidden.
+- Post Allocation / Reveal Phase: The mapping is disclosed, enabling verification of correctness.
+- Spam resistance: Only registered proxies with staked deposits can submit bundles.
+- Allocator competition: Multiple allocators propose allocations; the best one is selected and rewarded on-chain.
+- Pre-bid registration: Proxies must register before any bids referencing their commitHash are accepted.
+- Hook-native implementation: Auction phases map directly to V4 hook behaviors with liquidity-as-stake mechanism.
+
 This document outlines the implementation plan for converting the clock-proxy auction system from the Python simulation into a production-ready Uniswap V4 hook. The implementation will follow the specifications outlined in `mainLogicFlow.md` and `clockProxyV4Analysis.md`.
 
 ## Architecture Plan
@@ -38,35 +112,42 @@ This document outlines the implementation plan for converting the clock-proxy au
 AuctionPhase public currentPhase;
 uint256 public currentRound;
 mapping(bytes32 => address) public commitProxy; // commitHash -> proxyAddress
-mapping(address => uint256) public bidderStake;
-mapping(address => uint256) public bidderBidPoints;
-mapping(bytes32 => Bundle[]) public bundles; // commitHash -> bundles
+mapping(uint256 => address) public lpTokenToBidder; // LP token ID -> bidder
+mapping(address => uint256[]) public bidderLpTokens; // bidder -> LP token IDs
+address public commonNumeraire; // Y token shared across all pools
+Allocation[] public allocations; // proposed allocations
+address public winningAllocator;
+PoolKey[] public itemPools; // item pool addresses
+mapping(address => uint256) public prices; // item pool -> price
+bool public poolsOpened; // trading status
 ```
 
 #### B. Hierarchical Hook System
 - AuctionHook controls multiple PoolHooks
 - Each PoolHook attached to one V4 pool per auction item
-- PoolHooks block trading/liquidity during auction
+- PoolHooks block trading/liquidity during auction except for auction hook
 - AuctionHook manages prices and liquidity across all pools
 - Common numeraire constraint enforced across all pools
+- Item sub-pools start at 1:1 price ratio
 
 #### C. Commit-Reveal System
 - Two-salt unlinkability system as described
 - Pre-bid registration requirement
 - ERC1155 token minting for bidder representation
-- Stake binding and validation
+- Stake binding and validation through liquidity deposits
 
 ### 3. Hook Permissions & Integration Points
 
 #### AuctionHook Permissions
-- `beforeInitialize`: Control pool creation (if needed)
-- `beforeSwap`: Prevent trading during auction phases
-- `afterSwap`: Track any allowed swaps (if any)
+- `beforeInitialize`: Control pool creation and initial liquidity placement
+- `beforeAddLiquidity`: Capture liquidity deposits for stake tracking
+- `afterAddLiquidity`: Track LP token mappings for bidder->stake relationship
+- `beforeSwap`: Intercept claims during claim phase and process item transfers
 
 #### PoolHook Permissions
-- `beforeSwap`: Block all trading when auction active or paused
-- `beforeAddLiquidity`: Block liquidity additions when auction active or paused
-- `beforeRemoveLiquidity`: Block liquidity removal when auction active or paused
+- `beforeSwap`: Block all trading when auction active, allow only auction hook
+- `beforeAddLiquidity`: Block liquidity additions when auction active
+- `beforeRemoveLiquidity`: Block liquidity removal when auction active
 
 ### 4. Phase-Specific Implementation
 
@@ -77,30 +158,49 @@ mapping(bytes32 => Bundle[]) public bundles; // commitHash -> bundles
 - AuctionHook takes control of all PoolHooks
 - Auction owner (deployer) established with full control
 - Configuration parameter setting
-- Initial price establishment
+- Initial price establishment at 1:1 for item sub-pools
 - Pause functionality enabled for emergency situations
 
 #### Clock Phase
-- Bid submission with commit hash validation
-- Price adjustment based on excess demand
-- Bid point management and stake tracking
+- Bid submission through liquidity deposits with commit hash validation
+- Hook captures numeraire amount and stores LP token mapping
+- Bid point management and stake tracking (1:1 ratio with numeraire)
+- Auctioneer updates pool prices between rounds
 - Dropout handling with penalties
+- At clock phase end: Doppler-style price manipulation sets final prices in item pools
+- Items deposited as LP positions at price <= final price to ensure sufficient liquidity
 
 #### Proxy Phase
 - Bundle submission by registered proxies
 - Bundle validation and storage
 - Privacy maintenance
+- No hook interaction during this phase
 
 #### Allocation Phase
 - Allocator competition
 - On-chain scoring and selection
 - Winner determination
+- No hook interaction during this phase
 
 #### Reveal Phase
 - Identity disclosure
 - Spending requirement validation
 - Financial settlement
 - ERC1155 token distribution
+
+#### Claim Phase
+- Bidders claim through swap on ClockProxyAuctionHook pool
+- Hook intercepts in beforeSwap and validates eligibility
+- Hook processes claim using deposited stake
+- Execute swaps in item pools using stake as payment
+- Stake converted to liquidity in item pools on auctioneer's behalf
+- Helper function provided for insufficient stake calculations
+
+#### Settlement Phase
+- All item pools contain auctioneer-owned liquidity from claim proceeds
+- Unsold items returned to auctioneer or deposited in pools
+- Item pools opened for normal trading
+- Auctioneer receives all purchase proceeds as liquidity in the item pools
 
 #### Cancellation Phase (Emergency)
 - Owner can cancel auction at any time
@@ -112,13 +212,11 @@ mapping(bytes32 => Bundle[]) public bundles; // commitHash -> bundles
 
 #### `AuctionTypes.sol`
 ```solidity
-enum AuctionPhase { Setup, Clock, Proxy, Allocation, Reveal, Settlement }
+enum AuctionPhase { Setup, Clock, Proxy, Allocation, Reveal, Claim, Settlement }
 struct Bundle { ... }
 struct Allocation { ... }
 struct Bid { ... }
 ```
-
-
 
 #### `CommitReveal.sol`
 ```solidity
@@ -367,3 +465,19 @@ The key success factors will be:
 4. Creating a secure and auditable system
 
 This document will be updated as implementation progresses and new insights are gained.
+
+---
+
+## Rules
+1. Immutable Mapping – Once a commitHash → proxy mapping exists, it cannot be overwritten.
+2. Pre-Bid Registration – Commit must be registered before any bid.
+3. On-chain Scoring – For POC, scoring is done directly in Solidity for simplicity.
+4. Stake Requirement – Proxy must deposit a stake when registering commit.
+5. Rate Limits – Limit commits per block to reduce spam.
+6. Future Feature – Privacy Enhancements – Use ZK to hide bidder–proxy link pre-reveal.
+7. Allocator Competition – Multiple allocators submit; best-scoring allocation wins.
+8. Verification Priority – Always verify commit before accepting a bid.
+9. Liquidity-as-Stake – Bidders stake through single-sided liquidity deposits in numeraire.
+10. Hook Control – ClockProxyAuctionHook owns all deposited liquidity during auction.
+
+---
