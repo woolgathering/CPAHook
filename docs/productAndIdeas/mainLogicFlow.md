@@ -9,6 +9,7 @@ This auction design ensures that:
 - Spam resistance: Only registered proxies with staked deposits can submit bundles.
 - Allocator competition: Multiple allocators propose allocations; the best one is selected and rewarded on-chain.
 - Pre-bid registration: Proxies must register before any bids referencing their commitHash are accepted.
+- Hook-native implementation: Auction phases map directly to V4 hook behaviors with liquidity-as-stake mechanism.
 
 ---
 
@@ -21,6 +22,8 @@ This auction design ensures that:
 6. Future Feature – Privacy Enhancements – Use ZK to hide bidder–proxy link pre-reveal.
 7. Allocator Competition – Multiple allocators submit; best-scoring allocation wins.
 8. Verification Priority – Always verify commit before accepting a bid.
+9. Liquidity-as-Stake – Bidders stake through single-sided liquidity deposits in numeraire.
+10. Hook Control – ClockProxyAuctionHook owns all deposited liquidity during auction.
 
 ---
 
@@ -31,14 +34,16 @@ On-chain
 - Auction contract is deployed with:
   - Any address can be a bidder and cannot submit bids without initial stakes.
 - Any address can be a proxy but must register via `registerCommit` before associated bids are accepted.
-- Stake-to-BidPoints: Bidders receive bidPoints based on their stake amount with each bid, limiting their clock phase bidding power.
+- Stake-to-BidPoints: Bidders receive bidPoints based on their liquidity deposit amount with each bid, limiting their clock phase bidding power.
 - Configurable parameters: bid submission window, proxy registration window, allocation window, reveal window, stake amounts, rate limits, max possible stake (future safeguard).
   - As a UniV4 hook, auctioned items are tokens in linked pools.
   - Auctioneer deploys pools and deposits items.
   - Common Numeraire Constraint: All pools must share the same Y token (numeraire) for consistent pricing.
   - Auction contract controls pool pricing.
-  - Hook-Owned Assets: Auction hook will own assets in each pool (implementation detail for later).
+  - Hook-Owned Assets: Auction hook owns all deposited liquidity during auction.
+  - ClockProxyAuctionHook Pool: `numeraire <-> CPA` token pair with high initial CPA price.
 - Future feature: Instead of `transferFrom`, bidders could be ERC-6909 contracts that mint claims to the auction contract.
+- Item sub-pools are created between `item<>numeraire` with a starting price of 1:1 (to be later manipulated.)
 
 Off-chain
 - Bidders and proxies establish communication channels.
@@ -60,7 +65,7 @@ Instead of committing directly to `(bidderID, proxyAddress, salt)`:
    ))
    ```
    - During clock phase, only `commitHash` is public.
-   - Neither inner hash can be inverted to reveal the other party’s ID.
+   - Neither inner hash can be inverted to reveal the other party's ID.
 
 #### Off-chain
 1. Bidder computes `commitHash` as above.
@@ -71,15 +76,21 @@ Instead of committing directly to `(bidderID, proxyAddress, salt)`:
 #### On-chain
 - Clock loop:
   - Auctioneer announces prices.
-  - Bidders submit `bid([] demands, bidderId, commitHash, stakeAmount)`.
+  - Bidders submit bids through liquidity deposits:
+    - Option A: Call `poolManager.modifyLiquidity()` with demands encoded in `hookData`
+    - Option B: Call custom `addLiquidityWithBid()` function
+    - Hook captures numeraire amount and stores LP token mapping
     - Contract enforces: `commitHash` exists in `commitProxy` mapping before accepting bid.
-    - Contract calculates: bidPoints = stakeAmount (1:1 ratio) and updates bidder's total bidPoints.
+    - Contract calculates: bidPoints = numeraireAmount (1:1 ratio) and updates bidder's total bidPoints.
     - Contract enforces: Total bid value does not exceed bidder's current bidPoints.
     - BidPoints reset each round (not consumed by bids, allowing continued participation).
     - BidPoints are equivalent to the cost of the bid; that is, for the fully open auction, a bidder cannot bid on more items than they can pay for
+    - Contract owns the deposited liquidity until auction end
   - Auctioneer updates pool prices.
   - Bidders may call `dropout(bidderId)` to exit with partial refund (80% refund, 20% penalty).
   - Process repeats until there is no excess demand for any item or time runs out.
+  - At clock phase end: Doppler-style price manipulation sets final prices in item pools and items are deposited as an LP position on behalf of the contract AT THAT PRICE.
+    - This is so that if the final price of item1 is 10 and we have deposited all 100 item1 into the item1 sub-pool, we can purchase ALL 100 item1 with 10*100=1000 common numeraire.
 - Proxy registration:
   ```
   registerCommit(commitHash)
@@ -103,9 +114,10 @@ submitBundle(commitHash, bundleData)
 ```
 - Only registered proxy for `commitHash` may call.
 - Bundles limited to one per commitHash.
+- No hook interaction during this phase.
 
 Off-chain
-- Proxy may prepare bundle using bidder’s instructions.
+- Proxy may prepare bundle using bidder's instructions.
 
 ---
 
@@ -121,6 +133,7 @@ On-chain
   ```
   winningAllocator = allocators[bestIndex]
   ```
+- No hook interaction during this phase.
 
 Off-chain
 - Allocators simulate and optimize before submission.
@@ -157,16 +170,52 @@ Off-chain
 
 ---
 
+### 6. Claim Phase
+
+On-chain
+- Bidders claim allocated items through swap on ClockProxyAuctionHook pool:
+  ```
+  poolManager.swap(key, swapParams, hookData)
+  ```
+- Hook intercepts in `beforeSwap` and validates eligibility:
+  - Check if sender has allocated items in `commitProxy` mapping
+  - Calculate required stake for allocated items
+  - If insufficient stake, require additional numeraire in swap (provide a function that will help)
+- Hook processes claim using deposited stake:
+  - Execute swaps in item pools using stake as payment on behalf of the bidder
+  - Deposit stake as liquidity in item pools on auctioneer's behalf
+  - Transfer items to bidders through normal swap mechanics
+- Item pools remain blocked except for ClockProxyAuctionHook operations.
+
+---
+
+### 7. Settlement Phase
+
+On-chain
+- All item pools contain auctioneer-owned liquidity from claim proceeds
+- Unsold items returned to auctioneer or deposited in pools
+- Item pools opened for normal trading
+- Auctioneer receives all purchase proceeds as liquidity in the item pools
+
+---
+
 ## On-chain Data Structures
 
 ```solidity
 mapping(bytes32 => address) public commitProxy; // commitHash → proxyAddress
 mapping(address => uint256) public proxyStake;  // proxy → staked amount
-mapping(address => uint256) public bidderStake; // bidder → staked amount
 mapping(address => uint256) public bidderBidPoints; // bidder → bidPoints
+mapping(uint256 => address) public lpTokenToBidder; // LP token ID → bidder
+mapping(address => uint256[]) public bidderLpTokens; // bidder → LP token IDs
+mapping(address => uint256) public bidderTotalStake; // bidder → total stake
 address public commonNumeraire;                 // Y token shared across all pools
 Allocation[] public allocations;                // proposed allocations
 address public winningAllocator;
+address[] public itemPools;                     // item pool addresses
+mapping(address => uint256) public itemFinalPrices; // item pool → final price
+mapping(address => bool) public poolsOpened;    // item pool → trading status
+mapping(address => bool) public eligibleToClaim; // bidder → claim eligibility
+mapping(address => uint256) public allocatedItemValue; // bidder → allocated value
 ```
 
 ---
@@ -175,15 +224,16 @@ address public winningAllocator;
 
 On-chain:
 - `registerCommit(commitHash)`
-- `bid(demands, bidderId, commitHash, stakeAmount)` (requires commit registered, calculates bidPoints, respects bidPoints limit)
+- `modifyLiquidity()` or `addLiquidityWithBid()` for bidding (requires commit registered, calculates bidPoints, respects bidPoints limit)
 - `dropout(bidderId)` (allows bidder to exit with partial refund, default 80% refund, 20% penalty)
 - `submitBundle(commitHash, bundleData)`
 - `submitAllocation(allocationData)`
 - Allocation scoring & selection (best allocation chosen on-chain)
 - `reveal(bidderID, saltA, proxyAddress, saltB)`
-- `dropout(bidderId)` (partial refund with penalty)
+- `swap()` for item claims (intercepted by hook)
 - `enforceMinimumSpending(bidderId, purchaseAmount)` (automatically checked during reveal)
 - Stake management & reward payout
+- Final price setting using Doppler mechanism
 
 Off-chain:
 - Proxy–bidder selection & salt exchange
@@ -203,10 +253,32 @@ Off-chain:
 - Minimum spending requirement: Bidders must spend at least 50% of their total bid value on final purchases (prevents gaming with large deposits but small bundles).
 - Max stake cap possible as configurable safeguard.
 - Common numeraire constraint enforced across all pools.
+- Hook controls all liquidity during auction.
+- Item pools blocked except for auction hook operations.
+- Single price manipulation at clock phase end.
 - Future features:
   - ERC-6909 claims minting instead of token transfers.
   - ZK proofs for privacy even after allocation.
   - Timing/pattern obfuscation to mitigate bidder–proxy inference.
+
+---
+
+## Technical Implementation Challenges
+
+### Liquidity Capture Mechanism
+- V4 hook limitations: May not provide sufficient callbacks for stake tracking
+- Custom accounting: Requires inheriting from OpenZeppelin contracts
+- Security risk: Custom liquidity management increases attack surface
+
+### Price Range Parameterization
+- Mathematical complexity: Calculating sufficient liquidity across price range
+- Slippage exposure: Risk of insufficient liquidity at certain price points
+- Implementation difficulty: Requires sophisticated liquidity distribution algorithms
+
+### Gas Optimization
+- Swap-based claims: Higher gas cost than direct transfers
+- Multiple pool interactions: Claims require swaps across multiple item pools
+- Liquidity management: Complex operations for stake-to-liquidity conversion
 
 ---
 
