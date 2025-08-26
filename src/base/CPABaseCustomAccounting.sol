@@ -153,21 +153,21 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         // Get the principal delta by subtracting the fee delta from the caller delta (-= is not supported)
         delta = callerDelta - feesAccrued;
 
-        // Check for slippage on principal delta
-        uint128 amount0 = uint128(-delta.amount0());
-        if (amount0 < params.amount0Min || uint128(-delta.amount1()) < params.amount1Min) {
-            revert TooMuchSlippage();
-        }
+        // // Check for slippage on principal delta
+        // uint128 amount0 = uint128(-delta.amount0());
+        // if (amount0 < params.amount0Min || uint128(-delta.amount1()) < params.amount1Min) {
+        //     revert TooMuchSlippage();
+        // }
 
-        // If the currency0 is native, refund any remaining msg.value that wasn't used based on the principal delta
-        if (isNative) {
-            // Check that delta amount was covered by msg.value given that settle would be valid if hook can pay for difference
-            // It also allows users to provide more native value than the desired amount
-            if (msg.value < amount0) revert InvalidNativeValue();
+        // // If the currency0 is native, refund any remaining msg.value that wasn't used based on the principal delta
+        // if (isNative) {
+        //     // Check that delta amount was covered by msg.value given that settle would be valid if hook can pay for difference
+        //     // It also allows users to provide more native value than the desired amount
+        //     if (msg.value < amount0) revert InvalidNativeValue();
 
-            // Previous check prevents underflow revert
-            poolKey.currency0.transfer(msg.sender, msg.value - amount0);
-        }
+        //     // Previous check prevents underflow revert
+        //     poolKey.currency0.transfer(msg.sender, msg.value - amount0);
+        // }
     }
 
     /**
@@ -179,7 +179,7 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
      * @param params The parameters for the liquidity removal.
      * @return delta The principal delta of the liquidity removal.
      */
-    function removeLiquidityAsBid(RemoveLiquidityAsBid Params calldata params)
+    function removeLiquidityAsBid(RemoveLiquidityAsBidParams calldata params)
         external
         virtual
         ensure(params.deadline)

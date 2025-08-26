@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
+import { CPABaseCustomAccounting } from "./base/CPABaseCustomAccounting.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -13,6 +13,7 @@ import { AllocationScoring } from "./AllocationScoring.sol";
 import { PoolHook } from "./PoolHook.sol";
 import { IClockProxyAuction } from "./interfaces/IClockProxyAuction.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
@@ -30,7 +31,7 @@ import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
  * @notice Main auction hook implementing clock-proxy auction with commit-reveal privacy
  * @author Clock-Proxy Auction Team
  */
-contract ClockProxyAuctionHook is IErrorsAndEvents, BaseHook, Ownable, CPAStorage {
+contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, CPAStorage {
 	using AuctionTypes for *;
 	using PoolIdLibrary for PoolKey;
 
@@ -46,7 +47,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, BaseHook, Ownable, CPAStorag
 		address _owner,
 		address _commonNumeraire,
 		AuctionTypes.AuctionConfig memory _config
-	) BaseHook(_poolManager) Ownable(_owner) CPAStorage(_commonNumeraire, _config) {
+	) CPABaseCustomAccounting(_poolManager) Ownable(_owner) CPAStorage(_commonNumeraire, _config) {
 	}
 
 	/**
@@ -362,7 +363,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, BaseHook, Ownable, CPAStorag
 	function _updatePoolHookStates() internal {
 		for (uint256 i = 0; i < pools.length; i++) {
 			PoolHook(poolHooks[i]).setAuctionState(
-				currentPhase == AuctionTypes.AuctionPhase.Clock,
+				AuctionTypes.AuctionPhase.Clock,
 				paused,
 				cancelled
 			);
@@ -377,6 +378,45 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, BaseHook, Ownable, CPAStorag
 		// This should iterate through all bidders and refund their stakes
 		// when auction is cancelled
 	}
+
+	//// hook stuff
+	function _burn(
+		RemoveLiquidityAsBidParams memory params,
+		BalanceDelta callerDelta,
+		BalanceDelta feesAccrued,
+		uint256 shares
+	) internal override {
+		// TODO: Implement burn
+		// This should burn the liquidity shares and refund the stake
+		// right now we don't do anything.
+	}
+
+	function _mint(
+		AddLiquidityAsBidParams memory params,
+		BalanceDelta callerDelta,
+		BalanceDelta feesAccrued,
+		uint256 shares
+	) internal override {
+		// TODO: Implement mint
+		// This should mint the liquidity shares and refund the stake
+		// right now we don't do anything.
+	}
+
+	function _getAddLiquidity(uint160 sqrtPriceX96, AddLiquidityAsBidParams memory params)
+		internal
+		override
+		returns (bytes memory modify, uint256 shares) {
+			// TODO: Implement get add liquidity
+			// This should return the modify and shares
+		}
+	
+	function _getRemoveLiquidity(RemoveLiquidityAsBidParams memory params)
+		internal
+		override
+		returns (bytes memory modify, uint256 shares) {
+			// TODO: Implement get remove liquidity
+			// This should return the modify and shares
+		}
 
 	/**
 	 * @notice Returns the hook permissions configuration

@@ -5,6 +5,7 @@ import { BaseHook, ModifyLiquidityParams, SwapParams, BeforeSwapDelta } from "@u
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { AuctionTypes } from "./AuctionTypes.sol";
 
 /**
  * @title PoolHook
@@ -14,6 +15,15 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 contract PoolHook is BaseHook {
 	/// @notice Address of the auction that controls this pool hook
 	address public immutable auction;
+
+	/// @notice Auction phase
+	AuctionTypes.AuctionPhase public phase;
+
+	/// @notice Whether auction is paused
+	bool public paused;
+
+	/// @notice Whether auction is cancelled
+	bool public cancelled;
 	
 	/// @notice Whether operations are blocked
 	bool public blocked;
@@ -128,6 +138,16 @@ contract PoolHook is BaseHook {
 		}
 		
 		return BaseHook.beforeDonate.selector;
+	}
+
+	function setAuctionState(AuctionTypes.AuctionPhase _phase, bool _paused, bool _cancelled) external {
+		if (msg.sender != auction) {
+			revert OnlyAuction();
+		}
+		
+		phase = _phase;
+		paused = _paused;
+		cancelled = _cancelled;
 	}
 
 	/**
