@@ -1,85 +1,122 @@
-# Uniswap v4 Hook Template
+# Clock-Proxy Auction Hook for Uniswap V4
 
-**A template for writing Uniswap v4 Hooks 🦄**
+**A skeletal implementation of FCC-style clock-proxy auctions as Uniswap V4 hooks with commit-reveal privacy mechanisms**
 
-### Get Started
+## Project Status: Skeletal Implementation
 
-This template provides a starting point for writing Uniswap v4 Hooks, including a simple example and preconfigured test environment. Start by creating a new repository using the "Use this template" button at the top right of this page. Alternatively you can also click this link:
+This project is **NOT production ready** and should be considered a proof-of-concept implementation. The codebase is skeletal and requires significant development before any production use:
 
-[![Use this Template](https://img.shields.io/badge/Use%20this%20Template-101010?style=for-the-badge&logo=github)](https://github.com/uniswapfoundation/v4-template/generate)
+- **Smart contracts compile but are untested** - No comprehensive test coverage
+- **Core functionality implemented but unvalidated** - Logic may not work as intended
+- **Security not audited** - Contains potential vulnerabilities
+- **Economic parameters not optimized** - Requires careful tuning
+- **Documentation incomplete** - Technical details need expansion
 
-1. The example hook [Counter.sol](src/Counter.sol) demonstrates the `beforeSwap()` and `afterSwap()` hooks
-2. The test template [Counter.t.sol](test/Counter.t.sol) preconfigures the v4 pool manager, test tokens, and test liquidity.
+## Project Overview
 
-<details>
-<summary>Updating to v4-template:latest</summary>
+This implements a clock-proxy auction system as Uniswap V4 hooks, combining FCC-style auctions with privacy features through commit-reveal mechanisms. The system enables efficient multi-item token auctions with package bidding across multiple pools sharing a common numeraire.
 
-This template is actively maintained -- you can update the v4 dependencies, scripts, and helpers:
+### Key Features
 
-```bash
-git remote add template https://github.com/uniswapfoundation/v4-template
-git fetch template
-git merge template/main <BRANCH> --allow-unrelated-histories
+- **Clock Phase**: Price discovery through iterative bidding rounds
+- **Proxy Phase**: Bundle submission with privacy-preserving commit-reveal
+- **Allocation Phase**: Competitive allocation determination
+- **Reveal Phase**: Identity disclosure and verification
+- **Liquidity-as-Stake**: Bidders stake through V4 liquidity deposits
+- **Allocator Competition**: Multiple allocators compete for optimal allocations
+
+### Architecture
+
+```
+src/
+├── ClockProxyAuctionHook.sol    # Main auction hook
+├── PoolHook.sol                 # V4 hook integration
+├── AuctionTypes.sol             # Type definitions
+├── AllocationScoring.sol        # Allocation scoring logic
+├── CommitReveal.sol             # Privacy mechanisms
+├── base/                        # Base contract implementations
+├── libraries/                   # Auction phase libraries
+├── interfaces/                  # Contract interfaces
+└── utils/                       # Utility contracts
 ```
 
-</details>
+## Current Implementation Status
+
+### Completed (Skeletal)
+- Smart contract architecture and interfaces
+- Basic auction phase management
+- Commit-reveal privacy framework
+- V4 hook integration structure
+- Python simulation framework
+
+### Not Implemented/Tested
+- Comprehensive test suite
+- Security audits and vulnerability assessments
+- Economic parameter optimization
+- Gas optimization
+- Edge case handling
+- Integration testing
+- Frontend interface
+- Production deployment scripts
+
+### Known Issues
+- Compilation warnings in PoolHook.sol (unused parameters)
+- No validation of auction mechanics
+- Untested economic incentives
+- Missing error handling for edge cases
+- No formal security analysis
+
+## Development Setup
 
 ### Requirements
+- Foundry (stable version)
+- Python 3.8+ (for simulation framework)
+- Node.js (for future frontend development)
 
-This template is designed to work with Foundry (stable). If you are using Foundry Nightly, you may encounter compatibility issues. You can update your Foundry installation to the latest stable version by running:
-
-```
-foundryup
-```
-
-To set up the project, run the following commands in your terminal to install dependencies and run the tests:
-
-```
+### Installation
+```bash
+# Install dependencies
 forge install
+
+# Build contracts
+forge build
+
+# Run basic tests (limited coverage)
 forge test
 ```
 
-### Local Development
+### Python Simulation
+```bash
+# Navigate to scripts directory
+cd scripts
 
-Other than writing unit tests (recommended!), you can only deploy & test hooks on [anvil](https://book.getfoundry.sh/anvil/) locally. Scripts are available in the `script/` directory, which can be used to deploy hooks, create pools, provide liquidity and swap tokens. The scripts support both local `anvil` environment as well as running them directly on a production network.
-
-### Troubleshooting
-
-<details>
-
-#### Permission Denied
-
-When installing dependencies with `forge install`, Github may throw a `Permission Denied` error
-
-Typically caused by missing Github SSH keys, and can be resolved by following the steps [here](https://docs.github.com/en/github/authenticating-to-github/connecting-to-github-with-ssh)
-
-Or [adding the keys to your ssh-agent](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent#adding-your-ssh-key-to-the-ssh-agent), if you have already uploaded SSH keys
-
-#### Anvil fork test failures
-
-Some versions of Foundry may limit contract code size to ~25kb, which could prevent local tests to fail. You can resolve this by setting the `code-size-limit` flag
-
-```
-anvil --code-size-limit 40000
+# Run auction simulation
+python auction_core.py
 ```
 
-#### Hook deployment failures
+## Technical Documentation
 
-Hook deployment failures are caused by incorrect flags or incorrect salt mining
+Detailed technical specifications are available in:
+- `docs/productAndIdeas/mainLogicFlow.md` - Core auction mechanics
+- `docs/productAndIdeas/clockProxyV4Analysis.md` - V4 integration analysis
+- `docs/productAndIdeas/clockProxyHookImplementation.md` - Implementation details
 
-1. Verify the flags are in agreement:
-   - `getHookCalls()` returns the correct flags
-   - `flags` provided to `HookMiner.find(...)`
-2. Verify salt mining is correct:
-   - In **forge test**: the _deployer_ for: `new Hook{salt: salt}(...)` and `HookMiner.find(deployer, ...)` are the same. This will be `address(this)`. If using `vm.prank`, the deployer will be the pranking address
-   - In **forge script**: the deployer must be the CREATE2 Proxy: `0x4e59b44847b379578588920cA78FbF26c0B4956C`
-     - If anvil does not have the CREATE2 deployer, your foundry may be out of date. You can update it with `foundryup`
+## Contributing
 
-</details>
+**This is a research project in early development.** Contributions should focus on:
 
-### Additional Resources
+1. **Testing and validation** of existing functionality
+2. **Security analysis** and vulnerability identification
+3. **Economic parameter optimization**
+4. **Gas optimization** and efficiency improvements
+5. **Documentation** and specification refinement
 
-- [Uniswap v4 docs](https://docs.uniswap.org/contracts/v4/overview)
-- [v4-periphery](https://github.com/uniswap/v4-periphery)
-- [v4-core](https://github.com/uniswap/v4-core)
-- [v4-by-example](https://v4-by-example.org)
+## Disclaimer
+
+This software is provided "as is" without warranty of any kind. The implementation is experimental and has not been audited for security vulnerabilities. Use at your own risk.
+
+
+## Acknowledgments
+
+- Based on Uniswap V4 template
+- Uses commit-reveal privacy techniques
