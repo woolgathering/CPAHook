@@ -1,5 +1,58 @@
 # Clock-Proxy Auction Hook Implementation Roadmap
 
+## Two-Contract Architecture Design
+
+### Core Design Philosophy
+The Clock-Proxy Auction system has been redesigned to use two main contracts for better efficiency and reusability:
+
+1. **CPAHook (ClockProxyAuctionHook)**: Single contract that manages multiple auctions
+2. **PoolHook**: Shared hook that all asset pools attach to, controlled by the CPAHook
+
+This design eliminates the need to deploy new hooks for each auction, making the system more gas-efficient and easier to manage.
+
+### Architecture Overview
+```plaintext
+CPAHook (single contract) - manages multiple auctions
+    ↓ controls multiple
+PoolHook (single contract) - attached to all asset pools
+    ↓ attached to
+Asset Pool 1 (A<>USDC) - blocked during auctions
+Asset Pool 2 (B<>USDC) - blocked during auctions  
+Asset Pool 3 (C<>USDC) - blocked during auctions
+```
+
+### Initialization Process
+1. **Deploy CPAHook**: Single contract that will manage all auctions
+2. **Deploy PoolHook**: With CPAHook address as constructor argument (allows CPAHook to modify state of the PoolHook)
+3. **Create Asset Pools**: Deploy pools (A<>USDC, B<>USDC, C<>USDC) with PoolHook attached
+4. **Create Auction**: Call CPAHook.createAuction() with pool keys and auction parameters
+
+### Multi-Auction Support
+- **Auction IDs**: Each auction gets a unique auctionId
+- **Auction Owners**: Each auction has its own owner (not the CPAHook owner)
+- **Isolated State**: All auction variables are indexed by auctionId
+- **Owner Controls**: Only the auction owner can start, pause, change phases, etc.
+
+### PoolHook Control Mechanism
+- **Centralized Control**: CPAHook controls all PoolHooks
+- **State Synchronization**: CPAHook calls setAuctionState() on PoolHooks
+- **Pool Allowance**: CPAHook can enable/disable specific pools via setPoolAllowed()
+- **Operation Blocking**: PoolHook blocks all operations when auction is active
+
+### Auction Creation Flow
+1. **Deploy Asset Pools**: Create pools A<>USDC, B<>USDC, C<>USDC with PoolHook
+2. **Create Auction**: Call CPAHook.createAuction(poolKeys, config, owner)
+3. **Setup Phase**: Auction owner deposits assets and configures auction
+4. **Auction Execution**: Standard clock-proxy auction phases proceed
+5. **Settlement**: Auction completes and pools return to normal operation
+
+### Key Benefits of New Design
+- **Gas Efficiency**: No need to deploy new hooks for each auction
+- **Reusability**: Single PoolHook serves all asset pools
+- **Scalability**: CPAHook can manage unlimited auctions
+- **Simplicity**: Clear separation between auction logic and pool control
+- **Flexibility**: Different auction owners can run concurrent auctions
+
 ## Hook-Native Architecture Design
 
 ### Core Hook-Native Approach
@@ -13,15 +66,6 @@ The Clock-Proxy Auction is designed to be integral to the V4 hook system, not bo
 - Reveal phase: Identity disclosure and stake management (no hook interaction)
 - Claim phase: `beforeSwap` intercepts claims and processes item transfers
 - Settlement phase: Final liquidity distribution and pool opening
-
-### Architecture Overview
-```plaintext
-ClockProxyAuctionHook (hook contract) - pool: numeraire <-> CPA
-    ↓ controls
-PoolHook1 (for Item1) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
-PoolHook2 (for Item2) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
-PoolHook3 (for Item3) - blocks operations, allows auction hook only. Uses Doppler mechanism to update prices after clock phase.
-```
 
 ### CPA Token Mechanism
 - ClockProxyAuctionHook's pool trades `numeraire <-> CPA`
@@ -81,23 +125,19 @@ This document outlines the implementation plan for converting the clock-proxy au
 
 ### 1. Core Contract Structure
 
-#### Factory Contract: `ClockProxyFactory.sol`
-- Deploys the complete auction system
-- Creates AuctionHook and PoolHooks
-- Deploys V4 pools with PoolHooks attached
-- Adds initial hook-owned liquidity to pools
-
 #### Main Auction Contract: `ClockProxyAuctionHook.sol`
 - Extends `BaseHook` from V4 periphery
-- Implements the main auction logic and state management
+- Implements the main auction logic and state management for multiple auctions
 - Handles all auction phases and transitions
 - Manages commit-reveal system and proxy registration
-- Controls all PoolHooks during auction
+- Controls all PoolHooks during auctions
+- Supports multiple concurrent auctions with isolated state
 
-#### Pool Control Contracts: `PoolHook.sol`
-- Simple hook that blocks trading/liquidity operations during auction
-- Controlled by AuctionHook via `setAuctionActive()`
-- One PoolHook per auction item pool
+#### Pool Control Contract: `PoolHook.sol`
+- Simple hook that blocks trading/liquidity operations during auctions
+- Controlled by CPAHook via `setAuctionState()` and `setPoolAllowed()`
+- Shared across all asset pools
+- Centralized control mechanism for auction state
 
 #### Library Contracts
 - `AuctionTypes.sol` - Structs, enums, and type definitions
@@ -267,92 +307,107 @@ function selectWinningAllocation(...) pure returns (uint256)
 
 ## Implementation Phases
 
-### Phase 1: Foundation (Week 1-2)
-- [ ] Set up project structure and dependencies
-- [ ] Create `AuctionTypes.sol` with all structs and enums
-- [ ] Implement `PoolHook.sol` - simple pool control hook
-- [ ] Create basic `ClockProxyFactory.sol` structure
-- [ ] Set up testing framework
+### Phase 1: Foundation (COMPLETED)
+- [x] Set up project structure and dependencies
+- [x] Create `AuctionTypes.sol` with all structs and enums
+- [x] Implement `PoolHook.sol` - simple pool control hook
+- [x] Create basic `ClockProxyAuctionHook.sol` structure
+- [x] Set up testing framework
+- [x] Implement multi-auction storage pattern in `CPAStorage.sol`
 
-### Phase 2: Core Auction Logic (Week 3-4)
-- [ ] Implement commit-reveal system in `CommitReveal.sol`
-- [ ] Add state management to main AuctionHook contract
-- [ ] Implement phase transition logic
-- [ ] Add basic bid submission and validation
-- [ ] Create AuctionHook control over PoolHooks
-- [ ] Implement pause functionality with timelock
+### Phase 2: Core Architecture (COMPLETED)
+- [x] Implement two-contract architecture (CPAHook + PoolHook)
+- [ ] Add multi-auction support with AuctionId-based mappings
+- [ ] Implement basic state management for multiple auctions
+- [ ] Create PoolHook control mechanism
+- [ ] Set up auction creation and ownership model
 
-### Phase 3: Clock Phase Implementation (Week 5-6)
+### Phase 3: Auction Management (IN PROGRESS)
+- [ ] Implement auction creation and setup functions
+- [ ] Add pool registration and validation
+- [ ] Implement auction owner controls
+- [ ] Add auction state management (pause, cancel, phase transitions)
+- [ ] Create auction lifecycle management
+
+### Phase 4: Clock Phase Implementation (PLANNED)
 - [ ] Implement clock phase bidding mechanics
-- [ ] Add price adjustment logic
-- [ ] Implement bid point system
+- [ ] Add price adjustment logic across multiple pools
+- [ ] Implement bid point system with multi-auction support
 - [ ] Add dropout functionality with penalties
-- [ ] Create excess demand calculation
+- [ ] Create excess demand calculation for multiple items
 
-### Phase 4: Proxy and Bundle System (Week 7-8)
+### Phase 5: Proxy and Bundle System (PLANNED)
 - [ ] Implement proxy registration system
 - [ ] Add bundle submission logic
 - [ ] Create bundle validation
 - [ ] Implement privacy maintenance
 - [ ] Add ERC1155 token integration
 
-### Phase 5: Allocation and Scoring (Week 9-10)
+### Phase 6: Allocation and Scoring (PLANNED)
 - [ ] Implement `AllocationScoring.sol`
 - [ ] Add allocator competition mechanics
 - [ ] Create on-chain scoring system
 - [ ] Implement winner selection
 - [ ] Add allocation validation
 
-### Phase 6: Reveal and Settlement (Week 11-12)
+### Phase 7: Reveal and Settlement (PLANNED)
 - [ ] Implement reveal phase logic
 - [ ] Add spending requirement validation
 - [ ] Create financial settlement system
 - [ ] Implement penalty application
 - [ ] Add final token distribution
 - [ ] Implement auction cancellation with full refunds
-- [ ] Add emergency asset recovery mechanisms
 
-### Phase 7: Integration and Testing (Week 13-14)
-- [ ] Complete factory deployment system
+### Phase 8: Integration and Testing (PLANNED)
+- [ ] Complete deployment system
 - [ ] Add comprehensive testing suite
 - [ ] Implement gas optimizations
 - [ ] Add security measures
 - [ ] Create deployment scripts
 
-### Phase 8: Documentation and Audit (Week 15-16)
-- [ ] Complete documentation
-- [ ] Security audit preparation
-- [ ] Performance testing
-- [ ] Final optimizations
-- [ ] Production deployment preparation
-
 ## Key Design Decisions
 
-### 1. Hierarchical Hook Architecture
-**Decision**: Use AuctionHook controlling multiple PoolHooks
+### 1. Two-Contract Architecture
+**Decision**: Use CPAHook (single contract) + PoolHook (shared contract)
 **Rationale**: 
-- Clean separation of concerns
-- Simple PoolHook logic (just block operations)
-- AuctionHook focuses on auction coordination
-- Easy to reason about security and control
+- Gas efficiency: No need to deploy new hooks for each auction
+- Reusability: Single PoolHook serves all asset pools
+- Scalability: CPAHook can manage unlimited auctions
+- Simplicity: Clear separation between auction logic and pool control
 
-### 2. Owner Control Model
-**Decision**: Auction deployer has full control over auction operations
+### 2. Multi-Auction Support
+**Decision**: Single CPAHook manages multiple concurrent auctions
 **Rationale**:
-- Clear accountability for auction management
-- Emergency cancellation capability
-- Full refund guarantees for participants
-- Asset recovery in case of issues
+- Cost efficiency: One deployment serves all auctions
+- Resource sharing: Common infrastructure across auctions
+- Scalability: Unlimited auctions without additional deployments
+- Isolation: Each auction has its own state and owner
 
-### 3. Factory Deployment Pattern
-**Decision**: Use ClockProxyFactory to deploy entire system
+### 3. AuctionId-Based Storage
+**Decision**: All auction state indexed by AuctionId
 **Rationale**:
-- Single deployment transaction
-- Proper initialization order
-- Clean ownership setup
-- Easier testing and deployment
+- Clean separation: Each auction's data is isolated
+- Efficient access: Direct mapping lookup for auction data
+- Scalability: No storage conflicts between auctions
+- Maintainability: Clear data organization
 
-### 4. Library Separation
+### 4. PoolHook Centralization
+**Decision**: Single PoolHook controlled by CPAHook
+**Rationale**:
+- Simplified control: CPAHook manages all pool operations
+- Consistent behavior: All pools follow same blocking rules
+- Gas efficiency: Shared logic across all pools
+- Easy coordination: Centralized state management
+
+### 5. Auction Owner Model
+**Decision**: Each auction has its own owner (not CPAHook owner)
+**Rationale**:
+- Decentralized control: Multiple auctioneers can use the system
+- Isolated permissions: Auction owners only control their auctions
+- Reduced centralization: No single point of control
+- Flexibility: Different auctioneers can run concurrent auctions
+
+### 6. Library Separation
 **Decision**: Separate complex logic into libraries
 **Rationale**:
 - Gas optimization through code reuse
@@ -378,7 +433,21 @@ function selectWinningAllocation(...) pure returns (uint256)
 
 ## Technical Challenges and Solutions
 
-### 1. Gas Optimization
+### 1. Multi-Auction State Management
+**Challenge**: Managing isolated state for multiple concurrent auctions
+**Solution**: 
+- AuctionId-based mappings for all state variables
+- Clear ownership model per auction
+- Isolated function calls with auctionId parameter
+
+### 2. PoolHook Coordination
+**Challenge**: Coordinating multiple pools across different auctions
+**Solution**:
+- Single PoolHook with auction-aware blocking
+- CPAHook controls pool states via setAuctionState()
+- Pool-specific allowance via setPoolAllowed()
+
+### 3. Gas Optimization
 **Challenge**: Complex auction logic may be gas-intensive
 **Solution**: 
 - Use libraries for calculations
@@ -386,7 +455,7 @@ function selectWinningAllocation(...) pure returns (uint256)
 - Batch operations where possible
 - Optimize storage patterns
 
-### 2. Privacy Implementation
+### 4. Privacy Implementation
 **Challenge**: Maintaining bidder-proxy privacy during auction
 **Solution**:
 - Two-salt commit-reveal system
@@ -394,29 +463,13 @@ function selectWinningAllocation(...) pure returns (uint256)
 - No public mapping until reveal
 - Stake-based spam prevention
 
-### 3. Hierarchical Hook Coordination
-**Challenge**: Coordinating multiple PoolHooks with common numeraire
-**Solution**:
-- AuctionHook controls all PoolHooks
-- Centralized price management across pools
-- Numeraire constraint enforcement
-- Simple PoolHook logic for easy coordination
-
-### 4. Allocation Complexity
-**Challenge**: NP-hard allocation optimization
-**Solution**:
-- Multiple allocator competition
-- On-chain scoring with predefined rules
-- Future ZK proof integration
-- Iterative improvement mechanisms
-
 ## Success Metrics
 
 ### Technical Metrics
 - Gas efficiency: < 500k gas for typical operations
 - Security: Zero critical vulnerabilities
 - Performance: Sub-second response times
-- Scalability: Support for 100+ bidders
+- Scalability: Support for 100+ concurrent auctions
 
 ### Functional Metrics
 - Privacy: No bidder-proxy linkability during auction
@@ -431,8 +484,8 @@ function selectWinningAllocation(...) pure returns (uint256)
 - **Complexity**: Modular design and extensive testing
 - **Security**: Multiple audit rounds and formal verification
 - **Performance**: Load testing and optimization
-- **Pause abuse**: Timelock and governance controls
-- **Owner risk**: Single point of failure for auction control
+- **Multi-auction conflicts**: Isolated state management
+- **Owner risk**: Distributed ownership model
 
 ### Business Risks
 - **Adoption**: Clear documentation and examples
@@ -456,13 +509,14 @@ function selectWinningAllocation(...) pure returns (uint256)
 
 ## Conclusion
 
-This implementation plan provides a comprehensive roadmap for building a production-ready clock-proxy auction hook for Uniswap V4. The modular architecture, security-first approach, and phased implementation strategy ensure a robust and maintainable system that can evolve with the ecosystem.
+This implementation plan provides a comprehensive roadmap for building a production-ready clock-proxy auction hook for Uniswap V4. The two-contract architecture, multi-auction support, and phased implementation strategy ensure a robust and scalable system that can evolve with the ecosystem.
 
 The key success factors will be:
 1. Maintaining the privacy guarantees during auction
 2. Ensuring gas efficiency for on-chain operations
 3. Providing a seamless user experience
 4. Creating a secure and auditable system
+5. Supporting multiple concurrent auctions efficiently
 
 This document will be updated as implementation progresses and new insights are gained.
 

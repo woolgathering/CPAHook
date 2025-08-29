@@ -2,6 +2,31 @@
 
 This is for the most open design of the clock proxy. There are other designs that can be closed (i.e. whitelist of bidders, proxies, etc.).
 
+## Two-Contract Architecture
+
+### Design Overview
+The system uses two main contracts for efficiency and reusability:
+
+1. **CPAHook (ClockProxyAuctionHook)**: Single contract that manages multiple auctions
+2. **PoolHook**: Shared hook that all asset pools attach to, controlled by the CPAHook
+
+### Initialization Process
+1. Deploy CPAHook (single contract for all auctions)
+2. Deploy PoolHook with CPAHook address as constructor argument
+3. Create asset pools (A<>USDC, B<>USDC, C<>USDC) with PoolHook attached
+4. Create auction via CPAHook.createAuction() with pool keys and parameters
+
+### Multi-Auction Support
+- Each auction gets a unique auctionId
+- Each auction has its own owner (not the CPAHook owner)
+- All auction variables are indexed by auctionId
+- Only the auction owner can control their specific auction
+
+### PoolHook Control
+- CPAHook controls all PoolHooks via setAuctionState() and setPoolAllowed()
+- PoolHook blocks all operations when auction is active
+- Centralized control mechanism for auction state
+
 ## Overview
 This auction design ensures that:
 - During the Clock Phase: The mapping between bidders and their proxies is hidden.
@@ -31,23 +56,34 @@ This auction design ensures that:
 
 ### 1. Setup Phase
 On-chain
-- Auction contract is deployed with:
-  - Any address can be a bidder and cannot submit bids without initial stakes.
-- Any address can be a proxy but must register via `registerCommit` before associated bids are accepted.
-- Stake-to-BidPoints: Bidders receive bidPoints based on their liquidity deposit amount with each bid, limiting their clock phase bidding power.
-- Configurable parameters: bid submission window, proxy registration window, allocation window, reveal window, stake amounts, rate limits, max possible stake (future safeguard).
-  - As a UniV4 hook, auctioned items are tokens in linked pools.
-  - Auctioneer deploys pools and deposits items.
-  - Common Numeraire Constraint: All pools must share the same Y token (numeraire) for consistent pricing.
-  - Auction contract controls pool pricing.
-  - Hook-Owned Assets: Auction hook owns all deposited liquidity during auction.
-  - ClockProxyAuctionHook Pool: `numeraire <-> CPA` token pair with high initial CPA price.
-- Future feature: Instead of `transferFrom`, bidders could be ERC-6909 contracts that mint claims to the auction contract.
-- Item sub-pools are created between `item<>numeraire` with a starting price of 1:1 (to be later manipulated.)
+- **System Deployment**:
+  - CPAHook (ClockProxyAuctionHook) is deployed as a single contract that will manage all auctions
+  - PoolHook is deployed with CPAHook address as constructor argument
+  - PoolHook will be attached to all asset pools for auction control
+
+- **Auction Creation**:
+  - Auctioneer calls `CPAHook.createAuction(poolKeys, config, owner)` to create a new auction
+  - Each auction gets a unique auctionId
+  - Each auction has its own owner (not the CPAHook owner)
+  - Auction configuration includes: bid submission window, proxy registration window, allocation window, reveal window, stake amounts, rate limits, max possible stake
+
+- **Pool Setup**:
+  - Asset pools (A<>commonNumeraire, B<>commonNumeraire, C<>commonNumeraire) are created with PoolHook attached
+  - Common Numeraire Constraint: All pools must share the same numeraire for consistent pricing
+  - CPAHook controls pool pricing and operations through PoolHook
+
+- **Auction Configuration**:
+  - Any address can be a bidder and cannot submit bids without initial stakes
+  - Any address can be a proxy but must register via `registerCommit` before associated bids are accepted
+  - Stake-to-BidPoints: Bidders receive bidPoints based on their liquidity deposit amount with each bid, limiting their clock phase bidding power
+  - Hook-Owned Assets: Auction hook owns all deposited liquidity during auction
+  - ClockProxyAuctionHook Pool: `numeraire <-> CPA` token pair with high initial CPA price
+
+- **Future feature**: Instead of `transferFrom`, bidders could be ERC-6909 contracts that mint claims to the auction contract
 
 Off-chain
-- Bidders and proxies establish communication channels.
-- Bidders select a proxy and share a secret salt.
+- Bidders and proxies establish communication channels
+- Bidders select a proxy and share a secret salt
 
 ---
 
