@@ -8,67 +8,215 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { PoolUtils } from "../utils/PoolUtils.sol";
 import { AuctionTypes } from "../AuctionTypes.sol";
+import { AuctionId, AuctionIdLibrary } from "../AuctionId.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { IClockProxyAuction } from "../interfaces/IClockProxyAuction.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
+import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
 
 library CPASetup {
 	using PoolUtils for IPoolManager;
+	using CurrencySettler for Currency;
 
-    /**
-	 * @notice Validate pool addition and return pool info
-	 * @param poolKey The V4 pool key
-	 * @param depositAmount Amount deposited for auction
-	 * @param _poolManager The pool manager
-	 * @param _commonNumeraire The common numeraire token
-	 * @return poolId The pool ID
-	 * @return poolInfo The pool info struct
-	 * @return isCurrency0Numeraire Whether currency0 is the numeraire
+	/**
+	 * @notice Create a new auction with the given configuration
+	 * @param self The contract instance
+	 * @param poolKeys Array of pool keys for the auction
+	 * @param config The auction configuration
+	 * @param auctionInfo Mapping for auction info
+	 * @param poolToAuctionId Mapping for pool to auction ID
+	 * @param poolInfo Mapping for pool info
 	 */
-	function validateAndPreparePool(
-		PoolKey calldata poolKey,
-		uint256 depositAmount,
-		IPoolManager _poolManager,
-		address _commonNumeraire
-	) external view returns (PoolId poolId, AuctionTypes.PoolInfo memory poolInfo, bool isCurrency0Numeraire) {
-		// Ensure one of the currencies is the common numeraire
-		if (address(Currency.unwrap(poolKey.currency1)) != _commonNumeraire && address(Currency.unwrap(poolKey.currency0)) != _commonNumeraire) {
-			revert IErrorsAndEvents.InvalidNumeraire();
-		}
+	function createAuction(
+		CPAStorage self,
+		PoolKey[] memory poolKeys, 
+		AuctionTypes.AuctionConfig memory config, 
+		address auctionOwner,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionId) storage poolToAuctionId,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+	) internal returns (AuctionId) {
+		// we need to create the auction id
+		// then we need to check that all the pools have the same numeraire
+		// then we need to check that the hook in the pools matches the cpaAuctionHookAddr
+		// then we need to do the following mappings:
+		// - auction id to auction owner
+		// - auction id to auction config
+		// - auction id to auction info 
+		// - auction id to pool info for each pool
+		// - auction id to common numeraire
 
-		// assure that this is a new pool that hasn't been initialized by PoolManager
-		if (_poolManager.poolExists(poolKey)) {
-			revert IErrorsAndEvents.PoolAlreadyExists();
-		}
+		// create the auction id
+		AuctionId auctionId = AuctionIdLibrary.createId(poolKeys);
 
-		poolId = poolKey.toId();
-		isCurrency0Numeraire = address(Currency.unwrap(poolKey.currency0)) == _commonNumeraire;
+		// ensure all pools share the same numeraire and are controlled by the correct auction hook.
+		// map each pool to the new auctionId and set up core auction state.
+		address numeraireAddress = config.commonNumeraire;
 		
-		poolInfo = AuctionTypes.PoolInfo({
-			key: poolKey,
-			currentPrice: 0,         // Will be set during clock phase
-			depositAmount: depositAmount,
-			excessDemand: 0          // Will be calculated during clock phase
+		// Note: commonNumeraire is now stored in auctionInfo, not in a separate mapping
+		
+		for (uint256 i = 0; i < poolKeys.length; i++) {
+			if (address(Currency.unwrap(poolKeys[i].currency0)) == numeraireAddress || address(Currency.unwrap(poolKeys[i].currency1)) == numeraireAddress) {
+				// check that the hook in the pool matches the cpaAuctionHookAddr
+				if (address(poolKeys[i].hooks) != self.cpaAuctionHookAddr()) {
+					revert IErrorsAndEvents.InvalidHook();
+				}
+				
+				poolToAuctionId[poolKeys[i].toId()] = auctionId; // set the auction id in poolToAuctionId
+				
+				// Create and store PoolInfo for this pool
+				PoolId poolId = poolKeys[i].toId();
+				AuctionTypes.PoolInfo memory poolInfoData = AuctionTypes.PoolInfo({
+					key: poolKeys[i],
+					currentPrice: 0, // Will be set during deposit
+					depositAmount: 0, // Will be set during deposit
+					excessDemand: 0,
+					auctionId: auctionId
+				});
+				poolInfo[poolId] = poolInfoData;
+			} else {
+				revert IErrorsAndEvents.MismatchedNumeraires();
+			}
+		}
+
+		// set the auction info
+		auctionInfo[auctionId] = AuctionTypes.AuctionInfo({
+			auctionOwner: auctionOwner,
+			commonNumeraire: numeraireAddress,
+			config: config,
+			currentPhase: AuctionTypes.AuctionPhase.Setup,
+			currentRound: 0,
+			clockOpen: false,
+			roundBids: new AuctionTypes.Bid[](0),
+			poolKeys: poolKeys
 		});
+
+		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
+
+		return auctionId;
+	}
+
+	// function moveDepositsToPools(
+	// 	CPAStorage self, 
+	// 	mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo, 
+	// 	mapping(AuctionId => mapping(PoolId => AuctionTypes.PoolInfo)) storage poolInfo, 
+	// 	AuctionId auctionId
+	// ) internal {
+	// 	// go through the pools and transfer the deposit amount from the sender to the hook via the pool manager
+	// 	PoolKey[] memory pools = auctionInfo[auctionId].poolKeys;
+	// 	for (uint256 i = 0; i < pools.length; i++) {
+	// 		PoolId poolId = pools[i].toId();
+	// 		moveDeposit(self, auctionId, poolId, poolInfo[auctionId][poolId].depositAmount);
+	// 	}
+	// }
+
+	/**
+	 * @notice Move deposits from auction owner to a single pool, giving ERC6909 claims to PoolHook
+	 * @param self The contract instance
+	 * @param auctionId The auction ID
+	 * @param poolKey The pool key to deposit to
+	 * @param depositAmount The amount to deposit
+	 */
+	function moveDeposit(
+		CPAStorage self, 
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		PoolKey memory poolKey,
+		AuctionId auctionId, 
+		uint256 depositAmount
+	) internal {
+		// confirm that the auction is in the Setup phase
+		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
+		}
+
+		// AuctionTypes.PoolInfo memory poolInfo = poolInfo[auctionId][poolId];
+		
+		// Update the deposit amount in poolInfo
+		poolInfo[poolKey.toId()].depositAmount = depositAmount;
+		
+		// Determine which currency is the item (non-numeraire)
+		address numeraireAddress = auctionInfo[auctionId].commonNumeraire;
+		Currency itemCurrency;
+		
+		if (address(Currency.unwrap(poolKey.currency0)) == numeraireAddress) {
+			itemCurrency = poolKey.currency1;
+		} else {
+			itemCurrency = poolKey.currency0;
+		}
+		
+		// Create callback data for the unlock callback
+		bytes memory operationData = abi.encode(
+			poolKey,
+			itemCurrency,
+			depositAmount,
+			auctionId,
+			msg.sender  // Pass the original caller (auction owner)
+		);
+		
+		bytes memory callbackData = abi.encode(
+			uint8(1), // operationType = 1 for deposit transfer
+			operationData
+		);
+
+		// Call poolManager.unlock() which will trigger unlockCallback
+		self.manager().unlock(callbackData);
+
+		// Emit event for tracking
+		emit IErrorsAndEvents.AssetsDeposited(auctionId, poolKey.toId(), address(Currency.unwrap(itemCurrency)), depositAmount, self.cpaAuctionHookAddr());
+	}
+
+	/**
+	 * @notice Handle deposit transfer operation (setup)
+	 * @param self The contract instance
+	 * @param operationData The encoded operation data
+	 * @return returnData The encoded balance deltas
+	 */
+	function handleDepositTransfer(
+		CPAStorage self, 
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		bytes memory operationData
+	) internal returns (bytes memory returnData) {
+		// Decode callback data
+		(PoolKey memory poolKey, Currency itemCurrency, uint256 depositAmount, AuctionId auctionId, address originalCaller) = 
+			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
+		
+		// Verify this is a legitimate auction owner (original caller, not msg.sender)
+		require(originalCaller == auctionInfo[auctionId].auctionOwner, "Not auction owner");
+		
+		// Directly transfer assets using V4's settle/take mechanism
+		// This bypasses V4's native liquidity functionality
+		
+		// First, settle (send) tokens from auction owner to pool
+		itemCurrency.settle(self.manager(), originalCaller, depositAmount, false);
+		
+		// Then, take (mint) ERC6909 tokens to be received by CPAHook
+		itemCurrency.take(self.manager(), self.cpaAuctionHookAddr(), depositAmount, true);
+		
+		// Return the actual balance changes that occurred
+		// CPAHook received depositAmount as ERC6909 claims (positive delta)
+		// No fees were collected (zero delta)
+		int128 amount0 = 0;
+		int128 amount1 = 0;
+		
+		// Determine which currency changed and set the appropriate delta
+		if (address(Currency.unwrap(poolKey.currency0)) == address(Currency.unwrap(itemCurrency))) {
+			amount0 = int128(uint128(depositAmount)); // Positive because CPAHook received claims
+		} else {
+			amount1 = int128(uint128(depositAmount)); // Positive because CPAHook received claims
+		}
+		
+		return abi.encode(toBalanceDelta(amount0, amount1), BalanceDeltaLibrary.ZERO_DELTA);
 	}
 
     function confirmSetupComplete(CPAStorage self) internal view returns (bool) {
         // go through the pools and check that the deposit amounts match
-        // for now we're just storing the deposits in the hook itself
-
-        PoolId[] memory pools = self.getAllPools();
-        for (uint256 i = 0; i < pools.length; i++) {
-            PoolId poolId = pools[i];
-            (PoolKey memory key, uint256 currentPrice, uint256 depositAmount, uint256 excessDemand) = self.poolInfo(poolId);
-            // Check if the non-numeraire token balance matches the deposit amount
-            if (IERC20(Currency.unwrap(key.currency0)).balanceOf(address(this)) != depositAmount && 
-                IERC20(Currency.unwrap(key.currency1)).balanceOf(address(this)) != depositAmount) {
-                return false;
-            }
-        }
-        return true;
+        // check that the auction state is in the Setup phase
+		return true; // for now we're just returning true
     }
 }
