@@ -248,6 +248,37 @@ bool public poolsOpened; // trading status
 - Return of all assets to auction owner
 - PoolHooks remain blocked until manual release
 
+### 4. Asset Custody and Settlement Strategy
+
+#### Asset Custody Model
+- **PoolHook Custody**: Assets (items to be sold) are custodied by PoolHook
+- **CPAHook Control**: CPAHook has operational control over assets during auctions
+- **ERC6909 Claims**: PoolManager mints claims to PoolHook for auctioned assets
+- **Permission Model**: Only CPAHook can request asset transfers from PoolHook
+
+#### Asset Flow
+1. **Setup**: Assets deposited to PoolManager → Claims minted to PoolHook
+2. **Auction**: PoolHook holds claims, CPAHook controls auction logic
+3. **Settlement**: CPAHook requests transfers via PoolHook.transferToWinner()
+4. **Distribution**: PoolHook validates and executes claim transfers to winners
+
+#### Settlement Process
+- **Winner Claims**: Bidders claim through CPAHook (not directly from PoolHook)
+- **Transfer Request**: CPAHook calls `PoolHook.transferToWinner(winner, amount, auctionId)`
+- **Validation**: PoolHook validates:
+  - Request comes from CPAHook
+  - Auction is in correct phase
+  - Winner is legitimate
+  - Amounts are correct
+- **Execution**: PoolHook burns its claims and mints new claims to winner
+
+#### Benefits of This Approach
+- **Clean Separation**: PoolHook custodies, CPAHook controls
+- **V4 Integration**: Natural fit with V4 pool mechanics
+- **Efficient**: No unnecessary asset transfers
+- **Secure**: Clear permission boundaries
+- **Auditable**: All transfers go through validated channels
+
 ### 5. Library Separation Strategy
 
 #### `AuctionTypes.sol`

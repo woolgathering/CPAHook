@@ -25,21 +25,6 @@ This implements a clock-proxy auction system as Uniswap V4 hooks, combining FCC-
 - **Liquidity-as-Stake**: Bidders stake through V4 liquidity deposits
 - **Allocator Competition**: Multiple allocators compete for optimal allocations
 
-### Architecture
-
-```
-src/
-├── ClockProxyAuctionHook.sol    # Main auction hook
-├── PoolHook.sol                 # V4 hook integration
-├── AuctionTypes.sol             # Type definitions
-├── AllocationScoring.sol        # Allocation scoring logic
-├── CommitReveal.sol             # Privacy mechanisms
-├── base/                        # Base contract implementations
-├── libraries/                   # Auction phase libraries
-├── interfaces/                  # Contract interfaces
-└── utils/                       # Utility contracts
-```
-
 ## Current Implementation Status
 
 ### Completed (Skeletal)
@@ -70,8 +55,7 @@ src/
 
 ### Requirements
 - Foundry (stable version)
-- Python 3.8+ (for simulation framework)
-- Node.js (for future frontend development)
+- Python 3.11+ (for simulation framework)
 
 ### Installation
 ```bash
