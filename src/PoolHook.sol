@@ -5,6 +5,7 @@ import { BaseHook, ModifyLiquidityParams, SwapParams, BeforeSwapDelta } from "@u
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { AuctionTypes } from "./AuctionTypes.sol";
 
 /**
@@ -13,24 +14,20 @@ import { AuctionTypes } from "./AuctionTypes.sol";
  * @author Clock-Proxy Auction Team
  */
 contract PoolHook is BaseHook {
-	/// @notice Address of the auction that controls this pool hook
-	address public immutable auction;
-
-	/// @notice Auction phase
-	AuctionTypes.AuctionPhase public phase;
-
-	/// @notice Whether auction is paused
-	bool public paused;
-
-	/// @notice Whether auction is cancelled
-	bool public cancelled;
+	using PoolIdLibrary for PoolKey;
 	
-	/// @notice Whether operations are blocked
-	bool public blocked;
+	/// @notice Address of the auction that controls this pool hook
+	address public immutable auctionManager;
+
+	/// @notice Auction phase per pool
+	mapping(PoolId => AuctionTypes.AuctionPhase) public poolStates;
+	
+	/// @notice Whether operations are blocked per pool
+	mapping(PoolId => bool) public allowedPools;
 
 	/// @notice Error when caller is not the auction
 	error OnlyAuction();
-	error OperationsBlocked();
+	error AuctionOngoing();
 
 	/// @notice Events
 	event BlockedStateChanged(bool blocked);
@@ -38,26 +35,25 @@ contract PoolHook is BaseHook {
 	/**
 	 * @notice Constructor
 	 * @param _poolManager The V4 pool manager
-	 * @param _auction The auction that controls this pool hook
 	 */
 	constructor(
 		IPoolManager _poolManager,
-		address _auction
+		address _auctionManager
 	) BaseHook(_poolManager) {
-		auction = _auction;
+		auctionManager = _auctionManager;
 	}
 
 	/**
-	 * @notice Set blocked state (only callable by auction)
-	 * @param _blocked Whether operations should be blocked
+	 * @notice Set whether a pool is allowed to be used
+	 * @param key The pool key
+	 * @param allowed Whether the pool is allowed to be used
 	 */
-	function setBlocked(bool _blocked) external {
-		if (msg.sender != auction) {
+	function setPoolAllowed(PoolKey calldata key, bool allowed) external {
+		if (msg.sender != auctionManager) {
 			revert OnlyAuction();
 		}
 		
-		blocked = _blocked;
-		emit BlockedStateChanged(_blocked);
+		allowedPools[key.toId()] = allowed;
 	}
 
 	/**
@@ -67,10 +63,8 @@ contract PoolHook is BaseHook {
 		address sender,
 		PoolKey calldata key,
 		uint160 sqrtPriceX96
-	) internal view override returns (bytes4) {
-		if (blocked) {
-			revert OperationsBlocked();
-		}
+	) internal override returns (bytes4) {
+		allowedPools[key.toId()] = false; // make sure it's set to false (not necessary??)
 		
 		return BaseHook.beforeInitialize.selector;
 	}
@@ -84,8 +78,8 @@ contract PoolHook is BaseHook {
 		SwapParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4, BeforeSwapDelta, uint24) {
-		if (blocked) {
-			revert OperationsBlocked();
+		if (!allowedPools[key.toId()]) {
+			revert AuctionOngoing();
 		}
 		
 		return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
@@ -100,8 +94,8 @@ contract PoolHook is BaseHook {
 		ModifyLiquidityParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
-		if (blocked) {
-			revert OperationsBlocked();
+		if (!allowedPools[key.toId()]) {
+			revert AuctionOngoing();
 		}
 		
 		return BaseHook.beforeAddLiquidity.selector;
@@ -116,8 +110,8 @@ contract PoolHook is BaseHook {
 		ModifyLiquidityParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
-		if (blocked) {
-			revert OperationsBlocked();
+		if (!allowedPools[key.toId()]) {
+			revert AuctionOngoing();
 		}
 		
 		return BaseHook.beforeRemoveLiquidity.selector;
@@ -133,21 +127,50 @@ contract PoolHook is BaseHook {
 		uint256 amount1,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
-		if (blocked) {
-			revert OperationsBlocked();
+		if (!allowedPools[key.toId()]) {
+			revert AuctionOngoing();
 		}
 		
 		return BaseHook.beforeDonate.selector;
 	}
 
-	function setAuctionState(AuctionTypes.AuctionPhase _phase, bool _paused, bool _cancelled) external {
-		if (msg.sender != auction) {
+	/**
+	 * @notice Set the auction state for a specific pool
+	 * @param poolKey The pool key
+	 * @param phase The auction phase
+	 * @param paused Whether the auction is paused
+	 * @param cancelled Whether the auction is cancelled
+	 */
+	function setAuctionState(
+		PoolKey calldata poolKey, 
+		AuctionTypes.AuctionPhase phase, 
+		bool paused, 
+		bool cancelled
+	) external {
+		if (msg.sender != auctionManager) {
 			revert OnlyAuction();
 		}
 		
-		phase = _phase;
-		paused = _paused;
-		cancelled = _cancelled;
+		PoolId poolId = poolKey.toId();
+		poolStates[poolId] = phase;
+		// Update allowed state based on phase and pause/cancel status
+		allowedPools[poolId] = (phase == AuctionTypes.AuctionPhase.Settlement) && !paused && !cancelled;
+	}
+
+	/**
+	 * @notice Set the pool state (only allows ClockProxyAuctionHook to call)
+	 * @param poolKey The pool key
+	 * @param state The auction phase state
+	 */
+	function setPoolState(PoolKey calldata poolKey, AuctionTypes.AuctionPhase state) external {
+		if (msg.sender != auctionManager) {
+			revert OnlyAuction();
+		}
+		
+		PoolId poolId = poolKey.toId();
+		poolStates[poolId] = state;
+		// Only allow trading when auction is in Settlement phase
+		allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement);
 	}
 
 	/**
