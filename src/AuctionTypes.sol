@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { AuctionId } from "./AuctionId.sol";
 
 /**
  * @title AuctionTypes
@@ -18,6 +19,7 @@ library AuctionTypes {
 		Reveal,     // Identity disclosure phase
 		Settlement, // Final settlement phase
 		Cancelled,   // Auction cancelled by owner
+		Paused,     // Auction paused by owner
 		Finished     // Auction finishedf
 	}
 
@@ -63,6 +65,7 @@ library AuctionTypes {
 
 	/// @notice Configuration structure for auction parameters
 	struct AuctionConfig {
+		address commonNumeraire;
 		uint256 minSpendRatio;              // Minimum spending ratio (basis points)
 		uint256 dropoutSlashRatio;          // Dropout penalty ratio (basis points)
 		uint256 spendingViolationSlashRatio; // Spending violation penalty (basis points)
@@ -81,5 +84,18 @@ library AuctionTypes {
 		uint256 currentPrice;       // Current price in the pool
 		uint256 depositAmount;      // Amount deposited for auction
 		uint256 excessDemand;       // Current excess demand
+		AuctionId auctionId;        // ID of the auction for this pool
 	}
+
+	struct AuctionInfo {
+		address auctionOwner;
+		address commonNumeraire;
+		AuctionTypes.AuctionConfig config;
+		AuctionPhase currentPhase;
+		bool clockOpen;
+		AuctionTypes.Bid[] roundBids;
+		uint256 currentRound;
+		PoolKey[] poolKeys;         // Array of pool keys for this auction
+	}
+
 }
