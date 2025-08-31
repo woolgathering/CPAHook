@@ -10,7 +10,7 @@ import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {Currency, CurrencyLibrary} from "@uniswap/v4-core/src/types/Currency.sol";
-import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IHookEvents} from "@openzeppelin/uniswap-hooks/src/interfaces/IHookEvents.sol";
@@ -59,7 +59,7 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
     /**
      * @dev Liquidity was attempted to be added or removed via the `PoolManager` instead of the hook.
      */
-    error LiquidityOnlyViaHook();
+    error AuctionNotFinished();
 
     /**
      * @dev Native currency was not sent with the correct amount.
@@ -93,10 +93,8 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         ModifyLiquidityParams params;
     }
 
-    /**
-     * @notice The hook's pool key.
-     */
-    PoolKey public poolKey;
+    // are the non-auction hooks allowed to trade yet?
+    mapping(PoolId => bool) public allowedPools;
 
     /**
      * @dev Ensure the deadline of a liquidity modification request is not expired.
@@ -111,7 +109,8 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
     /**
      * @dev Set the pool `PoolManager` address.
      */
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+    }
 
     /**
      * @notice Adds liquidity to the hook's pool.
@@ -133,25 +132,20 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         ensure(params.deadline)
         returns (BalanceDelta delta)
     {
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
-
-        if (sqrtPriceX96 == 0) revert PoolNotInitialized();
-
-        // Revert if msg.value is non-zero but currency0 is not native
-        bool isNative = poolKey.currency0.isAddressZero();
-        if (!isNative && msg.value > 0) revert InvalidNativeValue();
+        // This function is not used in the auction hook context
+        revert("Not yet implemented");
 
         // Get the liquidity modification parameters and the amount of liquidity shares to mint
-        (bytes memory modifyParams, uint256 shares) = _getAddLiquidity(sqrtPriceX96, params);
+        // (bytes memory modifyParams, uint256 shares) = _getAddLiquidity(sqrtPriceX96, params);
 
         // Apply the liquidity modification
-        (BalanceDelta callerDelta, BalanceDelta feesAccrued) = _modifyLiquidity(modifyParams);
+        // (BalanceDelta callerDelta, BalanceDelta feesAccrued) = _modifyLiquidity(modifyParams);
 
         // Mint the liquidity shares to sender
-        _mint(params, callerDelta, feesAccrued, shares);
+        // _mint(params, callerDelta, feesAccrued, shares);
 
         // Get the principal delta by subtracting the fee delta from the caller delta (-= is not supported)
-        delta = callerDelta - feesAccrued;
+        // delta = callerDelta - feesAccrued;
 
         // // Check for slippage on principal delta
         // uint128 amount0 = uint128(-delta.amount0());
@@ -168,6 +162,7 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         //     // Previous check prevents underflow revert
         //     poolKey.currency0.transfer(msg.sender, msg.value - amount0);
         // }
+        return (BalanceDeltaLibrary.ZERO_DELTA);
     }
 
     /**
@@ -185,9 +180,8 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         ensure(params.deadline)
         returns (BalanceDelta delta)
     {
-        (uint160 sqrtPriceX96,,,) = poolManager.getSlot0(poolKey.toId());
-
-        if (sqrtPriceX96 == 0) revert PoolNotInitialized();
+        // This function is not used in the auction hook context
+        revert("Not yet implemented");
 
         // Get the liquidity modification parameters and the amount of liquidity shares to burn
         (bytes memory modifyParams, uint256 shares) = _getRemoveLiquidity(params);
@@ -239,100 +233,37 @@ abstract contract CPABaseCustomAccounting is BaseHook, IHookEvents, IUnlockCallb
         onlyPoolManager
         returns (bytes memory returnData)
     {
-        CallbackData memory data = abi.decode(rawData, (CallbackData));
-        PoolKey memory key = poolKey;
-
-        // Set the salt value of the liquidity position, which is the keccak256 hash of the sender and salt from the callback data
-        // This ensures that each liquidity position is unique and cannot be accessed by other users
-        data.params.salt = keccak256(abi.encode(data.sender, data.params.salt));
-
-        // Get liquidity modification deltas
-        (BalanceDelta callerDelta, BalanceDelta feesAccrued) = poolManager.modifyLiquidity(key, data.params, "");
-
-        // Calculate the principal delta
-        BalanceDelta principalDelta = callerDelta - feesAccrued;
-
-        // Handle each currency amount based on its sign after applying the liquidity modification
-        if (principalDelta.amount0() < 0) {
-            // If amount0 is negative, send tokens from the sender to the pool
-            key.currency0.settle(poolManager, data.sender, uint256(int256(-principalDelta.amount0())), false);
-        } else {
-            // If amount0 is positive, send tokens from the pool to the sender
-            key.currency0.take(poolManager, data.sender, uint256(int256(principalDelta.amount0())), false);
-        }
-
-        if (principalDelta.amount1() < 0) {
-            // If amount1 is negative, send tokens from the sender to the pool
-            key.currency1.settle(poolManager, data.sender, uint256(int256(-principalDelta.amount1())), false);
-        } else {
-            // If amount1 is positive, send tokens from the pool to the sender
-            key.currency1.take(poolManager, data.sender, uint256(int256(principalDelta.amount1())), false);
-        }
-
-        // Handle any accrued fees (by default, transfer all fees to the sender)
-        _handleAccruedFees(data, callerDelta, feesAccrued);
-
-        emit HookModifyLiquidity(
-            PoolId.unwrap(poolKey.toId()), data.sender, principalDelta.amount0(), principalDelta.amount1()
-        );
-
-        // Return both deltas so that slippage checks can be done on the principal delta
-        return abi.encode(callerDelta, feesAccrued);
+        // This will be overridden in ClockProxyAuctionHook
+        revert("Not yet implemented");
     }
 
     /**
-     * @dev Handle any fees accrued in a liquidity position. By default, this function transfers the tokens to the
-     * owner of the liquidity position. However, this function can be overridden to take fees accrued in the position,
-     * or any other desired logic.
+     * @dev Handle bid as liquidity add operation
+     * @param operationData The encoded operation data
+     * @return returnData The encoded balance deltas
+     */
+    function _handleBidAsLiquidity(bytes memory operationData) internal virtual returns (bytes memory returnData) {
+        // This will be implemented in the derived contract
+        revert("Not yet implemented");
+    }
+
+
+
+    /**
+     * @dev Handle any fees accrued in a liquidity position. This function is now virtual and should be overridden
+     * in derived contracts to handle fees according to the specific operation type.
      *
-     * @param data The encoded `CallbackData` struct, including the sender and the parameters for the liquidity modification.
-     * @param callerDelta The balance delta from the liquidity modification.
+     * @param poolKey The pool key for the operation
+     * @param sender The sender of the operation
      * @param feesAccrued The balance delta of the fees generated in the liquidity range.
      */
-    function _handleAccruedFees(CallbackData memory data, BalanceDelta callerDelta, BalanceDelta feesAccrued)
+    function _handleAccruedFees(PoolKey memory poolKey, address sender, BalanceDelta feesAccrued)
         internal
         virtual
     {
         // Send any accrued fees to the sender
-        poolKey.currency0.take(poolManager, data.sender, uint256(int256(feesAccrued.amount0())), false);
-        poolKey.currency1.take(poolManager, data.sender, uint256(int256(feesAccrued.amount1())), false);
-    }
-
-    /**
-     * @dev Initialize the hook's pool key. The stored key should act immutably so that
-     * it can safely be used across the hook's functions.
-     */
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        // Check if the pool key is already initialized
-        if (address(poolKey.hooks) != address(0)) revert AlreadyInitialized();
-
-        // Store the pool key to be used in other functions
-        poolKey = key;
-        return this.beforeInitialize.selector;
-    }
-
-    /**
-     * @dev Revert when liquidity is attempted to be added via the `PoolManager`.
-     */
-    function _beforeAddLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal
-        virtual
-        override
-        returns (bytes4)
-    {
-        revert LiquidityOnlyViaHook();
-    }
-
-    /**
-     * @dev Revert when liquidity is attempted to be removed via the `PoolManager`.
-     */
-    function _beforeRemoveLiquidity(address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata)
-        internal
-        virtual
-        override
-        returns (bytes4)
-    {
-        revert LiquidityOnlyViaHook();
+        poolKey.currency0.take(poolManager, sender, uint256(int256(feesAccrued.amount0())), false);
+        poolKey.currency1.take(poolManager, sender, uint256(int256(feesAccrued.amount1())), false);
     }
 
     /**
