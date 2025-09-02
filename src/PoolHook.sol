@@ -7,17 +7,18 @@ import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { AuctionTypes } from "./AuctionTypes.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title PoolHook
  * @notice Simple hook that blocks all operations when controlled by auction
  * @author Clock-Proxy Auction Team
  */
-contract PoolHook is BaseHook {
+contract PoolHook is BaseHook, Ownable {
 	using PoolIdLibrary for PoolKey;
 	
 	/// @notice Address of the auction that controls this pool hook
-	address public immutable auctionManager;
+	address public auctionManager;
 
 	/// @notice Auction phase per pool
 	mapping(PoolId => AuctionTypes.AuctionPhase) public poolStates;
@@ -28,6 +29,7 @@ contract PoolHook is BaseHook {
 	/// @notice Error when caller is not the auction
 	error OnlyAuction();
 	error AuctionOngoing();
+	error OnlyOwner();
 
 	/// @notice Events
 	event BlockedStateChanged(bool blocked);
@@ -37,24 +39,23 @@ contract PoolHook is BaseHook {
 	 * @param _poolManager The V4 pool manager
 	 */
 	constructor(
-		IPoolManager _poolManager,
-		address _auctionManager
-	) BaseHook(_poolManager) {
+		IPoolManager _poolManager
+	) BaseHook(_poolManager) Ownable(msg.sender) {
+	}
+
+	function getAuctionManager() external view returns (address) {
+		return auctionManager;
+	}
+
+	function setAuctionManager(address _auctionManager) external {
+		if (msg.sender != owner()) {
+			revert OnlyOwner();
+		}
+		
 		auctionManager = _auctionManager;
 	}
 
-	/**
-	 * @notice Set whether a pool is allowed to be used
-	 * @param key The pool key
-	 * @param allowed Whether the pool is allowed to be used
-	 */
-	function setPoolAllowed(PoolKey calldata key, bool allowed) external {
-		if (msg.sender != auctionManager) {
-			revert OnlyAuction();
-		}
-		
-		allowedPools[key.toId()] = allowed;
-	}
+	// Removed setPoolAllowed function - consolidated into setPoolState
 
 	/**
 	 * @notice Hook that runs before pool initialization
@@ -64,7 +65,8 @@ contract PoolHook is BaseHook {
 		PoolKey calldata key,
 		uint160 sqrtPriceX96
 	) internal override returns (bytes4) {
-		allowedPools[key.toId()] = false; // make sure it's set to false (not necessary??)
+		// New pools start blocked by default
+		allowedPools[key.toId()] = false;
 		
 		return BaseHook.beforeInitialize.selector;
 	}
@@ -134,31 +136,10 @@ contract PoolHook is BaseHook {
 		return BaseHook.beforeDonate.selector;
 	}
 
-	/**
-	 * @notice Set the auction state for a specific pool
-	 * @param poolKey The pool key
-	 * @param phase The auction phase
-	 * @param paused Whether the auction is paused
-	 * @param cancelled Whether the auction is cancelled
-	 */
-	function setAuctionState(
-		PoolKey calldata poolKey, 
-		AuctionTypes.AuctionPhase phase, 
-		bool paused, 
-		bool cancelled
-	) external {
-		if (msg.sender != auctionManager) {
-			revert OnlyAuction();
-		}
-		
-		PoolId poolId = poolKey.toId();
-		poolStates[poolId] = phase;
-		// Update allowed state based on phase and pause/cancel status
-		allowedPools[poolId] = (phase == AuctionTypes.AuctionPhase.Settlement) && !paused && !cancelled;
-	}
+	// Removed setAuctionState function - consolidated into setPoolState
 
 	/**
-	 * @notice Set the pool state (only allows ClockProxyAuctionHook to call)
+	 * @notice Set the pool state (only allows auction manager to call)
 	 * @param poolKey The pool key
 	 * @param state The auction phase state
 	 */
