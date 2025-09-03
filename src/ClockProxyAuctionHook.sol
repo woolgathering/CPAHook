@@ -23,7 +23,7 @@ import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-cor
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol"; 
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
-// import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
+import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 // import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 // import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
@@ -46,8 +46,9 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	 */
 	constructor(
 		IPoolManager _poolManager,
-		address _owner
-	) CPABaseCustomAccounting(_poolManager) Ownable(_owner) CPAStorage(address(this)) {
+		address _owner,
+		address _cpaAuctionHookAddr
+	) CPABaseCustomAccounting(_poolManager) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr) {
 		manager = _poolManager;
 	}
 
@@ -78,6 +79,10 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	modifier onlyPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		if (auctionInfo[auctionId].currentPhase != phase) revert InvalidPhase(phase, auctionInfo[auctionId].currentPhase);
 		_;
+	}
+
+	function setCpaAuctionHookAddr(address _cpaAuctionHookAddr) external onlyOwner {
+		cpaAuctionHookAddr = _cpaAuctionHookAddr;
 	}
 
 	/**
@@ -139,7 +144,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 		auctionInfo[auctionId].currentRound++;
 		auctionInfo[auctionId].clockOpen = true;
 		delete auctionInfo[auctionId].roundBids;
-		emit IErrorsAndEvents.ClockRoundOpened(auctionInfo[auctionId].currentRound);
+		emit IErrorsAndEvents.ClockRoundOpened(auctionId, auctionInfo[auctionId].currentRound);
 	}
 
 	/**
@@ -318,7 +323,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
 		AuctionTypes.AuctionPhase oldPhase = auctionInfo[auctionId].currentPhase;
 		auctionInfo[auctionId].currentPhase = newPhase;
-		emit IErrorsAndEvents.AuctionPhaseChanged(oldPhase, newPhase);
+		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, oldPhase, newPhase);
 	}
 
 	/**
