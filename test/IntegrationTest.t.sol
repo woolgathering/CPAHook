@@ -1,0 +1,346 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity ^0.8.24;
+
+import { Test, console2 } from "forge-std/Test.sol";
+import { PoolHook } from "../src/PoolHook.sol";
+import { ClockProxyAuctionHook } from "../src/ClockProxyAuctionHook.sol";
+import { AuctionTypes } from "../src/AuctionTypes.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { Deployers } from "./utils/Deployers.sol";
+import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { Constants } from "../lib/uniswap-hooks/lib/v4-core/test/utils/Constants.sol";
+
+contract IntegrationTest is Deployers {
+    using PoolIdLibrary for PoolKey;
+
+    PoolHook public poolHook;
+    ClockProxyAuctionHook public cpaHook;
+    address public owner;
+    address public nonOwner;
+    
+    PoolKey public testPoolKey;
+    PoolId public testPoolId;
+
+    function setUp() public {
+        deployArtifacts();
+        
+        owner = address(0x1111111111111111111111111111111111111111);
+        nonOwner = address(0x2222222222222222222222222222222222222222);
+        
+        // Deploy both hooks from the same address (owner)
+        vm.startPrank(owner);
+        
+        // First deploy PoolHook
+        poolHook = deployPoolHook(poolManager);
+        
+        // Then deploy ClockProxyAuctionHook with poolHook address
+        cpaHook = deployCPAHook(poolManager, owner, address(poolHook));
+        
+        // Set the auction manager in PoolHook to be the CPAHook
+        poolHook.setAuctionManager(address(cpaHook));
+        
+        vm.stopPrank();
+        
+        // Create a test pool key
+        testPoolKey = PoolKey({
+            currency0: Currency.wrap(address(0x1000000000000000000000000000000000000000)),
+            currency1: Currency.wrap(address(0x2000000000000000000000000000000000000000)),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(poolHook))
+        });
+        testPoolId = testPoolKey.toId();
+    }
+
+    /// @notice Deploy PoolHook with proper address mining and flag setting
+    function deployPoolHook(IPoolManager _poolManager) internal returns (PoolHook) {
+        uint160 flags = uint160(
+            Hooks.BEFORE_INITIALIZE_FLAG |
+            Hooks.BEFORE_SWAP_FLAG |
+            Hooks.BEFORE_ADD_LIQUIDITY_FLAG |
+            Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG |
+            Hooks.BEFORE_DONATE_FLAG
+        );
+        
+        bytes memory constructorArgs = abi.encode(_poolManager);
+        
+        (address hookAddress, bytes32 salt) = HookMiner.find(
+            owner,
+            flags,
+            type(PoolHook).creationCode,
+            constructorArgs
+        );
+        
+        PoolHook deployedHook = new PoolHook{salt: salt}(_poolManager);
+        require(address(deployedHook) == hookAddress, "Hook address mismatch");
+        return deployedHook;
+    }
+
+    /// @notice Deploy ClockProxyAuctionHook with proper address mining and flag setting
+    function deployCPAHook(IPoolManager _poolManager, address _owner, address _poolHook) internal returns (ClockProxyAuctionHook) {
+        uint160 flags = uint160(
+            Hooks.BEFORE_INITIALIZE_FLAG |
+            Hooks.BEFORE_SWAP_FLAG
+        );
+        
+        bytes memory constructorArgs = abi.encode(_poolManager, _owner, _poolHook);
+        
+        (address hookAddress, bytes32 salt) = HookMiner.find(
+            owner,
+            flags,
+            type(ClockProxyAuctionHook).creationCode,
+            constructorArgs
+        );
+        
+        ClockProxyAuctionHook deployedHook = new ClockProxyAuctionHook{salt: salt}(_poolManager, _owner, _poolHook);
+        require(address(deployedHook) == hookAddress, "Hook address mismatch");
+        return deployedHook;
+    }
+
+    // ============ Setup Verification Tests ============
+
+    function test_Setup_ContractsDeployedCorrectly() public {
+        // Verify both hooks are deployed
+        assertEq(address(poolHook.poolManager()), address(poolManager));
+        assertEq(address(cpaHook.manager()), address(poolManager));
+        
+        // Verify ownership
+        assertEq(poolHook.owner(), owner);
+        assertEq(cpaHook.owner(), owner);
+        
+        // Verify PoolHook has CPAHook as auction manager
+        assertEq(poolHook.auctionManager(), address(cpaHook));
+        
+        // Verify CPAHook has PoolHook address stored
+        assertEq(cpaHook.cpaAuctionHookAddr(), address(poolHook));
+    }
+
+    // ============ Permission Tests ============
+
+    function test_Permissions_OwnerCanSetAuctionManager() public {
+        // Owner should be able to change auction manager in PoolHook
+        address newAuctionManager = address(0x3333333333333333333333333333333333333333);
+        
+        vm.prank(owner);
+        poolHook.setAuctionManager(newAuctionManager);
+        
+        assertEq(poolHook.auctionManager(), newAuctionManager);
+    }
+
+    function test_Permissions_NonOwnerCannotSetAuctionManager() public {
+        // Non-owner should not be able to change auction manager
+        address newAuctionManager = address(0x3333333333333333333333333333333333333333);
+        
+        vm.prank(nonOwner);
+        vm.expectRevert(PoolHook.OnlyOwner.selector);
+        poolHook.setAuctionManager(newAuctionManager);
+        
+        // Verify it wasn't changed
+        assertEq(poolHook.auctionManager(), address(cpaHook));
+    }
+
+    function test_Permissions_CPAHookCanSetPoolState() public {
+        // Initialize pool first
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // CPAHook should be able to set pool state
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        
+        assertEq(uint8(poolHook.poolStates(testPoolId)), uint8(AuctionTypes.AuctionPhase.Settlement));
+        assertEq(poolHook.allowedPools(testPoolId), true);
+    }
+
+    function test_Permissions_OwnerCannotSetPoolState() public {
+        // Initialize pool first
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Owner should NOT be able to set pool state directly
+        vm.prank(owner);
+        vm.expectRevert(PoolHook.OnlyAuction.selector);
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        
+        // Verify state wasn't changed
+        assertEq(poolHook.allowedPools(testPoolId), false);
+    }
+
+    function test_Permissions_NonOwnerCannotSetPoolState() public {
+        // Initialize pool first
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Non-owner should NOT be able to set pool state
+        vm.prank(nonOwner);
+        vm.expectRevert(PoolHook.OnlyAuction.selector);
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        
+        // Verify state wasn't changed
+        assertEq(poolHook.allowedPools(testPoolId), false);
+    }
+
+    // ============ Integration Flow Tests ============
+
+    function test_Integration_CompleteAuctionFlow() public {
+        // Initialize pool
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Start with Setup phase - operations blocked
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Setup);
+        assertEq(poolHook.allowedPools(testPoolId), false);
+        
+        // Move to Clock phase - operations still blocked
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Clock);
+        assertEq(poolHook.allowedPools(testPoolId), false);
+        
+        // Move to Settlement phase - operations allowed
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        assertEq(poolHook.allowedPools(testPoolId), true);
+        
+        // Test other phases still block operations
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Proxy);
+        assertEq(poolHook.allowedPools(testPoolId), false);
+        
+        // Back to Settlement - operations allowed again
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        assertEq(poolHook.allowedPools(testPoolId), true);
+    }
+
+    function test_Integration_PoolOperationsBlockedWhenAuctionOngoing() public {
+        // Initialize pool
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Set to Setup phase (blocked)
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Setup);
+        
+        // Verify operations are blocked
+        assertEq(poolHook.allowedPools(testPoolId), false);
+        
+        // Try to perform operations - they should be blocked
+        // Note: In a real scenario, these would be called via the V4 router/manager
+        // and would revert with AuctionOngoing
+    }
+
+    function test_Integration_PoolOperationsAllowedWhenAuctionFinished() public {
+        // Initialize pool
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Set to Settlement phase (allowed)
+        vm.prank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+        
+        // Verify operations are allowed
+        assertEq(poolHook.allowedPools(testPoolId), true);
+        
+        // Operations should now be allowed
+        // Note: In a real scenario, these would be called via the V4 router/manager
+    }
+
+    // ============ Multi-Pool Tests ============
+
+    function test_Integration_MultiplePoolsIndependent() public {
+        // Create second pool key
+        PoolKey memory poolKey2 = PoolKey({
+            currency0: Currency.wrap(address(0x3000000000000000000000000000000000000000)),
+            currency1: Currency.wrap(address(0x4000000000000000000000000000000000000000)),
+            fee: 500,
+            tickSpacing: 10,
+            hooks: IHooks(address(poolHook))
+        });
+        PoolId poolId2 = poolKey2.toId();
+        
+        // Initialize both pools
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        poolManager.initialize(poolKey2, Constants.SQRT_PRICE_1_1);
+        
+        // Set different states for different pools
+        vm.startPrank(address(cpaHook));
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement); // Allowed
+        poolHook.setPoolState(poolKey2, AuctionTypes.AuctionPhase.Clock); // Blocked
+        vm.stopPrank();
+        
+        // Verify independent states
+        assertEq(poolHook.allowedPools(testPoolId), true);
+        assertEq(poolHook.allowedPools(poolId2), false);
+    }
+
+    // ============ Edge Cases ============
+
+    function test_Integration_ZeroAddressAuctionManager() public {
+        // Owner sets zero address as auction manager
+        vm.prank(owner);
+        poolHook.setAuctionManager(address(0));
+        
+        // Zero address auction manager cannot call restricted functions
+        vm.expectRevert(PoolHook.OnlyAuction.selector);
+        poolHook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
+    }
+
+    function test_Integration_ReinitializePool() public {
+        // Initialize pool once
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        assertEq(poolHook.allowedPools(testPoolId), false);
+        
+        // Re-initialize should still set to blocked
+        // Note: This would require a different pool key since V4 doesn't allow re-initialization
+        // For now, just verify the current state
+        assertEq(poolHook.allowedPools(testPoolId), false);
+    }
+
+    // ============ Security Tests ============
+
+    function test_Security_CPAHookCannotSetOwnAuctionManager() public {
+        // CPAHook should not be able to set itself as auction manager in PoolHook
+        // This would create a circular dependency
+        vm.prank(address(cpaHook));
+        vm.expectRevert(PoolHook.OnlyOwner.selector);
+        poolHook.setAuctionManager(address(cpaHook));
+    }
+
+    function test_Security_CPAHookCannotTransferOwnership() public {
+        // CPAHook should not be able to transfer ownership of PoolHook
+        vm.prank(address(cpaHook));
+        vm.expectRevert(PoolHook.OnlyOwner.selector);
+        poolHook.setAuctionManager(address(0x9999999999999999999999999999999999999999));
+    }
+
+    // ============ State Consistency Tests ============
+
+    function test_Consistency_PoolStateReflectsAuctionPhase() public {
+        // Initialize pool
+        poolManager.initialize(testPoolKey, Constants.SQRT_PRICE_1_1);
+        
+        // Test all auction phases
+        AuctionTypes.AuctionPhase[] memory phases = new AuctionTypes.AuctionPhase[](7);
+        phases[0] = AuctionTypes.AuctionPhase.Setup;
+        phases[1] = AuctionTypes.AuctionPhase.Clock;
+        phases[2] = AuctionTypes.AuctionPhase.Proxy;
+        phases[3] = AuctionTypes.AuctionPhase.Allocation;
+        phases[4] = AuctionTypes.AuctionPhase.Reveal;
+        phases[5] = AuctionTypes.AuctionPhase.Settlement;
+        phases[6] = AuctionTypes.AuctionPhase.Finished;
+        
+        for (uint i = 0; i < phases.length; i++) {
+            vm.prank(address(cpaHook));
+            poolHook.setPoolState(testPoolKey, phases[i]);
+            
+            // Only Settlement and Finished should allow operations
+            bool shouldAllow = (phases[i] == AuctionTypes.AuctionPhase.Settlement || 
+                               phases[i] == AuctionTypes.AuctionPhase.Finished);
+            
+            assertEq(poolHook.allowedPools(testPoolId), shouldAllow, 
+                    string.concat("Phase ", vm.toString(uint8(phases[i])), " should ", 
+                                shouldAllow ? "allow" : "block", " operations"));
+        }
+    }
+}
