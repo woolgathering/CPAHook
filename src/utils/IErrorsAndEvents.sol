@@ -15,21 +15,21 @@ interface IErrorsAndEvents {
 
 	/// @notice Events
 	event AuctionCreated(AuctionId auctionId, address auctionOwner);
-	event AuctionPhaseChanged(AuctionTypes.AuctionPhase oldPhase, AuctionTypes.AuctionPhase newPhase);
-	event ClockRoundOpened(uint256 round);
-	event ClockRoundClosed(uint256 round, uint256 totalBids);
-	event BidSubmitted(address bidder, bytes32 commitHash, uint256 stakeAmount, uint256 round);
-	event BundleSubmitted(bytes32 commitHash, uint256 bundleId);
-	event AllocationSubmitted(address allocator, uint256 allocationId);
-	event RevealProcessed(address bidder, address proxy, bytes32 commitHash);
+	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase oldPhase, AuctionTypes.AuctionPhase newPhase);
+	event BidSubmitted(AuctionId auctionId, address bidder, bytes32 commitHash, uint256 stakeAmount, uint256 round);
+	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, uint256 bundleId);
+	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 allocationId);
+	event RevealProcessed(AuctionId auctionId, address bidder, address proxy, bytes32 commitHash);
 	event AuctionPaused(AuctionId auctionId, address by);
 	event AuctionUnpaused(AuctionId auctionId, address by);
 	event AuctionCancelled(AuctionId auctionId, address by);
-	event StakeAdded(address bidder, uint256 amount);
-	event StakeRefunded(address bidder, uint256 amount);
-	event PenaltyApplied(address bidder, uint256 amount);
+	event StakeAdded(AuctionId auctionId, address bidder, uint256 amount);
+	event StakeRefunded(AuctionId auctionId, address bidder, uint256 amount);
+	event PenaltyApplied(AuctionId auctionId, address bidder, uint256 amount);
 	event AssetsDeposited(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 	event AssetsWithdrawn(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
+	event ClockRoundOpened(AuctionId auctionId, uint256 round);
+	event ClockRoundClosed(AuctionId auctionId, uint256 round, uint256 totalBids);
 
 	/// @notice Shared errors
 	error OnlyOwner();
@@ -55,4 +55,5 @@ interface IErrorsAndEvents {
 	error AuctionNotSetup();
 	error AuctionNotStarted();
 	error AuctionNotEnded();
+	error ClockAlreadyOpen();
 }
