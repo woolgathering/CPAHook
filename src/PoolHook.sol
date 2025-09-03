@@ -150,8 +150,8 @@ contract PoolHook is BaseHook, Ownable {
 		
 		PoolId poolId = poolKey.toId();
 		poolStates[poolId] = state;
-		// Only allow trading when auction is in Settlement phase
-		allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement);
+		// Only allow trading when auction is in Settlement or Finished phase
+		allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement || state == AuctionTypes.AuctionPhase.Finished);
 	}
 
 	/**
