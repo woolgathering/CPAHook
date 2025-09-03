@@ -59,116 +59,19 @@ abstract contract CPAStorage {
 		poolInfo[poolId].depositAmount = depositAmount;
 	}
 
-	/**
-	 * @notice Get all pool IDs for an auction
-	 * @param auctionId The auction ID
-	 * @return Array of all pool IDs
-	 */
-	function getAllPools(AuctionId auctionId) external view returns (PoolId[] memory) {
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
-		PoolId[] memory poolIds = new PoolId[](poolKeys.length);
-		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
-			poolIds[i] = poolKeys[i].toId();
-		}
-		
-		return poolIds;
-	}
+
 
     ////////
     // CLOCK PHASE
     ////////
-    /// @notice Current clock round
-	mapping(AuctionId => uint256) public currentRound;
-
-    /// @notice Clock round open for bidding
-	mapping(AuctionId => bool) public clockOpen;
-
-	/**
-	 * @notice Set clock open state
-	 * @param auctionId The auction ID
-	 * @param _clockOpen The new clock state
-	 */
-	function _setClockOpen(AuctionId auctionId, bool _clockOpen) internal {
-		clockOpen[auctionId] = _clockOpen;
-	}
-
-    /// @notice Round bids storage
-	mapping(AuctionId => AuctionTypes.Bid[]) public roundBids;
-
-    /// @notice Dropped bidders
+    /// @notice Dropped bidders (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => bool)) public droppedBidders;
 
-    /// @notice Bidder stake mapping
+    /// @notice Bidder stake mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderStake;
 
-	/**
-	 * @notice Add stake for a bidder
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param amount The amount to add
-	 */
-	function _addBidderStake(AuctionId auctionId, address bidder, uint256 amount) internal {
-		bidderStake[auctionId][bidder] += amount;
-	}
-
-	/**
-	 * @notice Set bidder bid points
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param points The bid points
-	 */
-	function _setBidderBidPoints(AuctionId auctionId, address bidder, uint256 points) internal {
-		bidderBidPoints[auctionId][bidder] = points;
-	}
-
-	/**
-	 * @notice Add a bid to round bids
-	 * @param auctionId The auction ID
-	 * @param bid The bid to add
-	 */
-	function _addRoundBid(AuctionId auctionId, AuctionTypes.Bid memory bid) internal {
-		roundBids[auctionId].push(bid);
-	}
-
-	/**
-	 * @notice Set dropped bidder status
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param dropped Whether the bidder is dropped
-	 */
-	function _setDroppedBidder(AuctionId auctionId, address bidder, bool dropped) internal {
-		droppedBidders[auctionId][bidder] = dropped;
-	}
-
-	/**
-	 * @notice Clear bidder stake and bid points
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 */
-	function _clearBidderData(AuctionId auctionId, address bidder) internal {
-		bidderStake[auctionId][bidder] = 0;
-		bidderBidPoints[auctionId][bidder] = 0;
-	}
-
-	/**
-	 * @notice Get number of round bids
-	 * @param auctionId The auction ID
-	 * @return Number of round bids
-	 */
-	function getRoundBidsLength(AuctionId auctionId) external view returns (uint256) {
-		return roundBids[auctionId].length;
-	}
-
-	/**
-	 * @notice Get a round bid by index
-	 * @param auctionId The auction ID
-	 * @param index The index of the bid
-	 * @return The bid struct
-	 */
-	function getRoundBid(AuctionId auctionId, uint256 index) external view returns (AuctionTypes.Bid memory) {
-		return roundBids[auctionId][index];
-	}
+    /// @notice Bidder bid points mapping (not stored in AuctionInfo)
+	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
 
 	/**
 	 * @notice Get number of bundles for a commit hash
@@ -190,8 +93,7 @@ abstract contract CPAStorage {
 		bundles[auctionId][commitHash].push(bundle);
 	}
 	
-	/// @notice Bidder bid points mapping
-	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
+
 
     ////////
     // PROXY PHASE
