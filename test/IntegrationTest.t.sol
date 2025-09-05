@@ -8,7 +8,7 @@ import { AuctionTypes } from "../src/AuctionTypes.sol";
 import { AuctionId } from "../src/AuctionId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
@@ -17,9 +17,11 @@ import { Deployers } from "./utils/Deployers.sol";
 import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { Constants } from "../lib/uniswap-hooks/lib/v4-core/test/utils/Constants.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
+import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
 
 contract IntegrationTest is Deployers {
     using PoolIdLibrary for PoolKey;
+	using CurrencyLibrary for Currency;
 
     PoolHook public poolHook;
 	CPAManagerHook public cpaHook;
@@ -705,5 +707,152 @@ contract IntegrationTest is Deployers {
 		assertTrue(true, "Auction created with real tokens successfully");
 		
 		// TODO: Next step will be testing CPAClockPhase.moveDeposit to move tokens from auctioneer to pools
+	}
+
+	function test_DepositFunctionality_WithRealTokens() public {
+		// Deploy real tokens for testing
+		MockERC20 numeraireToken = new MockERC20("Numeraire", "NUM", 18);
+		MockERC20 asset1Token = new MockERC20("Asset1", "AST1", 18);
+		MockERC20 asset2Token = new MockERC20("Asset2", "AST2", 18);
+		
+		// Define entities
+		address protocolOwner = owner; // Protocol owns the auction manager contract
+		address auctioneer = address(0xcafebabe); // Auctioneer creates auctions and owns assets
+		
+		// Mint asset tokens to the auctioneer
+		uint256 tokenAmount = 1000000 * 10**18; // 1M tokens
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		// Verify initial state
+		assertEq(asset1Token.balanceOf(auctioneer), tokenAmount, "Auctioneer should own asset1 tokens initially");
+		assertEq(asset2Token.balanceOf(auctioneer), tokenAmount, "Auctioneer should own asset2 tokens initially");
+		assertEq(asset1Token.balanceOf(address(poolManager)), 0, "PoolManager should start with no asset1 tokens");
+		assertEq(asset2Token.balanceOf(address(poolManager)), 0, "PoolManager should start with no asset2 tokens");
+		// Note: ERC6909 balance checking requires proper interface casting - skipping for now
+		
+		// Create test pool keys with real tokens (only asset pools for createAuction)
+		PoolKey[] memory poolKeys = new PoolKey[](2);
+		
+		// Asset pool 1: asset1 <> numeraire (ensure currencies are sorted by address)
+		(address sortedAsset1, address sortedNumeraire1) = address(asset1Token) < address(numeraireToken) 
+			? (address(asset1Token), address(numeraireToken)) 
+			: (address(numeraireToken), address(asset1Token));
+		
+		poolKeys[0] = PoolKey({
+			currency0: Currency.wrap(sortedAsset1),
+			currency1: Currency.wrap(sortedNumeraire1),
+			fee: 3000,
+			tickSpacing: 60,
+			hooks: IHooks(address(poolHook))
+		});
+		
+		// Asset pool 2: asset2 <> numeraire (ensure currencies are sorted by address)
+		(address sortedAsset2, address sortedNumeraire2) = address(asset2Token) < address(numeraireToken) 
+			? (address(asset2Token), address(numeraireToken)) 
+			: (address(numeraireToken), address(asset2Token));
+		
+		poolKeys[1] = PoolKey({
+			currency0: Currency.wrap(sortedAsset2),
+			currency1: Currency.wrap(sortedNumeraire2),
+			fee: 3000,
+			tickSpacing: 60,
+			hooks: IHooks(address(poolHook))
+		});
+	
+		// Create auction config
+		AuctionTypes.AuctionConfig memory config = AuctionTypes.AuctionConfig({
+			commonNumeraire: address(numeraireToken),
+			minSpendRatio: 1000,
+			dropoutSlashRatio: 500,
+			spendingViolationSlashRatio: 1000,
+			maxRounds: 10,
+			clockPriceIncrement: 100,
+			allocatorStakeRequirement: 1000,
+			proxyStakeRequirement: 500,
+			maxStakeCap: 10000,
+			revealWindow: 3600,
+			allocationWindow: 7200
+		});
+	
+		// Create auction (auctioneer creates it)
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaHook.createAuction(poolKeys, config, auctioneer);
+	
+		// Verify auction was created
+		assertTrue(AuctionId.unwrap(auctionId) != 0);
+		
+		// ============ Test Deposit Functionality ============
+		// Now test that the auctioneer can move tokens to the pools via the auction manager
+		
+		// Get pool IDs for the asset pools
+		PoolId pool1Id = poolKeys[0].toId();
+		PoolId pool2Id = poolKeys[1].toId();
+		
+		// Define deposit amounts
+		uint256 depositAmount1 = 100000 * asset1Token.decimals(); // 100K asset1 tokens
+		uint256 depositAmount2 = 150000 * asset2Token.decimals(); // 150K asset2 tokens
+		
+		// Approve the CPAManagerHook to spend the auctioneer's tokens
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaHook), depositAmount1);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaHook), depositAmount2);
+		
+		// Verify approvals were set
+		assertEq(asset1Token.allowance(auctioneer, address(cpaHook)), depositAmount1, "Asset1 approval should be set");
+		assertEq(asset2Token.allowance(auctioneer, address(cpaHook)), depositAmount2, "Asset2 approval should be set");
+		
+		// Test moving deposits to pool 1
+		vm.prank(auctioneer);
+		cpaHook.moveDeposit(auctionId, poolKeys[0], depositAmount1);
+		
+		// Verify token movement
+		assertEq(asset1Token.balanceOf(auctioneer), tokenAmount - depositAmount1, "Auctioneer should have reduced asset1 balance");
+		assertEq(asset1Token.balanceOf(address(poolManager)), depositAmount1, "PoolManager should have received asset1 ERC20 tokens");
+		assertEq(IERC6909Claims(address(poolManager)).balanceOf(address(cpaHook), Currency.wrap(address(asset1Token)).toId()), depositAmount1, "CPAHook should have received asset1 ERC6909 tokens");
+
+		// Verify that pool info is updated
+		(
+			,
+			,
+			uint256 pool1DepositAmountInPoolInfo,
+			,
+			AuctionId pool1AuctionIdInPoolInfo
+		) = cpaHook.poolInfo(pool1Id);
+		
+		assertEq(pool1DepositAmountInPoolInfo, depositAmount1, "Pool1 deposit amount should be updated");
+		assertTrue(AuctionId.unwrap(pool1AuctionIdInPoolInfo) == AuctionId.unwrap(auctionId), "Pool1 should reference the correct auction");
+		
+		// Test moving deposits to pool 2
+		vm.prank(auctioneer);
+		cpaHook.moveDeposit(auctionId, poolKeys[1], depositAmount2);
+		
+		// Verify token movement
+		assertEq(asset2Token.balanceOf(auctioneer), tokenAmount - depositAmount2, "Auctioneer should have reduced asset2 balance");
+		assertEq(asset2Token.balanceOf(address(poolManager)), depositAmount2, "PoolManager should have received asset2 ERC20 tokens");
+		assertEq(IERC6909Claims(address(poolManager)).balanceOf(address(cpaHook), Currency.wrap(address(asset2Token)).toId()), depositAmount2, "CPAHook should have received asset2 ERC6909 tokens");
+		
+		// Verify pool info is updated
+		(
+			,
+			,
+			uint256 pool2DepositAmountInPoolInfo,
+			,
+			AuctionId pool2AuctionIdInPoolInfo
+		) = cpaHook.poolInfo(pool2Id);
+		
+		assertEq(pool2DepositAmountInPoolInfo, depositAmount2, "Pool2 deposit amount should be updated");
+		assertTrue(AuctionId.unwrap(pool2AuctionIdInPoolInfo) == AuctionId.unwrap(auctionId), "Pool2 should reference the correct auction");
+		
+		// Verify final state
+		assertEq(asset1Token.balanceOf(auctioneer), tokenAmount - depositAmount1, "Final auctioneer asset1 balance should be correct");
+		assertEq(asset2Token.balanceOf(auctioneer), tokenAmount - depositAmount2, "Final auctioneer asset2 balance should be correct");
+		assertEq(asset1Token.balanceOf(address(poolManager)), depositAmount1, "Final PoolManager asset1 balance should be correct");
+		assertEq(asset2Token.balanceOf(address(poolManager)), depositAmount2, "Final PoolManager asset2 balance should be correct");
+		// Note: ERC6909 balance checking requires proper interface casting - skipping for now
+		
+		// Test that the auction manager can actually move tokens successfully
+		assertTrue(true, "Deposit functionality working correctly - tokens moved from auctioneer to pools via auction manager");
 	}
 }
