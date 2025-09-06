@@ -50,6 +50,8 @@ contract CPAClockPhaseTest is Deployers {
 
 	AuctionId public auctionId;
 
+    uint256 public numeraireCurrencyId;
+
 	function setUp() public {
         deployArtifacts();
 
@@ -58,6 +60,8 @@ contract CPAClockPhaseTest is Deployers {
 		numeraireToken = new MockERC20("Numeraire Token", "NUM", 18);
 		asset1Token = new MockERC20("Asset 1 Token", "AST1", 18);
 		asset2Token = new MockERC20("Asset 2 Token", "AST2", 18);
+
+        numeraireCurrencyId = uint256(uint160(address(numeraireToken)));
 
 		asset1InitialPrice = 1 * 10**18;
 		asset2InitialPrice = 2 * 10**18;
@@ -213,10 +217,10 @@ contract CPAClockPhaseTest is Deployers {
 		(
 			address auctionOwner,
 			address commonNumeraire,
-			AuctionTypes.AuctionConfig memory config,
+			,
 			AuctionTypes.AuctionPhase currentPhase,
 			AuctionTypes.AuctionStatus currentStatus,
-			bool clockOpen,
+			uint256 clockOpen,
 			AuctionTypes.Bid[] memory roundBids,
 			uint256 currentRound,
 			PoolKey[] memory poolKeys
@@ -226,7 +230,7 @@ contract CPAClockPhaseTest is Deployers {
 		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire should be numeraire token");
 		assertEq(uint256(currentPhase), uint256(AuctionTypes.AuctionPhase.Setup), "Initial phase should be Setup");
 		assertEq(uint256(currentStatus), uint256(AuctionTypes.AuctionStatus.Active), "Status should be Active");
-		assertFalse(clockOpen, "Clock should be closed initially");
+		assertEq(clockOpen, 1, "Clock should be closed initially");
 		assertEq(roundBids.length, 0, "Should have no round bids initially");
 		assertEq(currentRound, 0, "Initial round should be 0");
 		assertEq(poolKeys.length, 2, "Should have 2 asset pools");
@@ -250,7 +254,7 @@ contract CPAClockPhaseTest is Deployers {
 
 		assertEq(uint256(currentPhase), uint256(AuctionTypes.AuctionPhase.Clock), "Phase should be Clock");
 		assertEq(uint256(currentStatus), uint256(AuctionTypes.AuctionStatus.Active), "Status should still be Active");
-		assertTrue(clockOpen, "Clock should be open");
+		assertEq(clockOpen, 2, "Clock should be open");
 		assertEq(roundBids.length, 0, "Should have no round bids after opening");
 		assertEq(currentRound, 1, "Round should be incremented to 1");
 		assertEq(poolKeys.length, 2, "Should still have 2 asset pools");
@@ -339,6 +343,9 @@ contract CPAClockPhaseTest is Deployers {
 
 	function test_CompleteBidFlow_WithProxyCommit() public {
 		// Start clock phase
+        ////////////////////////////////////////
+        // ROUND ONE
+        ////////////////////////////////////////
 		vm.prank(auctioneer);
 		cpaHook.startClockRound(auctionId);
 
@@ -350,13 +357,15 @@ contract CPAClockPhaseTest is Deployers {
 		// Need enough for bid value: 100 * 1000 + 50 * 2000 = 200,000 numeraire tokens
 		vm.prank(protocolOwner);
 		numeraireToken.mint(bidder1, 250000 * 10**18);
+		uint256 bidder1OriginalBalance = IERC20(address(numeraireToken)).balanceOf(bidder1); // get it just cause
 
-		// Generate commit hash using CommitReveal library
-		bytes32 saltA = keccak256("saltA");
-		bytes32 saltB = keccak256("saltB");
-		bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA, saltB);
+		// Generate commit hash using CommitReveal library (one-time per bidder-proxy pair)
+		bytes32 saltA = keccak256("saltA"); // known only to the bidder
+		bytes32 saltB = keccak256("saltB"); // known only to the bidder and the proxy
+		bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA, saltB); // shared with the proxy
+		bytes32 partialCommit = CommitReveal.getBidderHash(bidder1, saltA); // submitted by the bidder with their bids
 
-		// Proxy commits to the bidder1
+		// Proxy commits to the bidder1 (one-time registration)
 		vm.prank(proxy1);
 		cpaHook.commitToBidder(auctionId, commitHash);
 
@@ -367,32 +376,26 @@ contract CPAClockPhaseTest is Deployers {
 		vm.prank(bidder1);
 		numeraireToken.approve(address(cpaHook), 250000 * 10**18);
 
-		// Bidder submits bid: demands [100, 50] for assets [asset1, asset2]
+		// Bidder creates a bid: demands [100, 50] for assets [asset1, asset2]
 		uint256[] memory demands = new uint256[](2);
-        console.log("asset1Token.decimals()", asset1Token.decimals());
-        console.log("asset2Token.decimals()", asset2Token.decimals());
 		demands[0] = 100 * 10**asset1Token.decimals(); // 100 units of asset1
 		demands[1] = 50 * 10**asset2Token.decimals();  // 50 units of asset2
 		
-		// uint256 stakeAmount = 200000 * 10**18; // 200,000 numeraire tokens as stake (matches bid value)
-
 		// Calculate expected bid value: 100 * 1000 + 50 * 2000 = 200,000 numeraire
 		uint256 expectedBidValue = ((demands[0] * asset1InitialPrice) / 10**18) + ((demands[1] * asset2InitialPrice) / 10**18); // (demand * price) / numeraire.decimals()
-        uint256 stakeAmount = expectedBidValue;
+        uint256 stakeAmount = expectedBidValue; // since it's 1:1, just set it directly
 
-        console.log("stakeAmount", stakeAmount);
-
-		// Submit bid
+		// Submit bid using partial commit (preserves anonymity)
 		vm.prank(bidder1);
-		cpaHook.submitBid(auctionId, demands, commitHash, stakeAmount);
+		cpaHook.submitBid(auctionId, demands, partialCommit, stakeAmount);
 
 		// Verify bid was recorded
-		(,,,,,bool clockOpen,AuctionTypes.Bid[] memory roundBids,uint256 currentRound,) = cpaHook.getAuctionInfo(auctionId);
-		assertTrue(clockOpen, "Clock should be open after first bid");
+		(,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,uint256 currentRound,) = cpaHook.getAuctionInfo(auctionId);
+		assertEq(clockOpen, 2, "Clock should be open after first bid");
 		assertEq(currentRound, 1, "Current round should be 1");
 		assertEq(roundBids.length, 1, "Should have exactly 1 bid after first bidder");
 		assertEq(roundBids[0].bidder, bidder1, "First bid should be from bidder1");
-		assertEq(roundBids[0].commitHash, commitHash, "First bid should have correct commit hash");
+		assertEq(roundBids[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
 		assertEq(roundBids[0].stakeAmount, stakeAmount, "First bid should have correct stake amount");
 		assertEq(roundBids[0].quantities.length, 2, "First bid should have 2 quantities");
 		assertEq(roundBids[0].quantities[0], 100 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 100");
@@ -404,9 +407,9 @@ contract CPAClockPhaseTest is Deployers {
 		assertEq(cpaHook.bidderBidPoints(auctionId, bidder1), stakeAmount, "Bidder1 bid points should match stake amount (1:1 ratio)");
 
 		// Verify numeraire tokens were transferred
-		uint256 bidder1OriginalBalance = 250000 * 10**18;
 		assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - stakeAmount, "Bidder1 should have remaining balance after stake");
 		assertEq(numeraireToken.balanceOf(address(poolManager)), stakeAmount, "Pool manager should have received stake amount");
+        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaHook), numeraireCurrencyId), stakeAmount, "CPAAuctionManager should have ERC6909 claims for total stakes");
 
 		// Add second bidder
 		bidder2 = makeAddr("bidder2");
@@ -415,13 +418,15 @@ contract CPAClockPhaseTest is Deployers {
 		// Mint numeraire tokens to second bidder
 		vm.prank(protocolOwner);
 		numeraireToken.mint(bidder2, 300000 * 10**18);
+		uint256 bidder2OriginalBalance = IERC20(address(numeraireToken)).balanceOf(bidder2); // get it just cause
 
-		// Generate commit hash for second bidder
+		// Generate commit hash for second bidder (one-time per bidder-proxy pair)
 		bytes32 saltA2 = keccak256("saltA2");
 		bytes32 saltB2 = keccak256("saltB2");
 		bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
+		bytes32 partialCommit2 = CommitReveal.getBidderHash(bidder2, saltA2);
 
-		// Proxy2 commits to bidder2
+		// Proxy2 commits to bidder2 (one-time registration)
 		vm.prank(proxy2);
 		cpaHook.commitToBidder(auctionId, commitHash2);
 
@@ -439,28 +444,27 @@ contract CPAClockPhaseTest is Deployers {
 		
         uint256 expectedBidValue2 = ((demands2[0] * asset1InitialPrice) / 10**18) + ((demands2[1] * asset2InitialPrice) / 10**18); // (demand * price) / numeraire.decimals()
 		uint256 stakeAmount2 = expectedBidValue2;
-        
 
-		// Submit second bid
+		// Submit second bid using partial commit (preserves anonymity)
 		vm.prank(bidder2);
-		cpaHook.submitBid(auctionId, demands2, commitHash2, stakeAmount2);
+		cpaHook.submitBid(auctionId, demands2, partialCommit2, stakeAmount2);
 
 		// Verify both bids were recorded
 		(,,,,,clockOpen,roundBids,currentRound,) = cpaHook.getAuctionInfo(auctionId);
-		assertTrue(clockOpen, "Clock should still be open after second bid");
+		assertEq(clockOpen, 2, "Clock should still be open after second bid");
 		assertEq(currentRound, 1, "Current round should still be 1");
 		assertEq(roundBids.length, 2, "Should have exactly 2 bids after second bidder");
 		
 		// Verify first bidder's bid
+		assertEq(roundBids[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
 		assertEq(roundBids[0].bidder, bidder1, "First bid should be from bidder1");
-		assertEq(roundBids[0].commitHash, commitHash, "First bid should have correct commit hash");
 		assertEq(roundBids[0].stakeAmount, stakeAmount, "First bid should have correct stake amount");
 		assertEq(roundBids[0].quantities[0], 100 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 100");
 		assertEq(roundBids[0].quantities[1], 50 * 10**asset2Token.decimals(), "First bid asset2 quantity should be 50");
 		
 		// Verify second bidder's bid
 		assertEq(roundBids[1].bidder, bidder2, "Second bid should be from bidder2");
-		assertEq(roundBids[1].commitHash, commitHash2, "Second bid should have correct commit hash2");
+		assertEq(roundBids[1].commitHash, partialCommit2, "Second bid should have correct partial commit hash2");
 		assertEq(roundBids[1].stakeAmount, stakeAmount2, "Second bid should have correct stake amount2");
 		assertEq(roundBids[1].quantities[0], 75 * 10**asset1Token.decimals(), "Second bid asset1 quantity should be 75");
 		assertEq(roundBids[1].quantities[1], 25 * 10**asset2Token.decimals(), "Second bid asset2 quantity should be 25");
@@ -472,24 +476,20 @@ contract CPAClockPhaseTest is Deployers {
 		assertEq(cpaHook.bidderBidPoints(auctionId, bidder2), stakeAmount2, "Bidder2 bid points should match stake amount2");
 
 		// Verify token balances
-		bidder1OriginalBalance = 250000 * 10**18;
-		uint256 bidder2OriginalBalance = 300000 * 10**18;
 		assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - stakeAmount, "Bidder1 should have remaining balance after stake");
 		assertEq(numeraireToken.balanceOf(bidder2), bidder2OriginalBalance - stakeAmount2, "Bidder2 should have remaining balance after stake");
 		assertEq(numeraireToken.balanceOf(address(poolManager)), stakeAmount + stakeAmount2, "Pool manager should have total stakes");
-		
-		// Verify ERC6909 claims: CPAAuctionManager should have claims for the total stakes
-		uint256 numeraireCurrencyId = uint256(uint160(address(numeraireToken)));
-		assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaHook), numeraireCurrencyId), stakeAmount + stakeAmount2, "CPAAuctionManager should have ERC6909 claims for total stakes");
+        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaHook), numeraireCurrencyId), stakeAmount + stakeAmount2, "CPAAuctionManager should have ERC6909 claims for total stakes");
 
-		// End the clock round
+		// End the first clock round
 		vm.prank(auctioneer);
 		cpaHook.endClockRound(auctionId);
 
-		// Verify clock is closed and phase changed to Proxy
-		(,,,AuctionTypes.AuctionPhase currentPhase2,AuctionTypes.AuctionStatus currentStatus2,bool clockOpen2,AuctionTypes.Bid[] memory roundBids2,uint256 currentRound2,) = cpaHook.getAuctionInfo(auctionId);
-		assertFalse(clockOpen2, "Clock should be closed after ending round");
-		assertEq(uint256(currentPhase2), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy after ending clock round");
+		// Verify clock is closed after first round
+		(,,,AuctionTypes.AuctionPhase currentPhase2,AuctionTypes.AuctionStatus currentStatus2,uint256 clockOpen2,AuctionTypes.Bid[] memory roundBids2,uint256 currentRound2,) = cpaHook.getAuctionInfo(auctionId);
+		assertEq(clockOpen2, 1,"Clock should be closed after ending first round");
+		assertEq(currentRound2, 1, "Current round should still be 1 after ending first round");
+		assertEq(roundBids2.length, 0, "Round bids should be cleared after ending round");
 
 		// Verify price increment functionality
 		// Asset1: demand = 100 + 75 = 175, supply = 100, excess = 75
@@ -501,19 +501,7 @@ contract CPAClockPhaseTest is Deployers {
 		// Verify price increment functionality by destructuring getPoolInfo tuples
 		// Check asset1 pool price (should be 1000 + 1*1 = 1001)
 		uint256 expectedAsset1Price = asset1InitialPrice + 1 * 1 * 10**18; // 1,001
-		(,uint256 asset1CurrentPrice,uint256 asset1PriceIncrement,,uint256 asset1ExcessDemand,) = cpaHook.getPoolInfo(asset1PoolKey.toId());
-		
-		// Debug: Check if price increment is set correctly
-		assertEq(asset1PriceIncrement, 1 * 10**18, "Asset1 price increment should be 1 token");
-		
-		// Debug: Print actual values to understand what's happening
-		console.log("Asset1 current price:", asset1CurrentPrice);
-		console.log("Asset1 price increment:", asset1PriceIncrement);
-		console.log("Asset1 excess demand:", asset1ExcessDemand);
-		console.log("Expected asset1 price:", expectedAsset1Price);
-		
-		assertEq(asset1ExcessDemand, 75 * 10**asset1Token.decimals(), "Asset1 should have excess demand of 75");
-		
+		(,uint256 asset1CurrentPrice,,,uint256 asset1ExcessDemand,) = cpaHook.getPoolInfo(asset1PoolKey.toId());		
 		assertEq(asset1CurrentPrice, expectedAsset1Price, "Asset1 price should increase by 1 token due to excess demand");
 		
 		// Check asset2 pool price (should remain 2000, no excess demand)
@@ -524,6 +512,125 @@ contract CPAClockPhaseTest is Deployers {
 		// Verify excess demand was calculated correctly
 		assertEq(asset1ExcessDemand, 75 * 10**asset1Token.decimals(), "Asset1 should have excess demand of 75");
 		assertEq(asset2ExcessDemand, 0, "Asset2 should have no excess demand");
+
+        ////////////////////////////////////////
+        // ROUND TWO
+        ////////////////////////////////////////
+
+		// Start second clock round
+		vm.prank(auctioneer);
+		cpaHook.startClockRound(auctionId);
+
+		// Verify second round is open
+		(,,,,,uint256 clockOpen3,AuctionTypes.Bid[] memory roundBids3,uint256 currentRound3,) = cpaHook.getAuctionInfo(auctionId);
+		assertEq(clockOpen3, 2, "Clock should be open for second round");
+		assertEq(currentRound3, 2, "Current round should be 2");
+		assertEq(roundBids3.length, 0, "Round bids should be cleared for new round");
+
+		// Existing bidders submit new bids in round 2 with smaller demands
+		// This should result in no excess demand due to higher prices from round 1
+
+		// Bidder1 submits smaller bid: demands [30, 20] for assets [asset1, asset2]
+		uint256[] memory demands1_round2 = new uint256[](2);
+		demands1_round2[0] = 30 * 10**asset1Token.decimals(); // 30 units of asset1
+		demands1_round2[1] = 20 * 10**asset2Token.decimals(); // 20 units of asset2
+		
+		// Calculate bid value with new prices (asset1 price increased by 1 token)
+		uint256 newAsset1Price = asset1InitialPrice + 1 * 10**18; // 1 + 1 = 2 tokens
+		uint256 expectedBidValue1_round2 = ((demands1_round2[0] * newAsset1Price) / 10**18) + ((demands1_round2[1] * asset2InitialPrice) / 10**18);
+		
+		// Check current bid points for bidder1
+		uint256 currentBidPoints1 = cpaHook.bidderBidPoints(auctionId, bidder1);
+		uint256 additionalStake1 = expectedBidValue1_round2 > currentBidPoints1 ? expectedBidValue1_round2 - currentBidPoints1 : 0;
+		
+		// Only approve additional tokens if needed
+		if (additionalStake1 > 0) {
+			vm.prank(bidder1);
+			numeraireToken.approve(address(cpaHook), additionalStake1);
+		}
+
+		// Submit bidder1's second round bid using same partial commit
+		vm.prank(bidder1);
+		cpaHook.submitBid(auctionId, demands1_round2, partialCommit, additionalStake1);
+
+		// Bidder2 submits smaller bid: demands [25, 15] for assets [asset1, asset2]
+		uint256[] memory demands2_round2 = new uint256[](2);
+		demands2_round2[0] = 25 * 10**asset1Token.decimals(); // 25 units of asset1
+		demands2_round2[1] = 15 * 10**asset2Token.decimals(); // 15 units of asset2
+		
+		uint256 expectedBidValue2_round2 = ((demands2_round2[0] * newAsset1Price) / 10**18) + ((demands2_round2[1] * asset2InitialPrice) / 10**18);
+		
+		// Check current bid points for bidder2
+		uint256 currentBidPoints2 = cpaHook.bidderBidPoints(auctionId, bidder2);
+		uint256 additionalStake2 = expectedBidValue2_round2 > currentBidPoints2 ? expectedBidValue2_round2 - currentBidPoints2 : 0;
+		
+		// Only approve additional tokens if needed
+		if (additionalStake2 > 0) {
+			vm.prank(bidder2);
+			numeraireToken.approve(address(cpaHook), additionalStake2);
+		}
+
+		// Submit bidder2's second round bid using same partial commit
+		vm.prank(bidder2);
+		cpaHook.submitBid(auctionId, demands2_round2, partialCommit2, additionalStake2);
+
+		// Verify both bids were recorded in round 2
+		(,,,,,uint256 clockOpen4,AuctionTypes.Bid[] memory roundBids4,uint256 currentRound4,) = cpaHook.getAuctionInfo(auctionId);
+		assertEq(clockOpen4, 2, "Clock should still be open after second round bids");
+		assertEq(currentRound4, 2, "Current round should still be 2");
+		assertEq(roundBids4.length, 2, "Should have exactly 2 bids in second round");
+		
+		// Verify bidder1's second round bid
+		assertEq(roundBids4[0].bidder, bidder1, "First bid in round 2 should be from bidder1");
+		assertEq(roundBids4[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
+		assertEq(roundBids4[0].stakeAmount, additionalStake1, "First bid should have correct additional stake amount");
+		assertEq(roundBids4[0].quantities[0], 30 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 30");
+		assertEq(roundBids4[0].quantities[1], 20 * 10**asset2Token.decimals(), "First bid asset2 quantity should be 20");
+		
+		// Verify bidder2's second round bid
+		assertEq(roundBids4[1].bidder, bidder2, "Second bid in round 2 should be from bidder2");
+		assertEq(roundBids4[1].commitHash, partialCommit2, "Second bid should have correct partial commit hash2");
+		assertEq(roundBids4[1].stakeAmount, additionalStake2, "Second bid should have correct additional stake amount");
+		assertEq(roundBids4[1].quantities[0], 25 * 10**asset1Token.decimals(), "Second bid asset1 quantity should be 25");
+		assertEq(roundBids4[1].quantities[1], 15 * 10**asset2Token.decimals(), "Second bid asset2 quantity should be 15");
+
+		// Verify bid points have been updated correctly (should be max of previous + additional)
+		uint256 expectedBidPoints1_round2 = currentBidPoints1 + additionalStake1;
+		uint256 expectedBidPoints2_round2 = currentBidPoints2 + additionalStake2;
+		assertEq(cpaHook.bidderBidPoints(auctionId, bidder1), expectedBidPoints1_round2, "Bidder1 bid points should be updated correctly");
+		assertEq(cpaHook.bidderBidPoints(auctionId, bidder2), expectedBidPoints2_round2, "Bidder2 bid points should be updated correctly");
+
+		// Manually end the clock phase (transition to proxy phase)
+		vm.prank(auctioneer);
+        cpaHook.endClockRound(auctionId);
+
+        // Verify clock is closed after second round
+        (,,,,,uint256 clockOpen5,AuctionTypes.Bid[] memory roundBids5,uint256 currentRound5,) = cpaHook.getAuctionInfo(auctionId);
+        assertEq(clockOpen5, 1, "Clock should be closed after ending second round");
+        assertEq(currentRound5, 2, "Current round should still be 2 after ending second round");
+        assertEq(roundBids5.length, 0, "Round bids should be cleared after ending second round");
+
+        // No excess demand so stop the auction here
+        vm.prank(auctioneer);
+		cpaHook.endClockPhase(auctionId);
+
+		// Verify clock is closed and phase changed to Proxy
+		(,,,AuctionTypes.AuctionPhase currentPhase6,AuctionTypes.AuctionStatus currentStatus6,uint256 clockOpen6,AuctionTypes.Bid[] memory roundBids6,uint256 currentRound6,) = cpaHook.getAuctionInfo(auctionId);
+		assertEq(clockOpen6, 1, "Clock should be closed after ending clock phase");
+		assertEq(uint256(currentPhase6), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy after ending clock phase");
+
+		// Verify no excess demand in second round (prices should not increase)
+		(,uint256 asset1CurrentPrice2,uint256 asset1PriceIncrement2,,uint256 asset1ExcessDemand2,) = cpaHook.getPoolInfo(asset1PoolKey.toId());
+		(,uint256 asset2CurrentPrice2,,,uint256 asset2ExcessDemand2,) = cpaHook.getPoolInfo(asset2PoolKey.toId());
+		
+		// Asset1: demand = 30 + 25 = 55, supply = 100, excess = 0 (no excess demand)
+		// Asset2: demand = 20 + 15 = 35, supply = 150, excess = 0 (no excess demand)
+		assertEq(asset1ExcessDemand2, 0, "Asset1 should have no excess demand in second round");
+		assertEq(asset2ExcessDemand2, 0, "Asset2 should have no excess demand in second round");
+		
+		// Prices should remain the same as first round (no increase due to no excess demand)
+		assertEq(asset1CurrentPrice2, expectedAsset1Price, "Asset1 price should remain the same (no excess demand)");
+		assertEq(asset2CurrentPrice2, expectedAsset2Price, "Asset2 price should remain the same (no excess demand)");
 	}
 
 	function test_StartClockRound_RoundBidsCleared() public {

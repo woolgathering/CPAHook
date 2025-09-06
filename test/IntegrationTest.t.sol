@@ -424,7 +424,7 @@ contract IntegrationTest is Deployers {
 			AuctionTypes.AuctionConfig memory auctionConfig,
 			AuctionTypes.AuctionPhase currentPhase,
 			AuctionTypes.AuctionStatus currentStatus,
-			bool clockOpen,
+			uint256 clockOpen,
 			AuctionTypes.Bid[] memory roundBids,
 			uint256 currentRound,
 			PoolKey[] memory auctionPoolKeys
@@ -435,7 +435,7 @@ contract IntegrationTest is Deployers {
         // address commonNumeraire = auctionInfo.commonNumeraire;
         // AuctionTypes.AuctionPhase currentPhase = auctionInfo.currentPhase;
         // AuctionTypes.AuctionStatus currentStatus = auctionInfo.currentStatus;
-        // bool clockOpen = auctionInfo.clockOpen;
+        // uint256 clockOpen = auctionInfo.clockOpen;
         // uint256 currentRound = auctionInfo.currentRound;
         // PoolKey[] memory auctionPoolKeys = auctionInfo.poolKeys;
 		
@@ -443,7 +443,7 @@ contract IntegrationTest is Deployers {
 		assertEq(commonNumeraire, numeraire, "Common numeraire should be the numeraire address");
 		assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
 		assertEq(uint8(currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
-		assertFalse(clockOpen, "Clock should not be open initially");
+		assertEq(clockOpen, 1, "Clock should not be open initially");
 		assertEq(currentRound, 0, "Current round should be 0");
 		assertEq(auctionPoolKeys.length, 2, "Should have 3 pools (main + 2 assets)");
 		
@@ -628,7 +628,7 @@ contract IntegrationTest is Deployers {
 			, // config
 			AuctionTypes.AuctionPhase currentPhase,
 			AuctionTypes.AuctionStatus currentStatus,
-			bool clockOpen,
+			uint256 clockOpen,
 			, // roundBids
 			uint256 currentRound,
 			PoolKey[] memory auctionPoolKeys
@@ -638,7 +638,7 @@ contract IntegrationTest is Deployers {
 		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire should be the numeraire token");
 		assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
 		assertEq(uint8(currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
-		assertFalse(clockOpen, "Clock should not be open initially");
+		assertEq(clockOpen, 1, "Clock should not be open initially");
 		assertEq(currentRound, 0, "Current round should be 0");
 		assertEq(auctionPoolKeys.length, 2, "Should have 2 asset pools");
 		
