@@ -23,6 +23,13 @@ library AuctionTypes {
 		Finished     // Auction finishedf
 	}
 
+	/// @notice Auction status
+	enum AuctionStatus {
+		Active,
+		Paused,
+		Cancelled
+	}
+
 	/// @notice Bundle structure for proxy submissions
 	struct Bundle {
 		uint256 bundleId;           // Unique identifier for the bundle
@@ -82,6 +89,7 @@ library AuctionTypes {
 	struct PoolInfo {
 		PoolKey key;                // Pool key
 		uint256 currentPrice;       // Current price in the pool
+		uint256 priceIncrement;     // Price increment per unit of excess demand
 		uint256 depositAmount;      // Amount deposited for auction
 		uint256 excessDemand;       // Current excess demand
 		AuctionId auctionId;        // ID of the auction for this pool
@@ -92,10 +100,21 @@ library AuctionTypes {
 		address commonNumeraire;
 		AuctionTypes.AuctionConfig config;
 		AuctionPhase currentPhase;
+		AuctionStatus currentStatus;
 		bool clockOpen;
 		AuctionTypes.Bid[] roundBids;
 		uint256 currentRound;
 		PoolKey[] poolKeys;         // Array of pool keys for this auction
+	}
+	
+	/// @notice Callback data structure for bid as liquidity operations
+	struct CallbackDataBid {
+		address sender;
+		address token0;
+		address token1;
+		int128 amount0;  // ETH amount (positive for add)
+		int128 amount1;  // ETH amount (0 for single-sided)
+		uint256 deadline; // deadline for the operation
 	}
 
 }
