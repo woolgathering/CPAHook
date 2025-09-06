@@ -75,6 +75,7 @@ library CPASetup {
 					currentPrice: 0, // Will be set during deposit
 					depositAmount: 0, // Will be set during deposit
 					excessDemand: 0,
+					priceIncrement: 0, // Will be set during deposit
 					auctionId: auctionId
 				});
 				poolInfo[poolId] = poolInfoData;
@@ -89,9 +90,10 @@ library CPASetup {
 			commonNumeraire: numeraireAddress,
 			config: config,
 			currentPhase: AuctionTypes.AuctionPhase.Setup,
-			currentRound: 0,
+			currentStatus: AuctionTypes.AuctionStatus.Active,
 			clockOpen: false,
 			roundBids: new AuctionTypes.Bid[](0),
+			currentRound: 0,
 			poolKeys: poolKeys
 		});
 
@@ -127,7 +129,9 @@ library CPASetup {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey,
 		AuctionId auctionId, 
-		uint256 depositAmount
+		uint256 depositAmount,
+		uint256 initialPrice,
+		uint256 priceIncrement
 	) internal {
 		// confirm that the auction is in the Setup phase
 		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
@@ -138,6 +142,12 @@ library CPASetup {
 		
 		// Update the deposit amount in poolInfo
 		poolInfo[poolKey.toId()].depositAmount = depositAmount;
+		
+		// Set initial price as specified by the auctioneer
+		poolInfo[poolKey.toId()].currentPrice = initialPrice;
+		
+		// Set price increment from auction config
+		poolInfo[poolKey.toId()].priceIncrement = priceIncrement;
 		
 		// Determine which currency is the item (non-numeraire)
 		address numeraireAddress = auctionInfo[auctionId].commonNumeraire;
@@ -196,7 +206,7 @@ library CPASetup {
 		itemCurrency.settle(self.manager(), originalCaller, depositAmount, false);
 		
 		// Then, take (mint) ERC6909 tokens to be received by CPAHook
-		itemCurrency.take(self.manager(), self.cpaAuctionHookAddr(), depositAmount, true);
+		itemCurrency.take(self.manager(), address(self), depositAmount, true);
 		
 		// Return the actual balance changes that occurred
 		// CPAHook received depositAmount as ERC6909 claims (positive delta)
@@ -214,9 +224,29 @@ library CPASetup {
 		return abi.encode(toBalanceDelta(amount0, amount1), BalanceDeltaLibrary.ZERO_DELTA);
 	}
 
-    function confirmSetupComplete(CPAStorage self) internal view returns (bool) {
-        // go through the pools and check that the deposit amounts match
-        // check that the auction state is in the Setup phase
-		return true; // for now we're just returning true
+    function confirmSetupComplete(
+		CPAStorage self,
+		AuctionId auctionId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+	) internal view returns (bool) {
+        // Check that auction is in Setup phase
+        if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
+            return false;
+        }
+        
+        // Check that all asset pools have deposits
+        PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+        for (uint256 i = 0; i < poolKeys.length; i++) {
+            PoolId poolId = poolKeys[i].toId();
+            AuctionTypes.PoolInfo memory pool = poolInfo[poolId];
+            
+            // Each asset pool must have some deposit amount
+            if (pool.depositAmount == 0) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 }
