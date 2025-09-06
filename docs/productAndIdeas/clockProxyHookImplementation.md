@@ -53,6 +53,13 @@ Asset Pool 3 (C<>USDC) - blocked during auctions
 - **Simplicity**: Clear separation between auction logic and pool control
 - **Flexibility**: Different auction owners can run concurrent auctions
 
+### Delayed Asset Pool Creation Benefits
+- **Eliminates Unnecessary Price Updates**: No need to update pool prices during clock phase
+- **Gas Efficiency**: Don't deploy pools until they're actually needed for settlement
+- **Simpler Logic**: Price discovery happens entirely in auction logic, not in pools
+- **Price Certainty**: Create pools with correct final prices from the start
+- **Cleaner Architecture**: Pools are purely settlement infrastructure, not price discovery tools
+
 ## Hook-Native Architecture Design
 
 ### Core Hook-Native Approach
@@ -193,22 +200,24 @@ bool public poolsOpened; // trading status
 
 #### Setup Phase
 - Factory deploys AuctionHook and PoolHooks
-- Factory deploys V4 pools with PoolHooks attached
-- Factory adds initial hook-owned liquidity to pools
-- AuctionHook takes control of all PoolHooks
 - Auction owner (deployer) established with full control
 - Configuration parameter setting
-- Initial price establishment at 1:1 for item sub-pools
 - Pause functionality enabled for emergency situations
+- **Note**: Asset pools are NOT created yet - they will be created after clock phase with final prices
 
 #### Clock Phase
 - Bid submission through liquidity deposits with commit hash validation
 - Hook captures numeraire amount and stores LP token mapping
 - Bid point management and stake tracking (1:1 ratio with numeraire)
-- Auctioneer updates pool prices between rounds
+- Price discovery happens in auction logic (no asset pools needed)
 - Dropout handling with penalties
-- At clock phase end: Doppler-style price manipulation sets final prices in item pools
-- Items deposited as LP positions at price <= final price to ensure sufficient liquidity
+- At clock phase end: Final prices determined through clock auction mechanics
+
+#### Post-Clock Phase (New)
+- **Asset Pool Creation**: Deploy V4 asset pools with final prices from clock phase
+- **Liquidity Positioning**: Add initial liquidity to asset pools at final prices
+- **Pool Registration**: Register asset pools with auction system
+- **Settlement Preparation**: Ensure pools are ready for claim phase
 
 #### Proxy Phase
 - Bundle submission by registered proxies

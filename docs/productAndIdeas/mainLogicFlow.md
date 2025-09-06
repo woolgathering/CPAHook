@@ -80,6 +80,7 @@ On-chain
   - ClockProxyAuctionHook Pool: `numeraire <-> CPA` token pair with high initial CPA price
 
 - **Future feature**: Instead of `transferFrom`, bidders could be ERC-6909 contracts that mint claims to the auction contract
+- **TODO**: Add pool verification check - ensure ETH<>numeraire pool with ClockProxyAuctionHook exists before allowing bids
 
 Off-chain
 - Bidders and proxies establish communication channels
