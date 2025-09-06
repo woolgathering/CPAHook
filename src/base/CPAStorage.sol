@@ -18,10 +18,10 @@ abstract contract CPAStorage {
 	// mapping(AuctionId => AuctionTypes.AuctionConfig) public auctionConfig;
 	
 	/// @notice Whether auction is paused
-	mapping(AuctionId => bool) public paused;
+	// mapping(AuctionId => bool) public paused;
 	
 	/// @notice Whether auction is cancelled
-	mapping(AuctionId => bool) public cancelled;
+	// mapping(AuctionId => bool) public cancelled;
 
 	/// @notice Commit hash to proxy mapping
 	// AuctionId -> CommitHash -> Proxy Address
@@ -39,11 +39,42 @@ abstract contract CPAStorage {
 	/// @notice Pool info mapping
 	mapping(PoolId => AuctionTypes.PoolInfo) public poolInfo;
 
+	/// @notice Current prices for currencies (in numeraire units)
+	/// @dev Currency address => price in numeraire (e.g., 1e18 = 1 numeraire token per currency unit)
+	mapping(address => uint256) public currentPrices;
+
 	/// @notice CPA Auction Hook address
 	// this is the hook that all auction item pools share
 	address public cpaAuctionHookAddr;
 
 	IPoolManager public manager;
+
+
+	//// getters
+	function getAuctionInfo(AuctionId auctionId) external view returns (address, address, AuctionTypes.AuctionConfig memory, AuctionTypes.AuctionPhase, AuctionTypes.AuctionStatus, bool, AuctionTypes.Bid[] memory, uint256, PoolKey[] memory) {
+    	return (
+			auctionInfo[auctionId].auctionOwner,
+			auctionInfo[auctionId].commonNumeraire,
+			auctionInfo[auctionId].config,
+			auctionInfo[auctionId].currentPhase,
+			auctionInfo[auctionId].currentStatus,
+			auctionInfo[auctionId].clockOpen,
+			auctionInfo[auctionId].roundBids,
+			auctionInfo[auctionId].currentRound,
+			auctionInfo[auctionId].poolKeys
+		);
+	}
+
+	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, uint256, uint256, uint256, uint256, AuctionId) {
+		return (
+			poolInfo[poolId].key,
+			poolInfo[poolId].currentPrice,
+			poolInfo[poolId].priceIncrement,
+			poolInfo[poolId].depositAmount,
+			poolInfo[poolId].excessDemand,
+			poolInfo[poolId].auctionId
+		);
+	}
 
 	///////
 	// SETUP PHASE
