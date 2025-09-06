@@ -34,8 +34,7 @@ interface IErrorsAndEvents {
 	/// @notice Shared errors
 	error OnlyOwner();
 	error InvalidPhase(AuctionTypes.AuctionPhase expected, AuctionTypes.AuctionPhase actual);
-	error AuctionPausedError();
-	error AuctionCancelledError();
+	error AuctionNotActive(AuctionId auctionId, AuctionTypes.AuctionStatus status);
 	error ClockNotOpen();
 	error InvalidCommitHash();
 	error InsufficientBidPoints();
