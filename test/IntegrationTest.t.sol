@@ -464,6 +464,7 @@ contract IntegrationTest is Deployers {
 		(
 			PoolKey memory pool1Key,
 			uint256 pool1CurrentPrice,
+			uint256 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
 			uint256 pool1ExcessDemand,
 			AuctionId pool1AuctionId
@@ -472,6 +473,7 @@ contract IntegrationTest is Deployers {
 		(
 			PoolKey memory pool2Key,
 			uint256 pool2CurrentPrice,
+			uint256 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
 			uint256 pool2ExcessDemand,
 			AuctionId pool2AuctionId
@@ -654,6 +656,7 @@ contract IntegrationTest is Deployers {
 		(
 			PoolKey memory pool1Key,
 			uint256 pool1CurrentPrice,
+			uint256 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
 			uint256 pool1ExcessDemand,
 			AuctionId pool1AuctionId
@@ -662,6 +665,7 @@ contract IntegrationTest is Deployers {
 		(
 			PoolKey memory pool2Key,
 			uint256 pool2CurrentPrice,
+			uint256 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
 			uint256 pool2ExcessDemand,
 			AuctionId pool2AuctionId
@@ -706,7 +710,7 @@ contract IntegrationTest is Deployers {
 		// This will be important for testing the deposit and settlement functionality
 		assertTrue(true, "Auction created with real tokens successfully");
 		
-		// TODO: Next step will be testing CPAClockPhase.moveDeposit to move tokens from auctioneer to pools
+		// TODO: Next step will be testing CPAClockPhase.moveDeposit to move tokens from auctioneer to pools with price increments
 	}
 
 	function test_DepositFunctionality_WithRealTokens() public {
@@ -805,7 +809,7 @@ contract IntegrationTest is Deployers {
 		
 		// Test moving deposits to pool 1
 		vm.prank(auctioneer);
-		cpaHook.moveDeposit(auctionId, poolKeys[0], depositAmount1);
+		cpaHook.moveDeposit(auctionId, poolKeys[0], depositAmount1, 1000 * 10**18, 1000 * 10**18);
 		
 		// Verify token movement
 		assertEq(asset1Token.balanceOf(auctioneer), tokenAmount - depositAmount1, "Auctioneer should have reduced asset1 balance");
@@ -814,6 +818,7 @@ contract IntegrationTest is Deployers {
 
 		// Verify that pool info is updated
 		(
+			,
 			,
 			,
 			uint256 pool1DepositAmountInPoolInfo,
@@ -826,7 +831,7 @@ contract IntegrationTest is Deployers {
 		
 		// Test moving deposits to pool 2
 		vm.prank(auctioneer);
-		cpaHook.moveDeposit(auctionId, poolKeys[1], depositAmount2);
+		cpaHook.moveDeposit(auctionId, poolKeys[1], depositAmount2, 2000 * 10**18, 1000 * 10**18);
 		
 		// Verify token movement
 		assertEq(asset2Token.balanceOf(auctioneer), tokenAmount - depositAmount2, "Auctioneer should have reduced asset2 balance");
@@ -835,6 +840,7 @@ contract IntegrationTest is Deployers {
 		
 		// Verify pool info is updated
 		(
+			,
 			,
 			,
 			uint256 pool2DepositAmountInPoolInfo,
