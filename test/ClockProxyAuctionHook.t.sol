@@ -3,16 +3,19 @@ pragma solidity ^0.8.24;
 
 import { Deployers } from "./utils/Deployers.sol";
 import { console2 } from "forge-std/console2.sol";
-import { ClockProxyAuctionHook } from "../src/ClockProxyAuctionHook.sol";
+import { CPAManagerHook } from "../src/ClockProxyAuctionHook.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { AuctionTypes } from "../src/AuctionTypes.sol";
+import { AuctionId } from "../src/AuctionId.sol";
 
-contract ClockProxyAuctionHookTest is Deployers {
-	ClockProxyAuctionHook public hook;
+contract CPAManagerHookTest is Deployers {
+	CPAManagerHook public hook;
 	address public owner;
 	address public nonOwner;
 	address public poolHook;
@@ -27,8 +30,8 @@ contract ClockProxyAuctionHookTest is Deployers {
 	}
 
 	/// @notice Deploy hook with proper address mining and flag setting
-	function deployHook(IPoolManager _poolManager, address _owner, address _poolHook) internal returns (ClockProxyAuctionHook) {
-		// Set the required hook flags for ClockProxyAuctionHook based on getHookPermissions()
+	function deployHook(IPoolManager _poolManager, address _owner, address _poolHook) internal returns (CPAManagerHook) {
+		// Set the required hook flags for CPAManagerHook based on getHookPermissions()
 		uint160 flags = uint160(
 			Hooks.BEFORE_INITIALIZE_FLAG | 
 			Hooks.BEFORE_SWAP_FLAG
@@ -41,12 +44,12 @@ contract ClockProxyAuctionHookTest is Deployers {
 		(address hookAddress, bytes32 salt) = HookMiner.find(
 			address(this), // deployer (test contract address)
 			flags,
-			type(ClockProxyAuctionHook).creationCode,
+			type(CPAManagerHook).creationCode,
 			constructorArgs
 		);
 
 		// Deploy the hook using CREATE2 with the mined salt
-		ClockProxyAuctionHook deployedHook = new ClockProxyAuctionHook{salt: salt}(_poolManager, _owner, poolHook);
+		CPAManagerHook deployedHook = new CPAManagerHook{salt: salt}(_poolManager, _owner, poolHook);
 		
 		// Verify the hook was deployed to the expected address
 		require(address(deployedHook) == hookAddress, "Hook address mismatch");
@@ -55,10 +58,10 @@ contract ClockProxyAuctionHookTest is Deployers {
 	}
 
 	/// @notice Deploy hook with proper address mining and flag setting, with error handling
-	function deployHookWithFallback(IPoolManager _poolManager, address _owner, address _poolHook) internal returns (ClockProxyAuctionHook) {
+	function deployHookWithFallback(IPoolManager _poolManager, address _owner, address _poolHook) internal returns (CPAManagerHook) {
 		// For tests that expect constructor validation to fail, use simple deployment
 		// since address mining will fail before we get to constructor validation
-		return new ClockProxyAuctionHook(_poolManager, _owner, _poolHook);
+		return new CPAManagerHook(_poolManager, _owner, _poolHook);
 	}
 
 	function test_Constructor_Success() public {
@@ -141,7 +144,7 @@ contract ClockProxyAuctionHookTest is Deployers {
 		uint256 gasUsed = gasBefore - gasleft();
 
 		// Log gas usage for reference
-		console2.log("ClockProxyAuctionHook constructor gas used:", gasUsed);
+		console2.log("CPAManagerHook constructor gas used:", gasUsed);
 		
 		// Gas usage should be reasonable (less than 100M gas for complex hook with address mining)
 		assertLt(gasUsed, 100_000_000);
@@ -149,8 +152,8 @@ contract ClockProxyAuctionHookTest is Deployers {
 
 	function test_Constructor_MultipleInstances() public {
 		// Test creating multiple instances
-		ClockProxyAuctionHook hook1 = deployHook(poolManager, owner, poolHook);
-		ClockProxyAuctionHook hook2 = deployHook(poolManager, nonOwner, poolHook);
+		CPAManagerHook hook1 = deployHook(poolManager, owner, poolHook);
+		CPAManagerHook hook2 = deployHook(poolManager, nonOwner, poolHook);
 
 		// Each instance should have its own state
 		assertEq(hook1.owner(), owner);
