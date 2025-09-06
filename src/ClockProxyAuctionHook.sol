@@ -28,15 +28,18 @@ import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 // import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 /**
- * @title ClockProxyAuctionHook
+ * @title CPAManagerHook
  * @notice Main auction hook implementing clock-proxy auction with commit-reveal privacy
  * @author Clock-Proxy Auction Team
  */
-contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, CPAStorage {
+contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, CPAStorage {
 	using AuctionTypes for *;
 	using PoolIdLibrary for PoolKey;
+	using CurrencySettler for Currency;
 	// using CPASetup for CPAStorage;
 
 	/**
@@ -53,23 +56,16 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	}
 
 	modifier onlyAuctionOwner(AuctionId auctionId) {
+		if (auctionInfo[auctionId].auctionOwner == address(0)) revert IErrorsAndEvents.AuctionNotFound();
 		if (auctionInfo[auctionId].auctionOwner != msg.sender) revert IErrorsAndEvents.Unauthorized();
 		_;
 	}
 
 	/**
-	 * @notice Modifier to ensure auction is not paused
+	 * @notice Modifier to ensure auction is active (not paused or cancelled)
 	 */
-	modifier whenNotPaused(AuctionId auctionId) {
-		if (paused[auctionId]) revert IErrorsAndEvents.AuctionPausedError();
-		_;
-	}
-
-	/**
-	 * @notice Modifier to ensure auction is not cancelled
-	 */
-	modifier whenNotCancelled(AuctionId auctionId) {
-		if (cancelled[auctionId]) revert IErrorsAndEvents.AuctionCancelledError();
+	modifier whenAuctionActive(AuctionId auctionId) {
+		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Active) revert IErrorsAndEvents.AuctionNotActive(auctionId, auctionInfo[auctionId].currentStatus);
 		_;
 	}
 
@@ -128,46 +124,45 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 		return CPASetup.createAuction(this, poolKeys, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
 	}
 
+	function moveDeposit(
+		AuctionId auctionId,
+		PoolKey memory poolKey,
+		uint256 depositAmount,
+		uint256 initialPrice,
+		uint256 priceIncrement
+	) external onlyAuctionOwner(auctionId) {
+		CPASetup.moveDeposit(this, auctionInfo, poolInfo, poolKey, auctionId, depositAmount, initialPrice, priceIncrement);
+		_updatePoolHookStates(auctionId);
+	}
+
 	    /**
 	 * @notice Start the clock phase
 	 */
-	 function startClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
-		// if (!confirmSetupComplete(auctionId)) revert SetupNotComplete(); // fix this eventually
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Clock);
-		_openClockRound(auctionId);
-	}
-
-	/**
-	 * @notice Open a new clock round
-	 */
-	 function _openClockRound(AuctionId auctionId) internal {
-		auctionInfo[auctionId].currentRound++;
-		auctionInfo[auctionId].clockOpen = true;
-		delete auctionInfo[auctionId].roundBids;
-		emit IErrorsAndEvents.ClockRoundOpened(auctionId, auctionInfo[auctionId].currentRound);
+	 function startClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
+		if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo, poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
+		CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
 
 	/**
 	 * @notice End current clock round
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		// TODO: Uncomment when CPAClockPhase is implemented
-		/*
-		clockOpen[auctionId] = false;
+		// Close the current clock round
+		CPAClockPhase.setClockOpen(auctionId, false, auctionInfo);
 		
-		// Process round results
-		CPAClockPhase.processClockRound(this);
+		// Process round results (calculate excess demand and update prices)
+		CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
 		
-		emit IErrorsAndEvents.ClockRoundClosed(currentRound[auctionId], roundBids[auctionId].length);
+		// Emit event for round closure
+		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
 		
 		// Check if clock phase should end
-		if (CPAClockPhase.shouldEndClockPhase(this)) {
+		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo, poolInfo)) {
 			_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
 		} else {
-			_openClockRound(auctionId);
+			// Open next clock round
+			CPAClockPhase.openClockRound(auctionId, auctionInfo);
 		}
-		*/
-		revert("Not yet implemented");
 	}
 
 	/**
@@ -182,18 +177,46 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 		uint256[] calldata demands,
 		bytes32 commitHash,
 		uint256 stakeAmount
-	) external whenNotPaused(auctionId) whenNotCancelled(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		// TODO: Uncomment when CPAClockPhase is implemented
-		// CPAClockPhase.submitBid(this, demands, commitHash, stakeAmount);
-		revert("Not yet implemented");
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+		CPAClockPhase.processBidAsLiquidity(
+			this,
+			auctionId,
+			demands,
+			commitHash,
+			stakeAmount,
+			auctionInfo,
+			bidderStake,
+			bidderBidPoints,
+			poolInfo,
+			commitProxy
+		);
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
+
+
+	/**
+	 * @notice Set current price for a pool
+	 * @param poolId The pool ID
+	 * @param price The price in numeraire units
+	 */
+	function setPoolPrice(PoolId poolId, uint256 price) external onlyOwner {
+		poolInfo[poolId].currentPrice = price;
+	}
+
+	/**
+	 * @notice Commit to a bidder (proxy function)
+	 * @param auctionId The auction ID
+	 * @param commitHash The commit hash
+	 */
+	function commitToBidder(AuctionId auctionId, bytes32 commitHash) external {
+		commitProxy[auctionId][commitHash] = msg.sender;
+	}
 
 	/**
 	 * @notice Dropout from auction with penalty
 	 * probably need to rewrite this to accept WHO is dropping out
 	 */
-	function dropout(AuctionId auctionId) external whenNotPaused(auctionId) whenNotCancelled(auctionId) {
+	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) {
 		// TODO: Uncomment when CPAClockPhase is implemented
 		// CPAClockPhase.dropout(this);
 		revert("Not yet implemented");
@@ -209,7 +232,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 		AuctionId auctionId,
 		bytes32 commitHash,
 		AuctionTypes.Bundle calldata bundleData
-	) external whenNotPaused(auctionId) whenNotCancelled(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
 		// TODO: Uncomment when CPAProxyPhase is implemented
 		// CPAProxyPhase.submitBundle(this, commitHash, bundleData);
 		revert("Not yet implemented");
@@ -230,7 +253,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	function submitAllocation(
 		AuctionId auctionId,
 		AuctionTypes.Allocation calldata allocationData
-	) external whenNotPaused(auctionId) whenNotCancelled(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
 		// TODO: Uncomment when CPAAllocationPhase is implemented
 		// CPAAllocationPhase.submitAllocation(this, allocationData);
 		revert("Not yet implemented");
@@ -286,7 +309,7 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 		bytes32 saltA,
 		bytes32 saltB,
 		uint256 finalPurchaseAmount
-	) external whenNotPaused(auctionId) whenNotCancelled(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Reveal) {
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Reveal) {
 		// TODO: Uncomment when CPARevealPhase is implemented
 		// CPARevealPhase.reveal(this, bidder, proxy, saltA, saltB, finalPurchaseAmount);
 		revert("Not yet implemented");
@@ -353,6 +376,48 @@ contract ClockProxyAuctionHook is IErrorsAndEvents, CPABaseCustomAccounting, Own
 	 */
 	function _handleDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
 		return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
+	}
+	
+	/**
+	 * @dev Handle bid as liquidity add operation
+	 * @param operationData The encoded operation data containing (int128 amount0, int128 amount1)
+	 * @return returnData The encoded balance deltas
+	 */
+	function _handleBidAsLiquidity(bytes memory operationData) internal override returns (bytes memory returnData) {
+		// Decode the callback data
+		(AuctionTypes.CallbackDataBid memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataBid));
+		address sender = data.sender;
+		address token0 = data.token0;
+		address token1 = data.token1;
+		int128 amount0 = data.amount0;
+		int128 amount1 = data.amount1;
+		
+		// For single-sided numeraire deposits, amount0 should be positive and amount1 should be 0
+		// if (amount0 != 0 || amount1 ==0 || token0 != address(0) || token1 == address(0)) {
+		// 	revert("Invalid bid params");
+		// }
+		
+		// TODO: Get the pool key for ETH<>numeraire pool
+		// For now, we'll use a placeholder - this should be passed in or retrieved from storage
+		// PoolKey memory poolKey = PoolKey({
+		// 	currency0: Currency.wrap(address(0)), // Placeholder - should be numeraire
+		// 	currency1: Currency.wrap(address(0)), // Placeholder - should be ETH
+		// 	fee: 0,
+		// 	tickSpacing: 0,
+		// 	hooks: IHooks(address(this))
+		// });
+		
+		// Transfer numeraire from bidder to pool manager
+		Currency.wrap(token1).settle(poolManager, sender, uint256(int256(amount1)), false);
+		
+		// Mint ERC6909 claims to this hook (bypassing V3 curve)
+		Currency.wrap(token1).take(poolManager, address(this), uint256(int256(amount1)), true);
+		
+		// Return the balance deltas
+		return abi.encode(
+			toBalanceDelta(0, -amount1), // callerDelta
+			BalanceDeltaLibrary.ZERO_DELTA // feesAccrued
+		);
 	}
 
 	/**
