@@ -22,7 +22,7 @@ library CPAClockPhase {
 	 * @param self The contract instance
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
-	 * @param commitHash The commit hash for privacy
+	 * @param partialCommitHash The commit hash for privacy
 	 * @param stakeAmount Additional stake amount
 	 * @param auctionInfo Mapping for auction info
 	 * @param bidderStake Mapping for bidder stakes
@@ -32,7 +32,7 @@ library CPAClockPhase {
 		CPAStorage self,
 		AuctionId auctionId,
 		uint256[] calldata demands,
-		bytes32 commitHash,
+		bytes32 partialCommitHash,
 		uint256 stakeAmount,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
@@ -40,39 +40,47 @@ library CPAClockPhase {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy
 	) internal {
-		if (!auctionInfo[auctionId].clockOpen) revert IErrorsAndEvents.ClockNotOpen();
-		if (!CommitReveal.isValidCommitHash(commitHash)) revert IErrorsAndEvents.InvalidCommitHash();
+		if (auctionInfo[auctionId].clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
+		if (!CommitReveal.isValidCommitHash(partialCommitHash)) revert IErrorsAndEvents.InvalidCommitHash(); // necessary?
+		if (demands.length != auctionInfo[auctionId].poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
 		
 		// Check if commit hash is committed to by a proxy
-		if (commitProxy[auctionId][commitHash] == address(0)) revert IErrorsAndEvents.InvalidCommitHash();
+		// if (commitProxy[auctionId][partialCommitHash] == address(0)) revert IErrorsAndEvents.InvalidCommitHash();
 		
-		// Add stake to bidder
-		bidderStake[auctionId][msg.sender] += stakeAmount;
-		
-		// Set bidder bid points
-		bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender]);
-
-		// Calculate total bid value
+		// Calculate total bid value first
 		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo, poolInfo);
-		if (totalValue > bidderBidPoints[auctionId][msg.sender]) revert IErrorsAndEvents.InsufficientBidPoints();
-
-		// TODO: Replace direct transfer with liquidity callback
-		// Transfer stake from bidder to auction contract via pool manager
-		if (stakeAmount > 0) {
-					// Call liquidity callback to transfer tokens from user to pool manager
-		// and mint ERC6909 claims to hook, bypassing V3 curve
-		AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
-			sender: msg.sender,
-			token0: address(0), // dynamic so we can support other tokens later
-			token1: auctionInfo[auctionId].commonNumeraire,
-			amount0: int128(int256(0)), // ETH
-			amount1: int128(int256(stakeAmount)), // numeraire amount (positive for add)
-			deadline: block.timestamp + 60
-		});
-		bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
-			self.manager().unlock(callbackData);
+		
+		// Check if bidder already has sufficient bid points
+		uint256 currentBidPoints = bidderBidPoints[auctionId][msg.sender];
+		if (totalValue > currentBidPoints) {
+			// Bidder needs additional stake
+			uint256 requiredAdditionalStake = totalValue - currentBidPoints;
+			if (stakeAmount < requiredAdditionalStake) revert IErrorsAndEvents.InsufficientBidPoints();
+			
+			// Add stake to bidder
+			bidderStake[auctionId][msg.sender] += stakeAmount;
+			
+			// Set bidder bid points
+			bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender]);
+			
+			// Transfer stake from bidder to auction contract via pool manager
+			if (stakeAmount > 0) {
+				// Call liquidity callback to transfer tokens from user to pool manager
+				// and mint ERC6909 claims to hook
+				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
+					sender: msg.sender,
+					token0: address(0), // dynamic so we can support other tokens later
+					token1: auctionInfo[auctionId].commonNumeraire,
+					amount0: int128(int256(0)), // ETH
+					amount1: int128(int256(stakeAmount)), // numeraire amount (positive for add)
+					deadline: block.timestamp + 60
+				});
+				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
+				self.manager().unlock(callbackData);
+			}
 		} else {
-			revert IErrorsAndEvents.InvalidStakeAmount();
+			// Bidder already has sufficient bid points, no additional stake needed
+			// Allow zero stake amount for this case
 		}
 		// would be interesting to eventually have "deposits" for bidders who use the system often
 		// so that they don't have to transfer the common numeraire every time they bid.
@@ -83,7 +91,7 @@ library CPAClockPhase {
 		// Record the bid
 		AuctionTypes.Bid memory bid = AuctionTypes.Bid({
 			bidder: msg.sender,
-			commitHash: commitHash,
+			commitHash: partialCommitHash,
 			stakeAmount: stakeAmount,
 			itemIds: new uint256[](0), // TODO: Add item IDs
 			quantities: demands,
@@ -93,7 +101,9 @@ library CPAClockPhase {
 		
 		auctionInfo[auctionId].roundBids.push(bid);
 		
-		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, commitHash, stakeAmount, auctionInfo[auctionId].currentRound);
+		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, partialCommitHash, stakeAmount, auctionInfo[auctionId].currentRound);
+		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
+		// would be useful if there are participant-limited auctions where more people want in than actually got in.
 	}
 
 	function computeBidPoints(uint256 stakeAmount) internal pure returns (uint256 bidPoints) {
@@ -172,6 +182,9 @@ library CPAClockPhase {
 				pool.currentPrice += pool.priceIncrement;
 			}
 		}
+		
+		// Clear round bids after processing
+		delete auctionInfo[auctionId].roundBids;
 	}
 
 	/**
@@ -186,8 +199,9 @@ library CPAClockPhase {
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
 	) internal view returns (bool shouldEnd) {
-		// create the pools here
-		return true;
+		// For now, clock phase does not end automatically
+		// It must be manually ended by the auctioneer
+		return false;
 	}
 
 	/**
@@ -256,7 +270,7 @@ library CPAClockPhase {
 	 */
 	function setClockOpen(
 		AuctionId auctionId, 
-		bool _clockOpen,
+		uint256 _clockOpen,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
 	) internal {
 		auctionInfo[auctionId].clockOpen = _clockOpen;
@@ -383,43 +397,28 @@ library CPAClockPhase {
 		// Cache auction info to reduce storage reads
 		AuctionTypes.AuctionInfo storage info = auctionInfo[auctionId];
 		
-		// // 1. Validate auction exists
-		// if (info.auctionOwner == address(0)) {
-		// 	revert IErrorsAndEvents.AuctionNotFound();
-		// }
-		
-		// 2. Validate auction is active (not paused or cancelled)
+		// 1. Validate auction is active (not paused or cancelled)
 		if (info.currentStatus != AuctionTypes.AuctionStatus.Active) {
 			revert IErrorsAndEvents.AuctionNotActive(auctionId, info.currentStatus);
 		}
 		
-		// 3. Validate clock is closed - we close between rounds
-		if (info.clockOpen) {
+		// 2. Validate clock is closed - we close between rounds
+		if (info.clockOpen == 2) {
 			revert IErrorsAndEvents.ClockAlreadyOpen();
 		}
 		
-		// 4. Validate current phase - allow both Setup and Clock
-		AuctionTypes.AuctionPhase currentPhase = info.currentPhase;
-		if (currentPhase != AuctionTypes.AuctionPhase.Setup && 
-			currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, currentPhase);
+		// 3. Validate we're in Clock phase (phase transition handled in startClockRound)
+		if (info.currentPhase != AuctionTypes.AuctionPhase.Clock) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Clock, info.currentPhase);
 		}
 		
-		// 5. Change phase to Clock only if not already there
-		if (currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			info.currentPhase = AuctionTypes.AuctionPhase.Clock;
-		}
-		
-		// 6. Clear previous round data
-		delete info.roundBids;
-		
-		// 7. Set clock open and increment round (unchecked for gas optimization)
-		info.clockOpen = true;
+		// 4. Set clock open and increment round (unchecked for gas optimization)
 		unchecked {
+			info.clockOpen = 2;
 			info.currentRound++;
 		}
 		
-		// 8. Emit event with cached round number
+		// 5. Emit event with cached round number
 		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
 	}
 }

@@ -135,11 +135,16 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		_updatePoolHookStates(auctionId);
 	}
 
-	    /**
+	/**
 	 * @notice Start the clock phase
 	 */
 	 function startClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
-		if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo, poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
+		// Handle first-time transition from Setup to Clock phase
+		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Setup) {
+			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo, poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
+			// Transition to Clock phase
+			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
+		}
 		CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
 
@@ -148,7 +153,7 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round
-		CPAClockPhase.setClockOpen(auctionId, false, auctionInfo);
+		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
 		CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
@@ -156,33 +161,48 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
 		
-		// Check if clock phase should end
-		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo, poolInfo)) {
-			_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
-		} else {
-			// Open next clock round
-			CPAClockPhase.openClockRound(auctionId, auctionInfo);
+		// Note: Clock remains closed after ending a round
+		// The auctioneer must manually call startClockRound to begin the next round
+	}
+
+	/**
+	 * @notice Manually end the clock phase and transition to proxy phase
+	 * @param auctionId The auction ID
+	 */
+	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+		// Close the current clock round if it's still open
+		if (auctionInfo[auctionId].clockOpen == 2) {
+			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+			
+			// Process round results (calculate excess demand and update prices)
+			CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
+			
+			// Emit event for round closure
+			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
 		}
+		
+		// Transition to proxy phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
 	}
 
 	/**
 	 * @notice Submit a bid during clock phase
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
-	 * @param commitHash The commit hash for privacy
+	 * @param partialCommitHash The commit hash for privacy
 	 * @param stakeAmount Additional stake amount
 	 */
 	function submitBid(
 		AuctionId auctionId,
 		uint256[] calldata demands,
-		bytes32 commitHash,
+		bytes32 partialCommitHash,
 		uint256 stakeAmount
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		CPAClockPhase.processBidAsLiquidity(
 			this,
 			auctionId,
 			demands,
-			commitHash,
+			partialCommitHash,
 			stakeAmount,
 			auctionInfo,
 			bidderStake,
@@ -344,9 +364,8 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	 * @param newPhase The new phase
 	 */
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
-		AuctionTypes.AuctionPhase oldPhase = auctionInfo[auctionId].currentPhase;
 		auctionInfo[auctionId].currentPhase = newPhase;
-		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, oldPhase, newPhase);
+		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, newPhase);
 	}
 
 	/**
