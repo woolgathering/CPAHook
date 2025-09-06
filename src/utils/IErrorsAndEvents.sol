@@ -15,7 +15,7 @@ interface IErrorsAndEvents {
 
 	/// @notice Events
 	event AuctionCreated(AuctionId auctionId, address auctionOwner);
-	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase oldPhase, AuctionTypes.AuctionPhase newPhase);
+	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase);
 	event BidSubmitted(AuctionId auctionId, address bidder, bytes32 commitHash, uint256 stakeAmount, uint256 round);
 	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, uint256 bundleId);
 	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 allocationId);
@@ -55,4 +55,5 @@ interface IErrorsAndEvents {
 	error AuctionNotStarted();
 	error AuctionNotEnded();
 	error ClockAlreadyOpen();
+	error InvalidBidsLength();
 }

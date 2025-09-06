@@ -101,7 +101,7 @@ library AuctionTypes {
 		AuctionTypes.AuctionConfig config;
 		AuctionPhase currentPhase;
 		AuctionStatus currentStatus;
-		bool clockOpen;
+		uint256 clockOpen;
 		AuctionTypes.Bid[] roundBids;
 		uint256 currentRound;
 		PoolKey[] poolKeys;         // Array of pool keys for this auction
