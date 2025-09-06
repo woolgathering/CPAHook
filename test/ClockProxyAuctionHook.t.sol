@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { Deployers } from "./utils/Deployers.sol";
 import { console2 } from "forge-std/console2.sol";
-import { CPAManagerHook } from "../src/ClockProxyAuctionHook.sol";
+import { CPAManagerHook } from "../src/CPAManager.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";

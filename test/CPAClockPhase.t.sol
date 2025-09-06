@@ -17,7 +17,7 @@ import { Constants } from "../lib/uniswap-hooks/lib/v4-core/test/utils/Constants
 import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
 
 
-import { CPAManagerHook } from "../src/ClockProxyAuctionHook.sol";
+import { CPAManagerHook } from "../src/CPAManager.sol";
 import { PoolHook } from "../src/PoolHook.sol";
 import { AuctionTypes } from "../src/AuctionTypes.sol";
 import { AuctionId } from "../src/AuctionId.sol";

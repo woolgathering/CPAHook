@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { Test, console2 } from "forge-std/Test.sol";
 import { PoolHook } from "../src/PoolHook.sol";
-import { CPAManagerHook } from "../src/ClockProxyAuctionHook.sol";
+import { CPAManagerHook } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/AuctionTypes.sol";
 import { AuctionId } from "../src/AuctionId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
