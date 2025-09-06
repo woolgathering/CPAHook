@@ -51,7 +51,7 @@ abstract contract CPAStorage {
 
 
 	//// getters
-	function getAuctionInfo(AuctionId auctionId) external view returns (address, address, AuctionTypes.AuctionConfig memory, AuctionTypes.AuctionPhase, AuctionTypes.AuctionStatus, bool, AuctionTypes.Bid[] memory, uint256, PoolKey[] memory) {
+	function getAuctionInfo(AuctionId auctionId) external view returns (address, address, AuctionTypes.AuctionConfig memory, AuctionTypes.AuctionPhase, AuctionTypes.AuctionStatus, uint256, AuctionTypes.Bid[] memory, uint256, PoolKey[] memory) {
     	return (
 			auctionInfo[auctionId].auctionOwner,
 			auctionInfo[auctionId].commonNumeraire,

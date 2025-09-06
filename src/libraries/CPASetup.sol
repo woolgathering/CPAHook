@@ -91,7 +91,7 @@ library CPASetup {
 			config: config,
 			currentPhase: AuctionTypes.AuctionPhase.Setup,
 			currentStatus: AuctionTypes.AuctionStatus.Active,
-			clockOpen: false,
+			clockOpen: 1,
 			roundBids: new AuctionTypes.Bid[](0),
 			currentRound: 0,
 			poolKeys: poolKeys
