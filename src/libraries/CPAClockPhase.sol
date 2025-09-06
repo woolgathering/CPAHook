@@ -6,6 +6,7 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { AuctionTypes } from "../AuctionTypes.sol";
 import { AuctionId } from "../AuctionId.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
@@ -17,7 +18,7 @@ import { CPAStorage } from "../base/CPAStorage.sol";
 library CPAClockPhase {
 
 	/**
-	 * @notice Submit a bid during clock phase
+	 * @notice Process a bid as liquidity during clock phase
 	 * @param self The contract instance
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
@@ -26,9 +27,8 @@ library CPAClockPhase {
 	 * @param auctionInfo Mapping for auction info
 	 * @param bidderStake Mapping for bidder stakes
 	 * @param bidderBidPoints Mapping for bidder bid points
-	 * @param droppedBidders Mapping for dropped bidders
 	 */
-	function submitBid(
+	function processBidAsLiquidity(
 		CPAStorage self,
 		AuctionId auctionId,
 		uint256[] calldata demands,
@@ -37,10 +37,14 @@ library CPAClockPhase {
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
-		mapping(AuctionId => mapping(address => bool)) storage droppedBidders
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy
 	) internal {
 		if (!auctionInfo[auctionId].clockOpen) revert IErrorsAndEvents.ClockNotOpen();
 		if (!CommitReveal.isValidCommitHash(commitHash)) revert IErrorsAndEvents.InvalidCommitHash();
+		
+		// Check if commit hash is committed to by a proxy
+		if (commitProxy[auctionId][commitHash] == address(0)) revert IErrorsAndEvents.InvalidCommitHash();
 		
 		// Add stake to bidder
 		bidderStake[auctionId][msg.sender] += stakeAmount;
@@ -48,19 +52,33 @@ library CPAClockPhase {
 		// Set bidder bid points
 		bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender]);
 
-		// Transfer stake from bidder to auction contract
+		// Calculate total bid value
+		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo, poolInfo);
+		if (totalValue > bidderBidPoints[auctionId][msg.sender]) revert IErrorsAndEvents.InsufficientBidPoints();
+
+		// TODO: Replace direct transfer with liquidity callback
+		// Transfer stake from bidder to auction contract via pool manager
 		if (stakeAmount > 0) {
-			IERC20(auctionInfo[auctionId].commonNumeraire).transferFrom(msg.sender, address(self), stakeAmount); 
+					// Call liquidity callback to transfer tokens from user to pool manager
+		// and mint ERC6909 claims to hook, bypassing V3 curve
+		AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
+			sender: msg.sender,
+			token0: address(0), // dynamic so we can support other tokens later
+			token1: auctionInfo[auctionId].commonNumeraire,
+			amount0: int128(int256(0)), // ETH
+			amount1: int128(int256(stakeAmount)), // numeraire amount (positive for add)
+			deadline: block.timestamp + 60
+		});
+		bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
+			self.manager().unlock(callbackData);
+		} else {
+			revert IErrorsAndEvents.InvalidStakeAmount();
 		}
 		// would be interesting to eventually have "deposits" for bidders who use the system often
 		// so that they don't have to transfer the common numeraire every time they bid.
 		// the deposit could be rehypothecated by the protocol when not being used. During auctions,
 		// this auction contract would make a "claim" against the deposits that are needed for staking.
 		// the complication is that we do not assert a common numeraire across all auction contracts.
-		
-		// Calculate total bid value
-		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo);
-		if (totalValue > bidderBidPoints[auctionId][msg.sender]) revert IErrorsAndEvents.InsufficientBidPoints();
 		
 		// Record the bid
 		AuctionTypes.Bid memory bid = AuctionTypes.Bid({
@@ -131,27 +149,27 @@ library CPAClockPhase {
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
 	) internal {
-		// TODO: Implement clock round processing
-		// This should calculate excess demand for each item
-		// and update pool prices accordingly
-		
-		// Placeholder: basic excess demand calculation
+		// Calculate excess demand for each item and update pool prices accordingly
 		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
 		for (uint256 i = 0; i < pools.length; i++) {
+			PoolId poolId = pools[i];
 			uint256 totalDemand = 0;
+			
+			// Sum up all demand for this item across all bids
 			for (uint256 j = 0; j < auctionInfo[auctionId].roundBids.length; j++) {
 				AuctionTypes.Bid memory bid = auctionInfo[auctionId].roundBids[j];
-				if (bid.itemIds.length > i) {
+				if (bid.quantities.length > i) {
 					totalDemand += bid.quantities[i];
 				}
 			}
 			
-            // if there is excess demand, increase the price
-			AuctionTypes.PoolInfo memory pool = poolInfo[pools[i]];
-			if (totalDemand > pool.depositAmount) {
-				
-			} else {
-				// no excess demand
+			// Calculate excess demand and update price
+			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
+			pool.excessDemand = totalDemand > pool.depositAmount ? totalDemand - pool.depositAmount : 0;
+			
+			// If there is excess demand, increase the price linearly
+			if (pool.excessDemand > 0) {
+				pool.currentPrice += pool.priceIncrement;
 			}
 		}
 	}
@@ -168,13 +186,7 @@ library CPAClockPhase {
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
 	) internal view returns (bool shouldEnd) {
-		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
-		for (uint256 i = 0; i < pools.length; i++) {
-			// TODO: Check excess demand logic
-			// if (poolInfo[pools[i]].excessDemand > 0) {
-			// 	return false;
-			// }
-		}
+		// create the pools here
 		return true;
 	}
 
@@ -188,17 +200,35 @@ library CPAClockPhase {
 	function calculateBidValue(
 		uint256[] calldata demands,
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
 	) internal view returns (uint256 totalValue) {
-		// TODO: Implement bid value calculation
-		// This should calculate the total value based on current prices
-		// and the bidder's demands
+		// Get all pool keys for this auction
+		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
 		
-		// Placeholder: simple multiplication
-		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
-		for (uint256 i = 0; i < demands.length && i < pools.length; i++) {
-			// totalValue += demands[i] * poolInfo[pools[i]].currentPrice;
+		// Calculate inner product: sum(demands[i] * prices[i])
+		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
+			// Get the pool ID and its current price
+			PoolId poolId = poolKeys[i].toId();
+			uint256 price = poolInfo[poolId].currentPrice;
+			
+			// Add to total value: demand * price
+			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the deciamsl of the numeraire
 		}
+	}
+
+	/**
+	 * @notice Update currency prices
+	 * @param currencyAddress The currency address to update
+	 * @param newPrice The new price in numeraire units
+	 * @param currentPrices Mapping for currency prices
+	 */
+	function updateCurrencyPrice(
+		address currencyAddress,
+		uint256 newPrice,
+		mapping(address => uint256) storage currentPrices
+	) internal {
+		currentPrices[currencyAddress] = newPrice;
 	}
 
 	/**
@@ -345,46 +375,51 @@ library CPAClockPhase {
 	 * @notice Open a new clock round - prepares the entire clock phase
 	 * @param auctionId The auction ID
 	 * @param auctionInfo Mapping for auction info
-	 * @param bidderStake Mapping for bidder stakes
-	 * @param bidderBidPoints Mapping for bidder bid points
-	 * @param droppedBidders Mapping for dropped bidders
 	 */
 	function openClockRound(
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
-		mapping(AuctionId => mapping(address => bool)) storage droppedBidders
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
 	) internal {
-		// 1. Validate clock is closed - we close between rounds
-		if (auctionInfo[auctionId].clockOpen) {
+		// Cache auction info to reduce storage reads
+		AuctionTypes.AuctionInfo storage info = auctionInfo[auctionId];
+		
+		// // 1. Validate auction exists
+		// if (info.auctionOwner == address(0)) {
+		// 	revert IErrorsAndEvents.AuctionNotFound();
+		// }
+		
+		// 2. Validate auction is active (not paused or cancelled)
+		if (info.currentStatus != AuctionTypes.AuctionStatus.Active) {
+			revert IErrorsAndEvents.AuctionNotActive(auctionId, info.currentStatus);
+		}
+		
+		// 3. Validate clock is closed - we close between rounds
+		if (info.clockOpen) {
 			revert IErrorsAndEvents.ClockAlreadyOpen();
 		}
 		
-		// 2. Validate current phase - allow both Setup and Clock
-		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup && 
-			auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
+		// 4. Validate current phase - allow both Setup and Clock
+		AuctionTypes.AuctionPhase currentPhase = info.currentPhase;
+		if (currentPhase != AuctionTypes.AuctionPhase.Setup && 
+			currentPhase != AuctionTypes.AuctionPhase.Clock) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, currentPhase);
 		}
 		
-		// 3. Change phase to Clock only if not already there
-		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
+		// 5. Change phase to Clock only if not already there
+		if (currentPhase != AuctionTypes.AuctionPhase.Clock) {
+			info.currentPhase = AuctionTypes.AuctionPhase.Clock;
 		}
 		
-		// 4. Clear previous round data
-		delete auctionInfo[auctionId].roundBids;
+		// 6. Clear previous round data
+		delete info.roundBids;
 		
-		// 5. Bidder data persists across rounds (stakes and bid points remain)
-		// Only round-specific data (bids) gets cleared
+		// 7. Set clock open and increment round (unchecked for gas optimization)
+		info.clockOpen = true;
+		unchecked {
+			info.currentRound++;
+		}
 		
-		// 6. Set clock open
-		auctionInfo[auctionId].clockOpen = true;
-		
-		// 6. Increment round
-		auctionInfo[auctionId].currentRound++;
-		
-		// 7. Emit event
-		emit IErrorsAndEvents.ClockRoundOpened(auctionId, auctionInfo[auctionId].currentRound);
+		// 8. Emit event with cached round number
+		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
 	}
 }
