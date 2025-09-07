@@ -34,7 +34,6 @@ library AuctionTypes {
 	struct Bundle {
 		uint256 bundleId;           // Unique identifier for the bundle
 		uint256 value;              // Value of the bundle to the bidder
-		uint256[] itemIds;          // Array of item IDs in this bundle
 		uint256[] quantities;       // Corresponding quantities for each item
 		uint256 timestamp;          // When bundle was submitted
 	}
