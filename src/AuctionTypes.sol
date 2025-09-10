@@ -32,7 +32,7 @@ library AuctionTypes {
 
 	/// @notice Bundle structure for proxy submissions
 	struct Bundle {
-		uint256 bundleId;           // Unique identifier for the bundle
+		bytes32 bundleId;           // Unique identifier for the bundle
 		uint256 value;              // Value of the bundle to the bidder
 		uint256[] quantities;       // Corresponding quantities for each item
 		uint256 timestamp;          // When bundle was submitted
@@ -40,7 +40,7 @@ library AuctionTypes {
 
 	/// @notice Allocation structure for allocator submissions
 	struct Allocation {
-		uint256 allocationId;       // Unique identifier for the allocation
+		bytes32 allocationId;       // Unique identifier for the allocation
 		address allocator;          // Address of the allocator
 		uint256[] bundleIds;        // Array of selected bundle IDs
 		uint256 totalValue;         // Total value of the allocation
@@ -76,19 +76,19 @@ library AuctionTypes {
 		uint256 dropoutSlashRatio;          // Dropout penalty ratio (basis points)
 		uint256 spendingViolationSlashRatio; // Spending violation penalty (basis points)
 		uint256 maxRounds;                  // Maximum clock rounds
-		uint256 clockPriceIncrement;        // Price increment per round
 		uint256 allocatorStakeRequirement;  // Minimum stake for allocators
 		uint256 proxyStakeRequirement;      // Minimum stake for proxies
-		uint256 maxStakeCap;                // Maximum stake per bidder
-		uint256 revealWindow;               // Time window for reveals
 		uint256 allocationWindow;           // Time window for allocations
+		PoolKey[] poolKeys;                 // Pool keys for the auction
+		uint160[] initialSqrtPricesX96;     // Initial sqrt prices for each pool
+		int24[] priceIncrements;            // Price increments in ticks for each pool
 	}
 
 	/// @notice Pool information structure
 	struct PoolInfo {
 		PoolKey key;                // Pool key
-		uint256 currentPrice;       // Current price in the pool
-		uint256 priceIncrement;     // Price increment per unit of excess demand
+		int24 startingTick;         // Starting tick for the pool
+		int24 priceIncrement;       // Price increment in ticks, added to the current tick at the end of the clock phase if there is excess demand
 		uint256 depositAmount;      // Amount deposited for auction
 		uint256 excessDemand;       // Current excess demand
 		AuctionId auctionId;        // ID of the auction for this pool

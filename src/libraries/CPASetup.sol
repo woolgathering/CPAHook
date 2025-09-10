@@ -13,6 +13,7 @@ import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySet
 import { PoolUtils } from "../utils/PoolUtils.sol";
 import { AuctionTypes } from "../AuctionTypes.sol";
 import { AuctionId, AuctionIdLibrary } from "../AuctionId.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { IClockProxyAuction } from "../interfaces/IClockProxyAuction.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
@@ -25,15 +26,14 @@ library CPASetup {
 	/**
 	 * @notice Create a new auction with the given configuration
 	 * @param self The contract instance
-	 * @param poolKeys Array of pool keys for the auction
-	 * @param config The auction configuration
+	 * @param config The auction configuration (includes pool keys, initial prices, and price increments)
+	 * @param auctionOwner The auction owner
 	 * @param auctionInfo Mapping for auction info
 	 * @param poolToAuctionId Mapping for pool to auction ID
 	 * @param poolInfo Mapping for pool info
 	 */
 	function createAuction(
 		CPAStorage self,
-		PoolKey[] memory poolKeys, 
 		AuctionTypes.AuctionConfig memory config, 
 		address auctionOwner,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
@@ -51,7 +51,7 @@ library CPASetup {
 		// - auction id to common numeraire
 
 		// create the auction id
-		AuctionId auctionId = AuctionIdLibrary.createId(poolKeys);
+		AuctionId auctionId = AuctionIdLibrary.createId(config.poolKeys);
 
 		// ensure all pools share the same numeraire and are controlled by the correct auction hook.
 		// map each pool to the new auctionId and set up core auction state.
@@ -59,26 +59,37 @@ library CPASetup {
 		
 		// Note: commonNumeraire is now stored in auctionInfo, not in a separate mapping
 		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
-			if (address(Currency.unwrap(poolKeys[i].currency0)) == numeraireAddress || address(Currency.unwrap(poolKeys[i].currency1)) == numeraireAddress) {
+		// Validate array lengths match
+		if (config.poolKeys.length != config.initialSqrtPricesX96.length || config.poolKeys.length != config.priceIncrements.length) {
+			revert IErrorsAndEvents.InvalidBidsLength();
+		}
+
+		for (uint256 i = 0; i < config.poolKeys.length; i++) {
+			if (address(Currency.unwrap(config.poolKeys[i].currency0)) == numeraireAddress || address(Currency.unwrap(config.poolKeys[i].currency1)) == numeraireAddress) {
 				// check that the hook in the pool matches the cpaAuctionHookAddr
-				if (address(poolKeys[i].hooks) != self.cpaAuctionHookAddr()) {
+				if (address(config.poolKeys[i].hooks) != self.cpaAuctionHookAddr()) {
 					revert IErrorsAndEvents.InvalidHook();
 				}
 				
-				poolToAuctionId[poolKeys[i].toId()] = auctionId; // set the auction id in poolToAuctionId
+				poolToAuctionId[config.poolKeys[i].toId()] = auctionId; // set the auction id in poolToAuctionId
+				
+				// Convert sqrtPriceX96 to tick
+				int24 startingTick = TickMath.getTickAtSqrtPrice(config.initialSqrtPricesX96[i]);
 				
 				// Create and store PoolInfo for this pool
-				PoolId poolId = poolKeys[i].toId();
+				PoolId poolId = config.poolKeys[i].toId();
 				AuctionTypes.PoolInfo memory poolInfoData = AuctionTypes.PoolInfo({
-					key: poolKeys[i],
-					currentPrice: 0, // Will be set during deposit
-					depositAmount: 0, // Will be set during deposit
+					key: config.poolKeys[i],
+					startingTick: startingTick,
+					priceIncrement: config.priceIncrements[i],
+					depositAmount: 0, // Will be set during moveDeposit
 					excessDemand: 0,
-					priceIncrement: 0, // Will be set during deposit
 					auctionId: auctionId
 				});
 				poolInfo[poolId] = poolInfoData;
+				
+				// Create the pool with initial sqrtPriceX96
+				self.manager().initialize(config.poolKeys[i], config.initialSqrtPricesX96[i]);
 			} else {
 				revert IErrorsAndEvents.MismatchedNumeraires();
 			}
@@ -94,7 +105,7 @@ library CPASetup {
 			clockOpen: 1,
 			roundBids: new AuctionTypes.Bid[](0),
 			currentRound: 0,
-			poolKeys: poolKeys
+			poolKeys: config.poolKeys
 		});
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
@@ -129,25 +140,15 @@ library CPASetup {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey,
 		AuctionId auctionId, 
-		uint256 depositAmount,
-		uint256 initialPrice,
-		uint256 priceIncrement
+		uint256 depositAmount
 	) internal {
 		// confirm that the auction is in the Setup phase
 		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
 			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
 		}
 
-		// AuctionTypes.PoolInfo memory poolInfo = poolInfo[auctionId][poolId];
-		
 		// Update the deposit amount in poolInfo
 		poolInfo[poolKey.toId()].depositAmount = depositAmount;
-		
-		// Set initial price as specified by the auctioneer
-		poolInfo[poolKey.toId()].currentPrice = initialPrice;
-		
-		// Set price increment from auction config
-		poolInfo[poolKey.toId()].priceIncrement = priceIncrement;
 		
 		// Determine which currency is the item (non-numeraire)
 		address numeraireAddress = auctionInfo[auctionId].commonNumeraire;
