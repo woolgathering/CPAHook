@@ -5,117 +5,109 @@
 ### Core Design Philosophy
 The Clock-Proxy Auction system has been redesigned to use two main contracts for better efficiency and reusability:
 
-1. **CPAHook (ClockProxyAuctionHook)**: Single contract that manages multiple auctions
-2. **PoolHook**: Shared hook that all asset pools attach to, controlled by the CPAHook
+1. **CPAManager**: Manager contract that handles auction logic and state management (NO LONGER A HOOK)
+2. **PoolHook**: Shared hook that all asset pools attach to, controlled by the CPAManager
 
-This design eliminates the need to deploy new hooks for each auction, making the system more gas-efficient and easier to manage.
+This design eliminates the need to deploy new hooks for each auction, making the system more gas-efficient and easier to manage. The CPAManager is now a pure manager contract that interfaces with V4 pools through the PoolHook.
 
 ### Architecture Overview
 ```plaintext
-CPAHook (single contract) - manages multiple auctions
+CPAManager (single contract) - manages multiple auctions
     ↓ controls multiple
 PoolHook (single contract) - attached to all asset pools
     ↓ attached to
-Asset Pool 1 (A<>USDC) - blocked during auctions
-Asset Pool 2 (B<>USDC) - blocked during auctions  
-Asset Pool 3 (C<>USDC) - blocked during auctions
+Asset Pool 1 (A<>USDC) - prices stored as sqrtPriceX96, swap/liquidity operations are blocked except for the CPAManager
+Asset Pool 2 (B<>USDC) - prices stored as sqrtPriceX96, swap/liquidity operations are blocked except for the CPAManager
+Asset Pool 3 (C<>USDC) - prices stored as sqrtPriceX96, swap/liquidity operations are blocked except for the CPAManager
 ```
 
-### Initialization Process
-1. **Deploy CPAHook**: Single contract that will manage all auctions
-2. **Deploy PoolHook**: With CPAHook address as constructor argument (allows CPAHook to modify state of the PoolHook)
-3. **Create Asset Pools**: Deploy pools (A<>USDC, B<>USDC, C<>USDC) with PoolHook attached
-4. **Create Auction**: Call CPAHook.createAuction() with pool keys and auction parameters
+### Initialization Process (this only happens once and is ready for all future auctions)
+1. **Deploy CPAManager**: Single contract that will manage all auctions
+2. **Deploy PoolHook**: With CPAManager address as constructor argument (allows CPAManager to modify state of the PoolHook)
+
 
 ### Multi-Auction Support
 - **Auction IDs**: Each auction gets a unique auctionId
-- **Auction Owners**: Each auction has its own owner (not the CPAHook owner)
+- **Auction Owners**: Each auction has its own owner (not the CPAManager owner)
 - **Isolated State**: All auction variables are indexed by auctionId
 - **Owner Controls**: Only the auction owner can start, pause, change phases, etc.
 
 ### PoolHook Control Mechanism
-- **Centralized Control**: CPAHook controls all PoolHooks
-- **State Synchronization**: CPAHook calls setAuctionState() on PoolHooks
-- **Pool Allowance**: CPAHook can enable/disable specific pools via setPoolAllowed()
+- **Centralized Control**: CPAManager controls all PoolHooks
+- **State Synchronization**: CPAManager calls setAuctionState() on PoolHooks
+- **Pool Allowance**: CPAManager can enable/disable specific pools via setPoolAllowed()
 - **Operation Blocking**: PoolHook blocks all operations when auction is active
 
 ### Auction Creation Flow
-1. **Deploy Asset Pools**: Create pools A<>USDC, B<>USDC, C<>USDC with PoolHook
-2. **Create Auction**: Call CPAHook.createAuction(poolKeys, config, owner)
-3. **Setup Phase**: Auction owner deposits assets and configures auction
-4. **Auction Execution**: Standard clock-proxy auction phases proceed
-5. **Settlement**: Auction completes and pools return to normal operation
+1. **Create Auction**: Call CPAManager.createAuction(poolKeys, config, owner)
+2. **Setup Phase**: Auction owner deposits assets and configures auction
+  a. **Deploy Asset Pools**: Create pools A<>USDC, B<>USDC, C<>USDC with PoolHook and initial sqrtPriceX96
+3. **Auction Execution**: Standard clock-proxy auction phases proceed
+4. **Settlement**: Auction completes and pools return to normal operation
 
 ### Key Benefits of New Design
 - **Gas Efficiency**: No need to deploy new hooks for each auction
 - **Reusability**: Single PoolHook serves all asset pools
-- **Scalability**: CPAHook can manage unlimited auctions
+- **Scalability**: CPAManager can manage unlimited auctions
 - **Simplicity**: Clear separation between auction logic and pool control
 - **Flexibility**: Different auction owners can run concurrent auctions
 
-### Delayed Asset Pool Creation Benefits
-- **Eliminates Unnecessary Price Updates**: No need to update pool prices during clock phase
-- **Gas Efficiency**: Don't deploy pools until they're actually needed for settlement
-- **Simpler Logic**: Price discovery happens entirely in auction logic, not in pools
-- **Price Certainty**: Create pools with correct final prices from the start
-- **Cleaner Architecture**: Pools are purely settlement infrastructure, not price discovery tools
+### Price Management in Pools
+- **Native V4 Pricing**: Prices stored as `sqrtPriceX96` directly in pools
+- **Initial Price Setting**: Pools created with initial `sqrtPriceX96` during auction creation
+- **Tick-Based Increments**: Price increments specified in ticks, not numeraire amounts
+- **Doppler-Style Manipulation**: Price increases via swaps with no liquidity when excess demand exists
+- **Price Formula**: `newPrice = priceFromTick(currentTick + tickIncrement)`
 
-## Hook-Native Architecture Design
+### Bidding System Changes
+- **Bid Types**: Support for both exact output and exact input bids
+- **Sign Convention**: Positive values = exact output, negative values = exact input
+- **Multi-Asset Bidding**: Submit demands for multiple assets in single transaction
+- **Stake Calculation**: Automatic stake calculation based on bid type and current prices
+- **Example**: `[8, 0, -3]` = "8 units of asset A, nothing of asset B, 3 numeraire worth of asset C"
 
-### Core Hook-Native Approach
-The Clock-Proxy Auction is designed to be integral to the V4 hook system, not bolted on top. The auction phases map directly to hook behaviors:
+## Manager-Based Architecture Design
 
-- Setup phase: `beforeInitialize` places initial liquidity
-- Clock phase: `beforeAddLiquidity` and `afterAddLiquidity` capture liquidity deposits for bidding
-  - We may need a special addLiquidityAsBid function a la customAccounting in OZ. Research needed.
+### Core Manager-Based Approach
+The Clock-Proxy Auction uses a pure manager contract that interfaces with V4 pools through the PoolHook. The auction phases are managed by the CPAManager:
+
+- Setup phase: Asset pools created with initial sqrtPriceX96
+- Clock phase: Bidding through CPAManager.placeBid() with price discovery
 - Proxy phase: Bundle submission through `submitBundle()` (no hook interaction)
 - Allocation phase: Allocator competition through `submitAllocation()` (no hook interaction)
 - Reveal phase: Identity disclosure and stake management (no hook interaction)
-- Claim phase: `beforeSwap` intercepts claims and processes item transfers
-- Settlement phase: Final liquidity distribution and pool opening
-
-### CPA Token Mechanism
-- ClockProxyAuctionHook's pool trades `numeraire <-> CPA`
-- Fixed supply of CPA tokens in the pool
-- Fees accrue as numeraire liquidity during auction
-- CPA price appreciates with auction success
-- Performance-based fees: Auctioneer/allocator get fixed CPA percentages
-- Auction owner benefits from fee revenue through CPA appreciation
+- Settlement phase: Bidders purchase allocations through asset pool swaps
 
 ### Item Sub-Pool Structure
-- Item sub-pools created between `item<>numeraire` with starting price of 1:1
 - Starting price provides baseline for later price manipulation
-- Final prices set through Doppler-style manipulation at clock phase end
-- Items deposited as LP positions at a price <= final price to ensure sufficient liquidity at the correct price.
+- Final prices set through Doppler-style manipulation at clock round ends. Price at clock phase end is final price.
+- Items deposited as LP position at a price <= final price to ensure sufficient liquidity at the correct price.
 
 ### Liquidity-as-Stake Mechanism
-- Bidders stake through single-sided liquidity deposits in numeraire in the ClockProxyAuctionHook
-- Hook contract owns all deposited liquidity during auction
-- LP token mapping tracks bidder->stake relationship
+- CPAManager contract owns all deposited liquidity during auction
+- LP token mapping tracks bidder->stake relationship (a mapping for now, tokens for future)
 - Stake used for item purchases or penalty application
 - Contract controls liquidity until auction end
 
 ### Bidding Mechanism
-- Option A: Bidders call `poolManager.modifyLiquidity()` with demands encoded in `hookData`
-- Option B: Custom `addLiquidityWithBid()` function with integrated bid processing
-- Hook captures numeraire amount and stores LP token mapping
+- Bidder calls CPAManager.placeBid()
+- CPAManager captures numeraire amount and stores LP token mapping
 - Bid points calculated as 1:1 ratio with deposited numeraire
 - Contract owns deposited liquidity until auction end
 
-### Claim Mechanism
-- Bidders claim through swap on ClockProxyAuctionHook pool
-- Hook intercepts in `beforeSwap` and validates eligibility
-- Hook processes claim using deposited stake
+### Settlement Mechanism
+- Bidders claim through swap on asset pools
+- PoolHook intercepts in `beforeSwap` and validates eligibility
+- PoolHook processes claim using deposited stake first, extra numeraire as required
 - Execute swaps in item pools using stake as payment
-- Stake converted to liquidity in item pools on auctioneer's behalf
-- Helper function provided for insufficient stake calculations
+- Stake converted to liquidity in item pools on auctioneer's behalf (normal Uniswap behavior)
 
-### Hook-Native Benefits
-- Auction lives in V4's lifecycle - Not bolted on top
-- Natural gas efficiency - Hook operations are optimized
+### Manager-Based Benefits
+- Clean separation of concerns - Manager handles logic, Hook handles pool control
+- Natural gas efficiency - Direct pool interactions are optimized
 - Atomic operations - Bids and price updates happen atomically
 - Native integration - Works seamlessly with V4's architecture
-- Performance-aligned fees - Auctioneer/allocator fees scale with auction success
+- Simplified testing - Manager contract is easier to test than hook
 
 ## Overview
 This auction design ensures that:
@@ -132,19 +124,21 @@ This document outlines the implementation plan for converting the clock-proxy au
 
 ### 1. Core Contract Structure
 
-#### Main Auction Contract: `ClockProxyAuctionHook.sol`
-- Extends `BaseHook` from V4 periphery
+#### Main Auction Contract: `CPAManager.sol`
+- **NO LONGER A HOOK** - Pure manager contract
 - Implements the main auction logic and state management for multiple auctions
 - Handles all auction phases and transitions
 - Manages commit-reveal system and proxy registration
 - Controls all PoolHooks during auctions
 - Supports multiple concurrent auctions with isolated state
+- Interfaces with V4 pools through PoolHook
 
 #### Pool Control Contract: `PoolHook.sol`
 - Simple hook that blocks trading/liquidity operations during auctions
-- Controlled by CPAHook via `setAuctionState()` and `setPoolAllowed()`
+- Controlled by CPAManager via `setAuctionState()` and `setPoolAllowed()`
 - Shared across all asset pools
 - Centralized control mechanism for auction state
+- Handles price manipulation via Doppler-style swaps
 
 #### Library Contracts
 - `AuctionTypes.sol` - Structs, enums, and type definitions
@@ -165,17 +159,24 @@ address public commonNumeraire; // Y token shared across all pools
 Allocation[] public allocations; // proposed allocations
 address public winningAllocator;
 PoolKey[] public itemPools; // item pool addresses
-mapping(address => uint256) public prices; // item pool -> price
 bool public poolsOpened; // trading status
+
+// Pool information (updated structure)
+struct PoolInfo {
+    PoolKey key;                // Pool key
+    int24 startingTick;         // Starting tick for the pool
+    int24 priceIncrement;       // Price increment in ticks
+    uint256 depositAmount;      // Amount deposited for auction
+    uint256 excessDemand;       // Current excess demand
+    AuctionId auctionId;        // ID of the auction for this pool
+}
 ```
 
-#### B. Hierarchical Hook System
-- AuctionHook controls multiple PoolHooks
-- Each PoolHook attached to one V4 pool per auction item
+#### B. Hook System
+- CPAManager controls multiple PoolHooks
 - PoolHooks block trading/liquidity during auction except for auction hook
-- AuctionHook manages prices and liquidity across all pools
+- CPAManager manages prices and liquidity across all pools
 - Common numeraire constraint enforced across all pools
-- Item sub-pools start at 1:1 price ratio
 
 #### C. Commit-Reveal System
 - Two-salt unlinkability system as described
@@ -185,43 +186,35 @@ bool public poolsOpened; // trading status
 
 ### 3. Hook Permissions & Integration Points
 
-#### AuctionHook Permissions
-- `beforeInitialize`: Control pool creation and initial liquidity placement
-- `beforeAddLiquidity`: Capture liquidity deposits for stake tracking
-- `afterAddLiquidity`: Track LP token mappings for bidder->stake relationship
-- `beforeSwap`: Intercept claims during claim phase and process item transfers
-
 #### PoolHook Permissions
-- `beforeSwap`: Block all trading when auction active, allow only auction hook
+- `beforeSwap`: Block all trading when auction active, allow only CPAManager
 - `beforeAddLiquidity`: Block liquidity additions when auction active
 - `beforeRemoveLiquidity`: Block liquidity removal when auction active
 
 ### 4. Phase-Specific Implementation
 
 #### Setup Phase
-- Factory deploys AuctionHook and PoolHooks
+- Factory deploys CPAManager and PoolHooks
 - Auction owner (deployer) established with full control
 - Configuration parameter setting
 - Pause functionality enabled for emergency situations
-- **Note**: Asset pools are NOT created yet - they will be created after clock phase with final prices
+- **Asset Pool Creation**: Create V4 asset pools with initial sqrtPriceX96 during auction creation
+- **Initial Price Setting**: Pools initialized with starting prices in tick space
 
 #### Clock Phase
-- Bid submission through liquidity deposits with commit hash validation
-- Hook captures numeraire amount and stores LP token mapping
-- Bid point management and stake tracking (1:1 ratio with numeraire)
-- Price discovery happens in auction logic (no asset pools needed)
+- Bid submission with support for exact output and exact input bids
+- Multi-asset bidding in single transaction
+- Automatic stake calculation based on bid type and current prices
+- Price discovery happens in auction logic using pool prices
 - Dropout handling with penalties
-- At clock phase end: Final prices determined through clock auction mechanics
-
-#### Post-Clock Phase (New)
-- **Asset Pool Creation**: Deploy V4 asset pools with final prices from clock phase
-- **Liquidity Positioning**: Add initial liquidity to asset pools at final prices
-- **Pool Registration**: Register asset pools with auction system
-- **Settlement Preparation**: Ensure pools are ready for claim phase
+- At clock round end: Price increases via Doppler-style swaps if excess demand exists
+- **Price Manipulation**: `newPrice = priceFromTick(currentTick + tickIncrement)`
+- At clock phase end, prices are final
 
 #### Proxy Phase
 - Bundle submission by registered proxies
 - Bundle validation and storage
+- Bundles are given a bundleId for later verification
 - Privacy maintenance
 - No hook interaction during this phase
 
@@ -229,7 +222,10 @@ bool public poolsOpened; // trading status
 - Allocator competition
 - On-chain scoring and selection
 - Winner determination
+- Add full deposit amount of assets to pools at final prices
+- Return any excess assets to auctioneer
 - No hook interaction during this phase
+- Allocators submit bundle allocations using bundleIds instead of actual bundles
 
 #### Reveal Phase
 - Identity disclosure
@@ -237,19 +233,13 @@ bool public poolsOpened; // trading status
 - Financial settlement
 - ERC1155 token distribution
 
-#### Claim Phase
-- Bidders claim through swap on ClockProxyAuctionHook pool
-- Hook intercepts in beforeSwap and validates eligibility
-- Hook processes claim using deposited stake
-- Execute swaps in item pools using stake as payment
-- Stake converted to liquidity in item pools on auctioneer's behalf
-- Helper function provided for insufficient stake calculations
-
 #### Settlement Phase
-- All item pools contain auctioneer-owned liquidity from claim proceeds
-- Unsold items returned to auctioneer or deposited in pools
-- Item pools opened for normal trading
-- Auctioneer receives all purchase proceeds as liquidity in the item pools
+- **Settlement Window**: Configurable window (in blocks) for bidders to purchase allocations
+- **Allocation-Based Purchases**: Bidders can purchase up to their allocated amount of each asset
+- **Stake Usage**: Use deposited stake to purchase assets, transfer additional numeraire if needed
+- **Forfeiture**: Bidders who don't purchase in settlement window forfeit allocation
+- **Return Stake**: Bidders can return leftover stake after settlement window ends
+- **Pool Opening**: Item pools opened for normal trading after settlement
 
 #### Cancellation Phase (Emergency)
 - Owner can cancel auction at any time
@@ -261,28 +251,28 @@ bool public poolsOpened; // trading status
 
 #### Asset Custody Model
 - **PoolHook Custody**: Assets (items to be sold) are custodied by PoolHook
-- **CPAHook Control**: CPAHook has operational control over assets during auctions
+- **CPAManager Control**: CPAManager has operational control over assets during auctions
 - **ERC6909 Claims**: PoolManager mints claims to PoolHook for auctioned assets
-- **Permission Model**: Only CPAHook can request asset transfers from PoolHook
+- **Permission Model**: Only CPAManager can request asset transfers from PoolHook
 
 #### Asset Flow
 1. **Setup**: Assets deposited to PoolManager → Claims minted to PoolHook
-2. **Auction**: PoolHook holds claims, CPAHook controls auction logic
-3. **Settlement**: CPAHook requests transfers via PoolHook.transferToWinner()
+2. **Auction**: PoolHook holds claims, CPAManager controls auction logic
+3. **Settlement**: CPAManager requests transfers via PoolHook.transferToWinner()
 4. **Distribution**: PoolHook validates and executes claim transfers to winners
 
 #### Settlement Process
-- **Winner Claims**: Bidders claim through CPAHook (not directly from PoolHook)
-- **Transfer Request**: CPAHook calls `PoolHook.transferToWinner(winner, amount, auctionId)`
+- **Winner Claims**: Bidders claim through CPAManager (not directly from PoolHook)
+- **Transfer Request**: CPAManager calls `PoolHook.transferToWinner(winner, amount, auctionId)`
 - **Validation**: PoolHook validates:
-  - Request comes from CPAHook
+  - Request comes from CPAManager
   - Auction is in correct phase
   - Winner is legitimate
   - Amounts are correct
 - **Execution**: PoolHook burns its claims and mints new claims to winner
 
 #### Benefits of This Approach
-- **Clean Separation**: PoolHook custodies, CPAHook controls
+- **Clean Separation**: PoolHook custodies, CPAManager controls
 - **V4 Integration**: Natural fit with V4 pool mechanics
 - **Efficient**: No unnecessary asset transfers
 - **Secure**: Clear permission boundaries
@@ -292,7 +282,7 @@ bool public poolsOpened; // trading status
 
 #### `AuctionTypes.sol`
 ```solidity
-enum AuctionPhase { Setup, Clock, Proxy, Allocation, Reveal, Claim, Settlement }
+enum AuctionPhase { Setup, Clock, Proxy, Allocation, Reveal, Settlement }
 struct Bundle { ... }
 struct Allocation { ... }
 struct Bid { ... }
@@ -351,46 +341,54 @@ function selectWinningAllocation(...) pure returns (uint256)
 - [x] Set up project structure and dependencies
 - [x] Create `AuctionTypes.sol` with all structs and enums
 - [x] Implement `PoolHook.sol` - simple pool control hook
-- [x] Create basic `ClockProxyAuctionHook.sol` structure
+- [x] Create basic `CPAManager.sol` structure
 - [x] Set up testing framework
 - [x] Implement multi-auction storage pattern in `CPAStorage.sol`
 
-### Phase 2: Core Architecture (COMPLETED)
-- [x] Implement two-contract architecture (CPAHook + PoolHook)
-- [ ] Add multi-auction support with AuctionId-based mappings
-- [ ] Implement basic state management for multiple auctions
-- [ ] Create PoolHook control mechanism
-- [ ] Set up auction creation and ownership model
+### Phase 2: Core Architecture Refactoring (IN PROGRESS)
+- [ ] Remove hook inheritance from CPAManager
+- [ ] Update CPAManager to be pure manager contract
+- [ ] Implement price management in pools (sqrtPriceX96)
+- [ ] Add tick-based price increments
+- [ ] Update PoolInfo structure with startingTick and priceIncrement
+- [ ] Implement Doppler-style price manipulation
 
-### Phase 3: Auction Management (IN PROGRESS)
+### Phase 3: Enhanced Bidding System (PLANNED)
+- [ ] Implement exact output vs exact input bid types
+- [ ] Add sign convention for bid types
+- [ ] Implement multi-asset bidding in single transaction
+- [ ] Add automatic stake calculation
+- [ ] Update bid processing logic
+
+### Phase 4: Auction Management (PLANNED)
 - [ ] Implement auction creation and setup functions
 - [ ] Add pool registration and validation
 - [ ] Implement auction owner controls
 - [ ] Add auction state management (pause, cancel, phase transitions)
 - [ ] Create auction lifecycle management
 
-### Phase 4: Clock Phase Implementation (PLANNED)
+### Phase 5: Clock Phase Implementation (PLANNED)
 - [ ] Implement clock phase bidding mechanics
 - [ ] Add price adjustment logic across multiple pools
 - [ ] Implement bid point system with multi-auction support
 - [ ] Add dropout functionality with penalties
 - [ ] Create excess demand calculation for multiple items
 
-### Phase 5: Proxy and Bundle System (PLANNED)
+### Phase 6: Proxy and Bundle System (PLANNED)
 - [ ] Implement proxy registration system
 - [ ] Add bundle submission logic
 - [ ] Create bundle validation
 - [ ] Implement privacy maintenance
 - [ ] Add ERC1155 token integration
 
-### Phase 6: Allocation and Scoring (PLANNED)
+### Phase 7: Allocation and Scoring (PLANNED)
 - [ ] Implement `AllocationScoring.sol`
 - [ ] Add allocator competition mechanics
 - [ ] Create on-chain scoring system
 - [ ] Implement winner selection
 - [ ] Add allocation validation
 
-### Phase 7: Reveal and Settlement (PLANNED)
+### Phase 8: Reveal and Settlement (PLANNED)
 - [ ] Implement reveal phase logic
 - [ ] Add spending requirement validation
 - [ ] Create financial settlement system
@@ -398,7 +396,7 @@ function selectWinningAllocation(...) pure returns (uint256)
 - [ ] Add final token distribution
 - [ ] Implement auction cancellation with full refunds
 
-### Phase 8: Integration and Testing (PLANNED)
+### Phase 9: Integration and Testing (PLANNED)
 - [ ] Complete deployment system
 - [ ] Add comprehensive testing suite
 - [ ] Implement gas optimizations
@@ -407,23 +405,47 @@ function selectWinningAllocation(...) pure returns (uint256)
 
 ## Key Design Decisions
 
-### 1. Two-Contract Architecture
-**Decision**: Use CPAHook (single contract) + PoolHook (shared contract)
+### 1. CPAManager as Pure Manager Contract
+**Decision**: CPAManager is no longer a hook, but a pure manager contract
+**Rationale**: 
+- Cleaner separation of concerns
+- Easier to reason about and test
+- No need for hook permissions or callbacks
+- Direct interface with V4 pools through PoolHook
+
+### 2. Price Management in Pools
+**Decision**: Prices stored as sqrtPriceX96 directly in pools, not in manager
+**Rationale**:
+- Native V4 integration
+- More efficient price manipulation
+- Leverages V4's built-in price mechanisms
+- Eliminates redundant price storage
+
+### 3. Two-Contract Architecture
+**Decision**: Use CPAManager (single contract) + PoolHook (shared contract)
 **Rationale**: 
 - Gas efficiency: No need to deploy new hooks for each auction
 - Reusability: Single PoolHook serves all asset pools
-- Scalability: CPAHook can manage unlimited auctions
+- Scalability: CPAManager can manage unlimited auctions
 - Simplicity: Clear separation between auction logic and pool control
 
-### 2. Multi-Auction Support
-**Decision**: Single CPAHook manages multiple concurrent auctions
+### 4. Enhanced Bidding System
+**Decision**: Support both exact output and exact input bids with sign convention
+**Rationale**:
+- More flexible bidding options for users
+- Automatic stake calculation reduces user complexity
+- Multi-asset bidding in single transaction improves UX
+- Sign convention provides clear bid type indication similar to Uniswap V4
+
+### 5. Multi-Auction Support
+**Decision**: Single CPAManager manages multiple concurrent auctions
 **Rationale**:
 - Cost efficiency: One deployment serves all auctions
 - Resource sharing: Common infrastructure across auctions
 - Scalability: Unlimited auctions without additional deployments
 - Isolation: Each auction has its own state and owner
 
-### 3. AuctionId-Based Storage
+### 6. AuctionId-Based Storage
 **Decision**: All auction state indexed by AuctionId
 **Rationale**:
 - Clean separation: Each auction's data is isolated
@@ -431,23 +453,23 @@ function selectWinningAllocation(...) pure returns (uint256)
 - Scalability: No storage conflicts between auctions
 - Maintainability: Clear data organization
 
-### 4. PoolHook Centralization
-**Decision**: Single PoolHook controlled by CPAHook
+### 7. PoolHook Centralization
+**Decision**: Single PoolHook controlled by CPAManager
 **Rationale**:
-- Simplified control: CPAHook manages all pool operations
+- Simplified control: CPAManager manages all pool operations
 - Consistent behavior: All pools follow same blocking rules
 - Gas efficiency: Shared logic across all pools
 - Easy coordination: Centralized state management
 
-### 5. Auction Owner Model
-**Decision**: Each auction has its own owner (not CPAHook owner)
+### 8. Auction Owner Model
+**Decision**: Each auction has its own owner (not CPAManager owner)
 **Rationale**:
 - Decentralized control: Multiple auctioneers can use the system
 - Isolated permissions: Auction owners only control their auctions
 - Reduced centralization: No single point of control
 - Flexibility: Different auctioneers can run concurrent auctions
 
-### 6. Library Separation
+### 9. Library Separation
 **Decision**: Separate complex logic into libraries
 **Rationale**:
 - Gas optimization through code reuse
@@ -455,7 +477,7 @@ function selectWinningAllocation(...) pure returns (uint256)
 - Clear separation of concerns
 - Easier upgrades and modifications
 
-### 5. ERC1155 Integration
+### 10. ERC1155 Integration (planned)
 **Decision**: Use ERC1155 tokens for bidder representation
 **Rationale**:
 - Flexible bundle representation
@@ -463,7 +485,7 @@ function selectWinningAllocation(...) pure returns (uint256)
 - Standard token interface
 - Composability with DeFi protocols
 
-### 6. On-Chain vs. Off-Chain Allocation
+### 11. On-Chain vs. Off-Chain Allocation
 **Decision**: Start with on-chain allocation for POC
 **Rationale**:
 - Simpler implementation
@@ -484,7 +506,7 @@ function selectWinningAllocation(...) pure returns (uint256)
 **Challenge**: Coordinating multiple pools across different auctions
 **Solution**:
 - Single PoolHook with auction-aware blocking
-- CPAHook controls pool states via setAuctionState()
+- CPAManager controls pool states via setAuctionState()
 - Pool-specific allowance via setPoolAllowed()
 
 ### 3. Gas Optimization
@@ -572,6 +594,6 @@ This document will be updated as implementation progresses and new insights are 
 7. Allocator Competition – Multiple allocators submit; best-scoring allocation wins.
 8. Verification Priority – Always verify commit before accepting a bid.
 9. Liquidity-as-Stake – Bidders stake through single-sided liquidity deposits in numeraire.
-10. Hook Control – ClockProxyAuctionHook owns all deposited liquidity during auction.
+10. Manager Control – CPAManager owns all deposited liquidity during auction.
 
 ---
