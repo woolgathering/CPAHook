@@ -65,10 +65,10 @@ abstract contract CPAStorage {
 		);
 	}
 
-	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, uint256, uint256, uint256, uint256, AuctionId) {
+	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, uint256, AuctionId) {
 		return (
 			poolInfo[poolId].key,
-			poolInfo[poolId].currentPrice,
+			poolInfo[poolId].startingTick,
 			poolInfo[poolId].priceIncrement,
 			poolInfo[poolId].depositAmount,
 			poolInfo[poolId].excessDemand,

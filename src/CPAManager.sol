@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { CPABaseCustomAccounting } from "./base/CPABaseCustomAccounting.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -10,20 +9,21 @@ import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { AuctionTypes } from "./AuctionTypes.sol";
 import { AuctionId } from "./AuctionId.sol";
 import { CommitReveal } from "./CommitReveal.sol";
-import { AllocationScoring } from "./AllocationScoring.sol";
+// import { AllocationScoring } from "./AllocationScoring.sol";
 import { PoolHook } from "./PoolHook.sol";
 import { IClockProxyAuction } from "./interfaces/IClockProxyAuction.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol"; 
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
-import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
+// import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 // import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 // import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
@@ -32,15 +32,17 @@ import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 /**
- * @title CPAManagerHook
- * @notice Main auction hook implementing clock-proxy auction with commit-reveal privacy
+ * @title CPAManager
+ * @notice Main auction manager implementing clock-proxy auction with commit-reveal privacy
  * @author Clock-Proxy Auction Team
  */
-contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, CPAStorage {
+contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	using AuctionTypes for *;
 	using PoolIdLibrary for PoolKey;
 	using CurrencySettler for Currency;
 	// using CPASetup for CPAStorage;
+
+	uint256 constant twoPow96 = 2**96;
 
 	/**
 	 * @notice Constructor
@@ -51,13 +53,18 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		IPoolManager _poolManager,
 		address _owner,
 		address _cpaAuctionHookAddr
-	) CPABaseCustomAccounting(_poolManager) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr) {
+	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr) {
 		manager = _poolManager;
 	}
 
 	modifier onlyAuctionOwner(AuctionId auctionId) {
 		if (auctionInfo[auctionId].auctionOwner == address(0)) revert IErrorsAndEvents.AuctionNotFound();
 		if (auctionInfo[auctionId].auctionOwner != msg.sender) revert IErrorsAndEvents.Unauthorized();
+		_;
+	}
+
+	modifier onlyPoolManager() {
+		if (msg.sender != address(manager)) revert IErrorsAndEvents.Unauthorized();
 		_;
 	}
 
@@ -111,27 +118,23 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 
 	/**
 	 * @notice Create a new auction
-	 * @param poolKeys The pool keys for the auction
-	 * @param config The auction configuration
+	 * @param config The auction configuration (includes pool keys, initial prices, and price increments)
 	 * @param auctionOwner The auction owner
 	 * @return The auction ID
 	 */
 	function createAuction(
-		PoolKey[] memory poolKeys, 
 		AuctionTypes.AuctionConfig memory config, 
 		address auctionOwner
 	) external returns (AuctionId) {
-		return CPASetup.createAuction(this, poolKeys, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
+		return CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
 	}
 
 	function moveDeposit(
 		AuctionId auctionId,
 		PoolKey memory poolKey,
-		uint256 depositAmount,
-		uint256 initialPrice,
-		uint256 priceIncrement
+		uint256 depositAmount
 	) external onlyAuctionOwner(auctionId) {
-		CPASetup.moveDeposit(this, auctionInfo, poolInfo, poolKey, auctionId, depositAmount, initialPrice, priceIncrement);
+		CPASetup.moveDeposit(this, auctionInfo, poolInfo, poolKey, auctionId, depositAmount);
 		_updatePoolHookStates(auctionId);
 	}
 
@@ -145,7 +148,7 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
 		}
-		CPAClockPhase.openClockRound(auctionId, auctionInfo);
+		// CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
 
 	/**
@@ -153,10 +156,10 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round
-		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+		// CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
-		CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
+		// CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
 		
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
@@ -172,10 +175,10 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round if it's still open
 		if (auctionInfo[auctionId].clockOpen == 2) {
-			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+			// CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 			
 			// Process round results (calculate excess demand and update prices)
-			CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
+			// CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
 			
 			// Emit event for round closure
 			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
@@ -198,30 +201,23 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		bytes32 partialCommitHash,
 		uint256 stakeAmount
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		CPAClockPhase.processBidAsLiquidity(
-			this,
-			auctionId,
-			demands,
-			partialCommitHash,
-			stakeAmount,
-			auctionInfo,
-			bidderStake,
-			bidderBidPoints,
-			poolInfo,
-			commitProxy
-		);
+		// CPAClockPhase.processBid(
+		// 	this,
+		// 	auctionId,
+		// 	demands,
+		// 	partialCommitHash,
+		// 	stakeAmount,
+		// 	auctionInfo,
+		// 	bidderStake,
+		// 	bidderBidPoints,
+		// 	poolInfo,
+		// 	commitProxy
+		// );
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
 
 
-	/**
-	 * @notice Set current price for a pool
-	 * @param poolId The pool ID
-	 * @param price The price in numeraire units
-	 */
-	function setPoolPrice(PoolId poolId, uint256 price) external onlyOwner {
-		poolInfo[poolId].currentPrice = price;
-	}
+	// Removed setPoolPrice - prices are now managed directly in pools
 
 	/**
 	 * @notice Commit to a bidder (proxy function)
@@ -289,7 +285,7 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		
 		// Get bundles and bidders for allocation scoring
 		AuctionTypes.Bundle[] memory allBundles = CPAProxyPhase.getAllBundles(this);
-		uint256 totalBidders = CPAClockPhase.getTotalBidders(this);
+		// uint256 totalBidders = CPAClockPhase.getTotalBidders(this);
 		
 		// Select winning allocation
 		uint256 winningIndex = AllocationScoring.selectWinningAllocation(
@@ -402,7 +398,7 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	 * @param operationData The encoded operation data containing (int128 amount0, int128 amount1)
 	 * @return returnData The encoded balance deltas
 	 */
-	function _handleBidAsLiquidity(bytes memory operationData) internal override returns (bytes memory returnData) {
+	function _handleBidAsLiquidity(bytes memory operationData) internal returns (bytes memory returnData) {
 		// Decode the callback data
 		(AuctionTypes.CallbackDataBid memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataBid));
 		address sender = data.sender;
@@ -427,10 +423,10 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		// });
 		
 		// Transfer numeraire from bidder to pool manager
-		Currency.wrap(token1).settle(poolManager, sender, uint256(int256(amount1)), false);
+		Currency.wrap(token1).settle(manager, sender, uint256(int256(amount1)), false);
 		
 		// Mint ERC6909 claims to this hook (bypassing V3 curve)
-		Currency.wrap(token1).take(poolManager, address(this), uint256(int256(amount1)), true);
+		Currency.wrap(token1).take(manager, address(this), uint256(int256(amount1)), true);
 		
 		// Return the balance deltas
 		return abi.encode(
@@ -446,7 +442,6 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 	 */
 	function unlockCallback(bytes calldata rawData)
 		external
-		override
 		onlyPoolManager
 		returns (bytes memory returnData)
 	{
@@ -490,120 +485,4 @@ contract CPAManagerHook is IErrorsAndEvents, CPABaseCustomAccounting, Ownable, C
 		// when auction is cancelled or auctioneer fails to uphold their end
 	}
 
-	///////////////////////////////////
-	// HOOK SPECIFIC STUFF
-	///////////////////////////////////
-	function _burn(
-		RemoveLiquidityAsBidParams memory params,
-		BalanceDelta callerDelta,
-		BalanceDelta feesAccrued,
-		uint256 shares
-	) internal override {
-		// TODO: Implement burn
-		// This should burn the liquidity shares and refund the stake
-		// right now we don't do anything.
-	}
-
-	function _mint(
-		AddLiquidityAsBidParams memory params,
-		BalanceDelta callerDelta,
-		BalanceDelta feesAccrued,
-		uint256 shares
-	) internal override {
-		// TODO: Implement mint
-		// This should mint the liquidity shares and refund the stake
-		// right now we don't do anything.
-		// this should eventually mint an ERC721 token to this contract
-		// that represents the bidder's stake.
-	}
-
-	function _getAddLiquidity(uint160 sqrtPriceX96, AddLiquidityAsBidParams memory params)
-		internal
-		override
-		returns (bytes memory modify, uint256 shares) {
-			// TODO: Implement get add liquidity
-			// this should return the encoded params for the add liquidity
-			// and the amount of shares to mint
-			// the encoded params should be the same as the encoded params for the remove liquidity
-			// and the amount of shares to burn
-			// the encoded params should be the same as the encoded params for the remove liquidity
-		}
-	
-	function _getRemoveLiquidity(RemoveLiquidityAsBidParams memory params)
-		internal
-		override
-		returns (bytes memory modify, uint256 shares) {
-			// TODO: Implement get remove liquidity
-			// This should return the modify and shares
-		}
-
-	    /**
-     * @dev Initialize the hook's pool key. The stored key should act immutably so that
-     * it can safely be used across the hook's functions.
-     */
-    function _beforeInitialize(address, PoolKey calldata key, uint160) internal override returns (bytes4) {
-        // This hook doesn't need to be initialized with a specific pool key
-        // It manages auctions that can have multiple pools
-		// right now, initialization is NOT the same thing as a createAuction
-		// maybe in the future but it is cleaner like this for now.
-        return this.beforeInitialize.selector;
-    }
-
-    /**
-     * @dev Revert when liquidity is attempted to be added via the `PoolManager`.
-     */
-    function _beforeAddLiquidity(
-		address sender, 
-		PoolKey calldata poolKey, 
-		ModifyLiquidityParams calldata params, 
-		bytes calldata hookData
-	)
-        internal
-        virtual
-        override
-        returns (bytes4)
-    {
-        if (!allowedPools[poolKey.toId()]) {
-			revert AuctionNotFinished();
-		}
-		return this.beforeAddLiquidity.selector;
-    }
-
-    /**
-     * @dev Revert when liquidity is attempted to be removed via the `PoolManager`.
-     */
-    function _beforeRemoveLiquidity(address, PoolKey calldata poolKey, ModifyLiquidityParams calldata, bytes calldata)
-        internal
-        virtual
-        override
-        returns (bytes4)
-    {
-        if (!allowedPools[poolKey.toId()]) {
-			revert AuctionNotFinished();
-		}
-		return this.beforeRemoveLiquidity.selector;
-    }
-
-	/**
-	 * @notice Returns the hook permissions configuration
-	 * @return permissions The hook permissions configuration
-	 */
-	function getHookPermissions() public pure override returns (Hooks.Permissions memory) {
-		return Hooks.Permissions({
-			beforeInitialize: true,
-			afterInitialize: false,
-			beforeAddLiquidity: false,
-			beforeRemoveLiquidity: false,
-			afterAddLiquidity: false,
-			afterRemoveLiquidity: false,
-			beforeSwap: true,
-			afterSwap: false,
-			beforeDonate: false,
-			afterDonate: false,
-			beforeSwapReturnDelta: false,
-			afterSwapReturnDelta: false,
-			afterAddLiquidityReturnDelta: false,
-			afterRemoveLiquidityReturnDelta: false
-		});
-	}
 }
