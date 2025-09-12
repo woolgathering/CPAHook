@@ -11,10 +11,9 @@ import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC690
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
-
-// import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-// import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-// import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
+import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 import { CPAManager } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/AuctionTypes.sol";
@@ -121,10 +120,67 @@ contract CPAClockPhaseTest is CPATestBase {
     }
 
     function test_StartClockRound_SetupNotComplete() public {
-        // Create a new auction without deposits
-        AuctionTypes.AuctionConfig memory config = createStandardAuctionConfig();
+        // Create fake tokens for a new auction without deposits
+        MockERC20 fakeNumeraire = new MockERC20("Fake Numeraire", "FAKE_NUM", 18);
+        MockERC20 fakeAsset1 = new MockERC20("Fake Asset 1", "FAKE_AST1", 18);
+        MockERC20 fakeAsset2 = new MockERC20("Fake Asset 2", "FAKE_AST2", 18);
+        
+        // Create fake pool keys
+        PoolKey memory fakeAsset1PoolKey = PoolKey({
+            currency0: Currency.wrap(address(fakeAsset1)),
+            currency1: Currency.wrap(address(fakeNumeraire)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(poolHook))
+        });
+        
+        PoolKey memory fakeAsset2PoolKey = PoolKey({
+            currency0: Currency.wrap(address(fakeAsset2)),
+            currency1: Currency.wrap(address(fakeNumeraire)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(poolHook))
+        });
+        
+        // Sort currencies by address
+        (fakeAsset1PoolKey.currency0, fakeAsset1PoolKey.currency1) = fakeAsset1PoolKey.currency0 < fakeAsset1PoolKey.currency1
+            ? (fakeAsset1PoolKey.currency0, fakeAsset1PoolKey.currency1)
+            : (fakeAsset1PoolKey.currency1, fakeAsset1PoolKey.currency0);
+            
+        (fakeAsset2PoolKey.currency0, fakeAsset2PoolKey.currency1) = fakeAsset2PoolKey.currency0 < fakeAsset2PoolKey.currency1
+            ? (fakeAsset2PoolKey.currency0, fakeAsset2PoolKey.currency1)
+            : (fakeAsset2PoolKey.currency1, fakeAsset2PoolKey.currency0);
+        
+        // Create auction config with fake tokens
+        PoolKey[] memory poolKeys = new PoolKey[](2);
+        poolKeys[0] = fakeAsset1PoolKey;
+        poolKeys[1] = fakeAsset2PoolKey;
+        
+        uint160[] memory initialSqrtPricesX96 = new uint160[](2);
+        initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1) * 2^96
+        initialSqrtPricesX96[1] = 112045541949572287496682733568; // sqrt(2) * 2^96
+        
+        int24[] memory priceIncrements = new int24[](2);
+        priceIncrements[0] = 60 * 10; // tickSpacing * 10
+        priceIncrements[1] = 60 * 5;  // tickSpacing * 5
+        
+        AuctionTypes.AuctionConfig memory config = AuctionTypes.AuctionConfig({
+            commonNumeraire: address(fakeNumeraire),
+            minSpendRatio: 1000,
+            dropoutSlashRatio: 1000,
+            spendingViolationSlashRatio: 2000,
+            maxRounds: 100,
+            allocatorStakeRequirement: 10000 * 10**18,
+            proxyStakeRequirement: 1000 * 10**18,
+            allocationWindow: 1800,
+            poolKeys: poolKeys,
+            initialSqrtPricesX96: initialSqrtPricesX96,
+            priceIncrements: priceIncrements
+        });
+        
+        // Create new auction without deposits
         AuctionId newAuctionId = createAuction(config, auctioneer);
-
+        
         // Try to start clock phase without deposits - should revert
         vm.prank(auctioneer);
         vm.expectRevert(IErrorsAndEvents.SetupNotComplete.selector);
@@ -136,9 +192,9 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.prank(auctioneer);
         cpaManager.startClockRound(auctionId);
 
-        // Try to start again - should revert with SetupNotComplete
+        // Try to start again - should revert with ClockAlreadyOpen
         vm.prank(auctioneer);
-        vm.expectRevert(IErrorsAndEvents.SetupNotComplete.selector);
+        vm.expectRevert(IErrorsAndEvents.ClockAlreadyOpen.selector);
         cpaManager.startClockRound(auctionId);
     }
 
