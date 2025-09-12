@@ -80,7 +80,15 @@ contract PoolHook is BaseHook, Ownable {
 		SwapParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4, BeforeSwapDelta, uint24) {
-		if (!allowedPools[key.toId()]) {
+		PoolId poolId = key.toId();
+		
+		// Auction manager can do whatever whenever
+		if (sender == auctionManager) {
+			return (BaseHook.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
+		}
+		
+		// For non-auction manager callers, check if pool operations are allowed
+		if (!allowedPools[poolId]) {
 			revert AuctionOngoing();
 		}
 		
@@ -96,9 +104,15 @@ contract PoolHook is BaseHook, Ownable {
 		ModifyLiquidityParams calldata params,
 		bytes calldata hookData
 	) internal view override returns (bytes4) {
-		if (!allowedPools[key.toId()]) {
-			revert AuctionOngoing();
+		// Auction manager can do whatever whenever
+		if (sender == auctionManager) {
+			return BaseHook.beforeAddLiquidity.selector;
 		}
+		
+		// // For non-auction manager callers, check if pool operations are allowed
+		// if (!allowedPools[key.toId()]) {
+		// 	revert AuctionOngoing();
+		// }
 		
 		return BaseHook.beforeAddLiquidity.selector;
 	}

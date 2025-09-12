@@ -56,4 +56,5 @@ interface IErrorsAndEvents {
 	error AuctionNotEnded();
 	error ClockAlreadyOpen();
 	error InvalidBidsLength();
+	error PoolPriceUpdateFailed();
 }

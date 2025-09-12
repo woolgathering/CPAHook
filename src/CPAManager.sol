@@ -23,7 +23,7 @@ import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol"; 
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
-// import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
+import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 // import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 // import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
@@ -40,6 +40,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	using AuctionTypes for *;
 	using PoolIdLibrary for PoolKey;
 	using CurrencySettler for Currency;
+	using BalanceDeltaLibrary for BalanceDelta;
 	// using CPASetup for CPAStorage;
 
 	uint256 constant twoPow96 = 2**96;
@@ -126,7 +127,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionTypes.AuctionConfig memory config, 
 		address auctionOwner
 	) external returns (AuctionId) {
-		return CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
+		AuctionId auctionId = CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
+		_updatePoolHookStates(auctionId);
+		return auctionId;
 	}
 
 	function moveDeposit(
@@ -147,8 +150,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo, poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
+			_updatePoolHookStates(auctionId);
 		}
-		// CPAClockPhase.openClockRound(auctionId, auctionInfo);
+		CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
 
 	/**
@@ -156,10 +160,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round
-		// CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
-		// CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
+		CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo);
 		
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
@@ -175,10 +179,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round if it's still open
 		if (auctionInfo[auctionId].clockOpen == 2) {
-			// CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 			
 			// Process round results (calculate excess demand and update prices)
-			// CPAClockPhase.processClockRound(auctionId, auctionInfo, poolInfo);
+			CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo);
 			
 			// Emit event for round closure
 			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
@@ -201,18 +205,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		bytes32 partialCommitHash,
 		uint256 stakeAmount
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		// CPAClockPhase.processBid(
-		// 	this,
-		// 	auctionId,
-		// 	demands,
-		// 	partialCommitHash,
-		// 	stakeAmount,
-		// 	auctionInfo,
-		// 	bidderStake,
-		// 	bidderBidPoints,
-		// 	poolInfo,
-		// 	commitProxy
-		// );
+		CPAClockPhase.processBid(
+			this,
+			auctionId,
+			demands,
+			partialCommitHash,
+			stakeAmount,
+			auctionInfo,
+			bidderStake,
+			bidderBidPoints,
+			poolInfo,
+			commitProxy
+		);
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
 
@@ -361,6 +365,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
 		auctionInfo[auctionId].currentPhase = newPhase;
+		_updatePoolHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, newPhase);
 	}
 
@@ -454,9 +459,26 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else if (operationType == 1) {
 			// Deposit transfer (setup)
 			return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
+		} else if (operationType == 2) {
+			// Price update swap
+			return _handlePriceUpdateSwap(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
+	}
+
+	/**
+	 * @notice Handle price update swap in callback
+	 */
+	function _handlePriceUpdateSwap(bytes memory operationData) internal returns (bytes memory) {
+		// Decode the swap parameters
+		(PoolKey memory poolKey, SwapParams memory swapParams) = abi.decode(operationData, (PoolKey, SwapParams)); 
+		
+		// Execute the swap to update the price
+		BalanceDelta delta = manager.swap(poolKey, swapParams, "");
+
+		// Return the delta
+		return abi.encode(delta);
 	}
 
 	/**

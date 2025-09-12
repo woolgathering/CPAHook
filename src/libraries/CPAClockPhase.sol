@@ -241,40 +241,37 @@ library CPAClockPhase {
 		
 		// Calculate new tick based on which currency is the asset
 		int24 newTick;
+		bool zeroForOne;
 		if (assetIsCurrency0) {
 			// Asset is currency0, numeraire is currency1
 			// Price = currency1/currency0, so to increase price, move tick down (subtract)
-			newTick = currentTick - priceIncrement;
+			newTick = currentTick + priceIncrement;
+			// To increase price (move tick down), we need to swap currency0 for currency1
+			// zeroForOne = false means swap currency1 for currency0
+			zeroForOne = false;
 		} else {
 			// Asset is currency1, numeraire is currency0  
 			// Price = currency0/currency1, so to increase price, move tick up (add)
-			newTick = currentTick + priceIncrement;
+			newTick = currentTick - priceIncrement;
+			// To increase price (move tick up), we need to swap currency1 for currency0
+			// zeroForOne = true means swap currency0 for currency1
+			zeroForOne = true;
 		} 
 		
 		// Convert new tick to sqrtPriceX96
-		uint160 newSqrtPriceX96 = TickMath.getTickAtSqrtPrice(newTick);
-		
-		// Perform a swap to move the price to the new tick
-		// For Doppler-style manipulation, we swap a minimal amount to move the price
-		// The swap will fail if there's liquidity, but succeed if there's no liquidity
+		uint160 newSqrtPriceX96 = TickMath.getSqrtPriceAtTick(newTick);
 		
 		// Create swap parameters for minimal swap
 		SwapParams memory swapParams = SwapParams({
-			zeroForOne: newTick > currentTick, // direction of swap
+			zeroForOne: zeroForOne,
 			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: newSqrtPriceX96, // target price
-			hookData: "" // no hook data needed
+			sqrtPriceLimitX96: newSqrtPriceX96 // target price
 		});
 		
-		// Perform the swap to update the price
-		// This will only work if there's no liquidity in the pool
-		try poolManager.swap(poolId, swapParams, "") {
-			// Swap succeeded, price updated
-		} catch {
-			// Swap failed, likely due to liquidity - this is expected in some cases
-			// For now, we'll continue without updating the price
-			// In a full implementation, we might want to handle this differently
-		}
+		// Perform the swap to update the price using callback approach
+		// Encode the operation type (2) and the swap parameters
+		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
+		poolManager.unlock(callbackData);
 	}
 
 	/**
