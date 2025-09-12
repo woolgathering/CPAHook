@@ -145,10 +145,10 @@ contract CPASetupPhaseTest is Deployers {
 		});
 		
 		// Set initial prices and increments for both pools
-		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
-		config.initialSqrtPricesX96[1] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
+		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1) * 2^96 = 1 numeraire per asset
+		config.initialSqrtPricesX96[1] = 112045541949572287496682733568; // sqrt(2) * 2^96 = 2 numeraire per asset
 		config.priceIncrements[0] = 100; // 100 ticks
-		config.priceIncrements[1] = 100; // 100 ticks
+		config.priceIncrements[1] = 300; // 300 ticks
 
 		// Create auction
 		vm.prank(owner);
@@ -225,7 +225,8 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool1Key.fee, poolKeys[0].fee, "Pool1 fee should match");
 		assertEq(pool1Key.tickSpacing, poolKeys[0].tickSpacing, "Pool1 tickSpacing should match");
 		assertEq(address(pool1Key.hooks), address(poolKeys[0].hooks), "Pool1 hooks should match");
-		assertEq(pool1StartingTick, 0, "Pool1 current price should be 0 initially");
+		assertEq(pool1StartingTick, 0, "Pool1 starting tick should be 0 for price = 1");
+		assertEq(pool1PriceIncrement, 100, "Pool1 price increment should be 100 ticks");
 		assertEq(pool1DepositAmount, 0, "Pool1 deposit amount should be 0 initially");
 		assertEq(pool1ExcessDemand, 0, "Pool1 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool1AuctionId) == AuctionId.unwrap(auctionId), "Pool1 should reference the correct auction");
@@ -236,7 +237,8 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool2Key.fee, poolKeys[1].fee, "Pool2 fee should match");
 		assertEq(pool2Key.tickSpacing, poolKeys[1].tickSpacing, "Pool2 tickSpacing should match");
 		assertEq(address(pool2Key.hooks), address(poolKeys[1].hooks), "Pool2 hooks should match");
-		assertEq(pool2StartingTick, 0, "Pool2 current price should be 0 initially");
+		assertEq(pool2StartingTick, 6931, "Pool2 starting tick should be 6931 for price = 2");
+		assertEq(pool2PriceIncrement, 300, "Pool2 price increment should be 300 ticks");
 		assertEq(pool2DepositAmount, 0, "Pool2 deposit amount should be 0 initially");
 		assertEq(pool2ExcessDemand, 0, "Pool2 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool2AuctionId) == AuctionId.unwrap(auctionId), "Pool2 should reference the correct auction");
@@ -331,10 +333,10 @@ contract CPASetupPhaseTest is Deployers {
 		});
 		
 		// Set initial prices and increments for both pools
-		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
-		config.initialSqrtPricesX96[1] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
+		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1) * 2^96 = 1 numeraire per asset
+		config.initialSqrtPricesX96[1] = 112045541949572287496682733568; // sqrt(2) * 2^96 = 2 numeraire per asset
 		config.priceIncrements[0] = 100; // 100 ticks
-		config.priceIncrements[1] = 100; // 100 ticks
+		config.priceIncrements[1] = 300; // 300 ticks
 	
 		// Create auction (auctioneer creates it, not protocol owner)
 		vm.prank(auctioneer);
@@ -409,7 +411,8 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool1Key.fee, poolKeys[0].fee, "Pool1 fee should match");
 		assertEq(pool1Key.tickSpacing, poolKeys[0].tickSpacing, "Pool1 tickSpacing should match");
 		assertEq(address(pool1Key.hooks), address(poolKeys[0].hooks), "Pool1 hooks should match");
-		assertEq(pool1StartingTick, 0, "Pool1 current price should be 0 initially");
+		assertEq(pool1StartingTick, 0, "Pool1 starting tick should be 0 for price = 1");
+		assertEq(pool1PriceIncrement, 100, "Pool1 price increment should be 100 ticks");
 		assertEq(pool1DepositAmount, 0, "Pool1 deposit amount should be 0 initially");
 		assertEq(pool1ExcessDemand, 0, "Pool1 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool1AuctionId) == AuctionId.unwrap(auctionId), "Pool1 should reference the correct auction");
@@ -420,7 +423,8 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool2Key.fee, poolKeys[1].fee, "Pool2 fee should match");
 		assertEq(pool2Key.tickSpacing, poolKeys[1].tickSpacing, "Pool2 tickSpacing should match");
 		assertEq(address(pool2Key.hooks), address(poolKeys[1].hooks), "Pool2 hooks should match");
-		assertEq(pool2StartingTick, 0, "Pool2 current price should be 0 initially");
+		assertEq(pool2StartingTick, 6931, "Pool2 starting tick should be 6931 for price = 2");
+		assertEq(pool2PriceIncrement, 300, "Pool2 price increment should be 300 ticks");
 		assertEq(pool2DepositAmount, 0, "Pool2 deposit amount should be 0 initially");
 		assertEq(pool2ExcessDemand, 0, "Pool2 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool2AuctionId) == AuctionId.unwrap(auctionId), "Pool2 should reference the correct auction");
@@ -512,10 +516,10 @@ contract CPASetupPhaseTest is Deployers {
 		});
 		
 		// Set initial prices and increments for both pools
-		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
-		config.initialSqrtPricesX96[1] = 79228162514264337593543950336; // sqrt(1e18) * 2^96
+		config.initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1) * 2^96 = 1 numeraire per asset
+		config.initialSqrtPricesX96[1] = 112045541949572287496682733568; // sqrt(2) * 2^96 = 2 numeraire per asset
 		config.priceIncrements[0] = 100; // 100 ticks
-		config.priceIncrements[1] = 100; // 100 ticks
+		config.priceIncrements[1] = 300; // 300 ticks
 	
 		// Create auction (auctioneer creates it)
 		vm.prank(auctioneer);
@@ -527,6 +531,7 @@ contract CPASetupPhaseTest is Deployers {
 		// ============ Test Deposit Functionality ============
 		// Now test that the auctioneer can move tokens to the pools via the auction manager
 		
+        
 		// Get pool IDs for the asset pools
 		PoolId pool1Id = poolKeys[0].toId();
 		PoolId pool2Id = poolKeys[1].toId();
