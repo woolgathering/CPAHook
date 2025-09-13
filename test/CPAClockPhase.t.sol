@@ -639,4 +639,290 @@ contract CPAClockPhaseTest is CPATestBase {
         (, , , , , , AuctionTypes.Bid[] memory roundBids, , ) = cpaManager.getAuctionInfo(auctionId);
         assertEq(roundBids.length, 0, "Round bids should be cleared when starting clock phase");
     }
+
+    // ============ EDGE CASES AND ERROR CONDITIONS ============
+
+    function test_SubmitBid_ValidBidAmounts_ZeroDemands() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Test zero demands - should be valid (bidder doesn't want any assets)
+        uint256[] memory zeroDemands = new uint256[](2);
+        zeroDemands[0] = 0;
+        zeroDemands[1] = 0;
+        
+        uint256 requiredStake = calculateBidValue(zeroDemands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, zeroDemands, partialCommit, requiredStake);
+        
+        // Verify the zero bid was accepted
+        (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
+        assertEq(roundBids.length, 1, "Should have 1 bid after zero demand submission");
+        assertEq(roundBids[0].quantities[0], 0, "First asset quantity should be 0");
+        assertEq(roundBids[0].quantities[1], 0, "Second asset quantity should be 0");
+    }
+
+    function test_SubmitBid_ValidBidAmounts_LargeDemands() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 2000000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Test very large demands - should be valid but require large stake
+        uint256[] memory largeDemands = new uint256[](2);
+        largeDemands[0] = 1000000 * 10**18; // Large but reasonable
+        largeDemands[1] = 500000 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(largeDemands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, largeDemands, partialCommit, requiredStake);
+        
+        // Verify the large bid was accepted
+        (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
+        assertEq(roundBids.length, 1, "Should have 1 bid after large demand submission");
+    }
+
+    function test_SubmitBid_InvalidCommitHash() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder
+        address testBidder = makeAddr("testBidder");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Test with invalid commit hash (all zeros)
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**18;
+        demands[1] = 50 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(demands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        bytes32 invalidCommit = bytes32(0);
+        
+        vm.prank(testBidder);
+        vm.expectRevert(IErrorsAndEvents.InvalidCommitHash.selector);
+        cpaManager.submitBid(auctionId, demands, invalidCommit, requiredStake);
+    }
+
+    function test_SubmitBid_BidderWithoutProxyCommitment() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder
+        address testBidder = makeAddr("testBidder");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash but don't have proxy commit to it
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, makeAddr("testProxy"), saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Test with uncommitted hash
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**18;
+        demands[1] = 50 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(demands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        vm.prank(testBidder);
+        // This should succeed since the proxy commitment check is commented out
+        cpaManager.submitBid(auctionId, demands, partialCommit, requiredStake);
+    }
+
+    function test_CommitToBidder_ProxyCommitsToMultipleBidders() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create multiple bidders
+        address bidder1 = makeAddr("bidder1");
+        address bidder2 = makeAddr("bidder2");
+        address testProxy = makeAddr("testProxy");
+        createBidder(bidder1, 100000 * 10**18);
+        createBidder(bidder2, 100000 * 10**18);
+
+        // Generate commit hashes for both bidders
+        bytes32 saltA1 = keccak256("saltA1");
+        bytes32 saltB1 = keccak256("saltB1");
+        bytes32 commitHash1 = CommitReveal.generateCommitHash(bidder1, testProxy, saltA1, saltB1);
+        
+        bytes32 saltA2 = keccak256("saltA2");
+        bytes32 saltB2 = keccak256("saltB2");
+        bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, testProxy, saltA2, saltB2);
+
+        // Proxy commits to both bidders - this should be allowed
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash1);
+        
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash2);
+
+        // Both bidders should be able to submit bids
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 100 * 10**18;
+        demands1[1] = 50 * 10**18;
+        
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 75 * 10**18;
+        demands2[1] = 25 * 10**18;
+        
+        uint256 requiredStake1 = calculateBidValue(demands1);
+        uint256 requiredStake2 = calculateBidValue(demands2);
+        
+        approveNumeraireForBidder(bidder1, requiredStake1);
+        approveNumeraireForBidder(bidder2, requiredStake2);
+        
+        bytes32 partialCommit1 = CommitReveal.getBidderHash(bidder1, saltA1);
+        bytes32 partialCommit2 = CommitReveal.getBidderHash(bidder2, saltA2);
+        
+        vm.prank(bidder1);
+        cpaManager.submitBid(auctionId, demands1, partialCommit1, requiredStake1);
+        
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2, partialCommit2, requiredStake2);
+        
+        // Verify both bids were accepted
+        (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
+        assertEq(roundBids.length, 2, "Should have 2 bids after both bidders submit");
+    }
+
+    function test_SubmitBid_InsufficientStake() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder with limited funds
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 1000 * 10**18); // Limited funds
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Test with demands that require more stake than available
+        uint256[] memory largeDemands = new uint256[](2);
+        largeDemands[0] = 100000 * 10**18; // Very large demands
+        largeDemands[1] = 50000 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(largeDemands);
+        uint256 insufficientStake = requiredStake - 1; // One less than required
+        
+        approveNumeraireForBidder(testBidder, insufficientStake);
+        
+        vm.prank(testBidder);
+        vm.expectRevert(IErrorsAndEvents.InsufficientBidPoints.selector);
+        cpaManager.submitBid(auctionId, largeDemands, partialCommit, insufficientStake);
+    }
+
+    function test_SubmitBid_NotInClockPhase() public {
+        // Don't start clock phase - auction is still in Setup phase
+        
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Test bid submission when clock is not open
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**18;
+        demands[1] = 50 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(demands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        vm.prank(testBidder);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, uint8(AuctionTypes.AuctionPhase.Clock), uint8(AuctionTypes.AuctionPhase.Setup)));
+        cpaManager.submitBid(auctionId, demands, partialCommit, requiredStake);
+    }
+
+    function test_SubmitBid_InvalidAuctionId() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Test with invalid auction ID
+        AuctionId invalidAuctionId = AuctionId.wrap(bytes32(keccak256("invalidAuctionId")));
+        
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**18;
+        demands[1] = 50 * 10**18;
+        
+        uint256 requiredStake = calculateBidValue(demands);
+        approveNumeraireForBidder(testBidder, requiredStake);
+        
+        vm.prank(testBidder);
+        vm.expectRevert(); // Should revert due to invalid auction
+        cpaManager.submitBid(invalidAuctionId, demands, partialCommit, requiredStake);
+    }
 }

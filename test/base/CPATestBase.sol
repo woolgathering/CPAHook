@@ -184,9 +184,6 @@ abstract contract CPATestBase is Deployers {
         uint160 asset1SqrtPriceX96 = 79228162514264337593543950336;
         uint160 asset2SqrtPriceX96 = 112045541949572287496682733568;
 
-        console.log("asset1SqrtPriceX96", asset1SqrtPriceX96);
-        console.log("asset2SqrtPriceX96", asset2SqrtPriceX96);
-
         PoolKey[] memory poolKeys = new PoolKey[](2);
         poolKeys[0] = asset1PoolKey;
         poolKeys[1] = asset2PoolKey;
