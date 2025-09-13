@@ -217,8 +217,29 @@ contract CPAClockPhaseTest is CPATestBase {
         (, , , , , , , uint256 currentRound, ) = cpaManager.getAuctionInfo(auctionId);
         assertEq(currentRound, 1, "First round should be 1");
 
-        // Note: Subsequent rounds would be opened by a different function
-        // (not startClockRound, which only works from Setup phase)
+        // End first round (no bids required)
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Start second round
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Verify second round
+        (, , , , , , , currentRound, ) = cpaManager.getAuctionInfo(auctionId);
+        assertEq(currentRound, 2, "Second round should be 2");
+
+        // End second round
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Start third round
+        vm.prank(auctioneer);
+        cpaManager.startClockRound(auctionId);
+
+        // Verify third round
+        (, , , , , , , currentRound, ) = cpaManager.getAuctionInfo(auctionId);
+        assertEq(currentRound, 3, "Third round should be 3");
     }
 
     function test_CompleteBidFlow_WithProxyCommit() public {
