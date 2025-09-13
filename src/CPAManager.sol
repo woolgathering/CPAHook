@@ -43,7 +43,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	using BalanceDeltaLibrary for BalanceDelta;
 	// using CPASetup for CPAStorage;
 
+	// ========================================
+	// CONSTANTS AND STATE VARIABLES
+	// ========================================
+
 	uint256 constant twoPow96 = 2**96;
+
+	// ========================================
+	// CONSTRUCTOR
+	// ========================================
 
 	/**
 	 * @notice Constructor
@@ -57,6 +65,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr) {
 		manager = _poolManager;
 	}
+
+	// ========================================
+	// MODIFIERS
+	// ========================================
 
 	modifier onlyAuctionOwner(AuctionId auctionId) {
 		if (auctionInfo[auctionId].auctionOwner == address(0)) revert IErrorsAndEvents.AuctionNotFound();
@@ -84,6 +96,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		if (auctionInfo[auctionId].currentPhase != phase) revert InvalidPhase(phase, auctionInfo[auctionId].currentPhase);
 		_;
 	}
+
+	// ========================================
+	// AUCTION MANAGEMENT FUNCTIONS
+	// ========================================
 
 	function setCpaAuctionHookAddr(address _cpaAuctionHookAddr) external onlyOwner {
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;
@@ -117,6 +133,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
 
+	// ========================================
+	// SETUP PHASE
+	// ========================================
+
 	/**
 	 * @notice Create a new auction
 	 * @param config The auction configuration (includes pool keys, initial prices, and price increments)
@@ -132,6 +152,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		return auctionId;
 	}
 
+	/**
+	 * @notice Move deposit from auction owner to a single pool, giving ERC6909 claims to PoolHook
+	 * @param auctionId The auction ID
+	 * @param poolKey The pool key to deposit to
+	 * @param depositAmount The amount to deposit
+	 */
 	function moveDeposit(
 		AuctionId auctionId,
 		PoolKey memory poolKey,
@@ -141,8 +167,13 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		_updatePoolHookStates(auctionId);
 	}
 
+	// ========================================
+	// CLOCK PHASE
+	// ========================================
+
 	/**
 	 * @notice Start the clock phase
+	 * @param auctionId The auction ID
 	 */
 	 function startClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
 		// Handle first-time transition from Setup to Clock phase
@@ -157,6 +188,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 
 	/**
 	 * @notice End current clock round
+	 * @param auctionId The auction ID
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Close the current clock round
@@ -242,11 +274,20 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		revert("Not yet implemented");
 	}
 
+	// ========================================
+	// PROXY PHASE
+	// ========================================
+
+	// start proxy phase
+
+	// end proxy phase
+
 	/**
 	 * @notice Submit bundle during proxy phase
 	 * @param auctionId The auction ID
 	 * @param commitHash The commit hash
 	 * @param bundleData The bundle data
+	 * @dev This is submitted by a proxy on behalf of a bidder
 	 */
 	function submitBundle(
 		AuctionId auctionId,
@@ -257,6 +298,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// CPAProxyPhase.submitBundle(this, commitHash, bundleData);
 		revert("Not yet implemented");
 	}
+
+	// ========================================
+	// ALLOCATION PHASE
+	// ========================================
 
 	/**
 	 * @notice Start allocation phase
@@ -306,6 +351,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		revert("Not yet implemented");
 	}
 
+	// register as allocator
+
+	// ========================================
+	// REVEAL PHASE (not sure if this is necessary or if it can be incorporated into the settlement phase)
+	// ========================================
+
 	/**
 	 * @notice Start reveal phase
 	 */
@@ -343,20 +394,35 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		_finalizeSettlement(auctionId);
 	}
 
+	// ========================================
+	// SETTLEMENT PHASE	
+	// ========================================
+
+
+	// start settlement phase
+
+	// end settlement phase
+
+	// claim item(s)
+
+	// ========================================
+	// UTILITY FUNCTIONS
+	// ========================================
+
 	/**
 	 * @notice Register a commit hash (called by proxies)
 	 * @param auctionId The auction ID
 	 * @param commitHash The commit hash to register
+	 * @dev This is called by proxies to register a commit hash. THis can only be submitted during the setup and clock phases.
 	 */
 	function registerCommit(AuctionId auctionId, bytes32 commitHash) external {
 		if (commitProxy[auctionId][commitHash] != address(0)) revert InvalidCommitHash();
 		commitProxy[auctionId][commitHash] = msg.sender;
 	}
 
-
-	
-
-	// Internal functions
+	// ========================================
+	// INTERNAL FUNCTIONS
+	// ========================================
 
 	/**
 	 * @notice Change auction phase
@@ -390,6 +456,38 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	}
 
 	/**
+	 * @notice Update pool hook states
+	 * @param auctionId The auction ID
+	 */
+	function _updatePoolHookStates(AuctionId auctionId) internal {
+		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+		for (uint256 i = 0; i < poolKeys.length; i++) {
+			// Get the pool hook address from the pool key
+			// address poolHookAddress = address(poolKeys[i].hooks);
+			
+			// Update the pool hook state
+			PoolHook(cpaAuctionHookAddr).setPoolState(
+				poolKeys[i],
+				auctionInfo[auctionId].currentPhase
+			);
+		}
+	}
+
+	/**
+	 * @notice Refund all stakes
+	 * @param auctionId The auction ID
+	 */
+	function _refundAllStakes(AuctionId auctionId) internal {
+		// TODO: Implement stake refunds
+		// This should iterate through all bidders and refund their stakes
+		// when auction is cancelled or auctioneer fails to uphold their end
+	}
+
+	// ========================================
+	// CALLBACK HANDLERS
+	// ========================================
+
+	/**
 	 * @dev Handle deposit transfer operation (setup)
 	 * @param operationData The encoded operation data
 	 * @return returnData The encoded balance deltas
@@ -412,21 +510,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		int128 amount0 = data.amount0;
 		int128 amount1 = data.amount1;
 		
-		// For single-sided numeraire deposits, amount0 should be positive and amount1 should be 0
-		// if (amount0 != 0 || amount1 ==0 || token0 != address(0) || token1 == address(0)) {
-		// 	revert("Invalid bid params");
-		// }
-		
-		// TODO: Get the pool key for ETH<>numeraire pool
-		// For now, we'll use a placeholder - this should be passed in or retrieved from storage
-		// PoolKey memory poolKey = PoolKey({
-		// 	currency0: Currency.wrap(address(0)), // Placeholder - should be numeraire
-		// 	currency1: Currency.wrap(address(0)), // Placeholder - should be ETH
-		// 	fee: 0,
-		// 	tickSpacing: 0,
-		// 	hooks: IHooks(address(this))
-		// });
-		
 		// Transfer numeraire from bidder to pool manager
 		Currency.wrap(token1).settle(manager, sender, uint256(int256(amount1)), false);
 		
@@ -438,6 +521,20 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			toBalanceDelta(0, -amount1), // callerDelta
 			BalanceDeltaLibrary.ZERO_DELTA // feesAccrued
 		);
+	}
+
+	/**
+	 * @notice Handle price update swap in callback
+	 */
+	function _handlePriceUpdateSwap(bytes memory operationData) internal returns (bytes memory) {
+		// Decode the swap parameters
+		(PoolKey memory poolKey, SwapParams memory swapParams) = abi.decode(operationData, (PoolKey, SwapParams)); 
+		
+		// Execute the swap to update the price
+		BalanceDelta delta = manager.swap(poolKey, swapParams, "");
+
+		// Return the delta
+		return abi.encode(delta);
 	}
 
 	/**
@@ -465,46 +562,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else {
 			revert("Invalid operation type");
 		}
-	}
-
-	/**
-	 * @notice Handle price update swap in callback
-	 */
-	function _handlePriceUpdateSwap(bytes memory operationData) internal returns (bytes memory) {
-		// Decode the swap parameters
-		(PoolKey memory poolKey, SwapParams memory swapParams) = abi.decode(operationData, (PoolKey, SwapParams)); 
-		
-		// Execute the swap to update the price
-		BalanceDelta delta = manager.swap(poolKey, swapParams, "");
-
-		// Return the delta
-		return abi.encode(delta);
-	}
-
-	/**
-	 * @notice Update pool hook states
-	 */
-	function _updatePoolHookStates(AuctionId auctionId) internal {
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
-		for (uint256 i = 0; i < poolKeys.length; i++) {
-			// Get the pool hook address from the pool key
-			// address poolHookAddress = address(poolKeys[i].hooks);
-			
-			// Update the pool hook state
-			PoolHook(cpaAuctionHookAddr).setPoolState(
-				poolKeys[i],
-				auctionInfo[auctionId].currentPhase
-			);
-		}
-	}
-
-	/**
-	 * @notice Refund all stakes
-	 */
-	function _refundAllStakes(AuctionId auctionId) internal {
-		// TODO: Implement stake refunds
-		// This should iterate through all bidders and refund their stakes
-		// when auction is cancelled or auctioneer fails to uphold their end
 	}
 
 }
