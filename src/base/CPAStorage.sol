@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { BundleId } from "../BundleId.sol";
 
 import { AuctionTypes } from "../AuctionTypes.sol";
 import { AuctionId } from "../AuctionId.sol";
@@ -76,6 +77,22 @@ abstract contract CPAStorage {
 		);
 	}
 
+	function getAuctionConfig(AuctionId auctionId) external view returns (address, uint256, uint256, uint256, uint256, uint256, uint256, PoolKey[] memory, uint160[] memory, int24[] memory) {
+		AuctionTypes.AuctionConfig memory config = auctionInfo[auctionId].config;
+		return (
+			config.commonNumeraire,
+			config.minSpendRatio,
+			config.dropoutSlashRatio,
+			config.spendingViolationSlashRatio,
+			config.maxRounds,
+			config.allocatorStakeRequirement,
+			config.proxyStakeRequirement,
+			config.poolKeys,
+			config.initialSqrtPricesX96,
+			config.priceIncrements
+		);
+	}
+
 	///////
 	// SETUP PHASE
 	///////
@@ -88,6 +105,10 @@ abstract contract CPAStorage {
 	 */
 	function _updatePoolDepositAmount(AuctionId auctionId, PoolId poolId, uint256 depositAmount) internal {
 		poolInfo[poolId].depositAmount = depositAmount;
+	}
+
+	function getNumItems(AuctionId auctionId) external view returns (uint256) {
+		return auctionInfo[auctionId].poolKeys.length;
 	}
 
 
@@ -104,33 +125,25 @@ abstract contract CPAStorage {
     /// @notice Bidder bid points mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
 
-	/**
-	 * @notice Get number of bundles for a commit hash
-	 * @param auctionId The auction ID
-	 * @param commitHash The commit hash
-	 * @return Number of bundles
-	 */
-	function getBundlesLength(AuctionId auctionId, bytes32 commitHash) external view returns (uint256) {
-		return bundles[auctionId][commitHash].length;
-	}
-
-	/**
-	 * @notice Add a bundle to the bundles array
-	 * @param auctionId The auction ID
-	 * @param commitHash The commit hash
-	 * @param bundle The bundle to add
-	 */
-	function _addBundle(AuctionId auctionId, bytes32 commitHash, AuctionTypes.Bundle memory bundle) internal {
-		bundles[auctionId][commitHash].push(bundle);
-	}
-	
-
-
     ////////
     // PROXY PHASE
     ////////
-    /// @notice Bundle storage
-	mapping(AuctionId => mapping(bytes32 => AuctionTypes.Bundle[])) public bundles;
+    /// @notice Bundle storage (id -> bundleId -> bundle)
+	mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) public bundles;
+
+	/// @notice Proxy phase start time
+	mapping(AuctionId => uint256) public proxyPhaseStartTime;
+
+	function getBundle(AuctionId auctionId, BundleId bundleId) external view returns (AuctionId, bytes32, BundleId, uint256[] memory, uint256, uint256) {
+		return (
+			auctionId,
+			bundles[auctionId][bundleId].commitHash,
+			bundleId,
+			bundles[auctionId][bundleId].quantities,
+			bundles[auctionId][bundleId].value,
+			bundles[auctionId][bundleId].timestamp
+		);
+	}
 
     ////////
     // ALLOCATION PHASE

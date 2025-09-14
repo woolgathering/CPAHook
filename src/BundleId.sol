@@ -6,10 +6,14 @@ import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 
 type BundleId is bytes32;
 
-using {equals as ==} for BundleId global;
+using {equals as ==, notEquals as !=} for BundleId global;
 
 function equals(BundleId bundleId, BundleId other) pure returns (bool) {
     return BundleId.unwrap(bundleId) == BundleId.unwrap(other);
+}
+
+function notEquals(BundleId bundleId, BundleId other) pure returns (bool) {
+    return BundleId.unwrap(bundleId) != BundleId.unwrap(other);
 }
 
 library BundleIdLibrary {

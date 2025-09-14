@@ -24,7 +24,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
 import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
-// import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
+import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 // import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
@@ -109,7 +109,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Pause the auction
 	 */
 	function pause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
-		auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Paused;
+		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Paused;
 		_updatePoolHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPaused(auctionId, msg.sender);
 	}
@@ -118,7 +118,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Unpause the auction
 	 */
 	function unpause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
-		auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
+		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Active;
 		_updatePoolHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionUnpaused(auctionId, msg.sender);
 	}
@@ -127,7 +127,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Cancel the auction and refund all stakes
 	 */
 	function cancelAuction(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
-		auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Cancelled;
+		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
 		_updatePoolHookStates(auctionId);
 		_refundAllStakes(auctionId);
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
@@ -278,9 +278,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// PROXY PHASE
 	// ========================================
 
-	// start proxy phase
+	// function startProxyPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	// 	CPAProxyPhase.startProxyPhase(this, proxyPhaseStartTime, auctionId);
+	// }
 
-	// end proxy phase
+	function endProxyPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
+		CPAProxyPhase.endProxyPhase(this, auctionId);
+
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
+	}
 
 	/**
 	 * @notice Submit bundle during proxy phase
@@ -294,9 +300,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		bytes32 commitHash,
 		AuctionTypes.Bundle calldata bundleData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
-		// TODO: Uncomment when CPAProxyPhase is implemented
-		// CPAProxyPhase.submitBundle(this, commitHash, bundleData);
-		revert("Not yet implemented");
+		CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData);
 	}
 
 	// ========================================
@@ -357,12 +361,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// REVEAL PHASE (not sure if this is necessary or if it can be incorporated into the settlement phase)
 	// ========================================
 
-	/**
-	 * @notice Start reveal phase
-	 */
-	function startRevealPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Reveal);
-	}
+	// /**
+	//  * @notice Start reveal phase
+	//  */
+	// function startRevealPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+	// 	_changePhase(auctionId, AuctionTypes.AuctionPhase.Reveal);
+	// }
 
 	/**
 	 * @notice Reveal bidder identity
@@ -380,19 +384,19 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		bytes32 saltA,
 		bytes32 saltB,
 		uint256 finalPurchaseAmount
-	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Reveal) {
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		// TODO: Uncomment when CPARevealPhase is implemented
 		// CPARevealPhase.reveal(this, bidder, proxy, saltA, saltB, finalPurchaseAmount);
 		revert("Not yet implemented");
 	}
 
-	/**
-	 * @notice End reveal phase and move to settlement
-	 */
-	function endRevealPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Reveal) {
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
-		_finalizeSettlement(auctionId);
-	}
+	// /**
+	//  * @notice End reveal phase and move to settlement
+	//  */
+	// function endRevealPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Reveal) {
+	// 	_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
+	// 	_finalizeSettlement(auctionId);
+	// }
 
 	// ========================================
 	// SETTLEMENT PHASE	

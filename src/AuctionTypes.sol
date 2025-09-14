@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { AuctionId } from "./AuctionId.sol";
+import { BundleId } from "./BundleId.sol";
 
 /**
  * @title AuctionTypes
@@ -16,11 +17,8 @@ library AuctionTypes {
 		Clock,      // Price discovery phase
 		Proxy,      // Bundle submission phase
 		Allocation, // Allocator competition phase
-		Reveal,     // Identity disclosure phase
 		Settlement, // Final settlement phase
-		Cancelled,   // Auction cancelled by owner
-		Paused,     // Auction paused by owner
-		Finished     // Auction finishedf
+		Finished     // Auction finished
 	}
 
 	/// @notice Auction status
@@ -32,7 +30,8 @@ library AuctionTypes {
 
 	/// @notice Bundle structure for proxy submissions
 	struct Bundle {
-		bytes32 bundleId;           // Unique identifier for the bundle
+		AuctionId auctionId;        // ID of the auction for this bundle
+		bytes32 commitHash;         // Commit hash for privacy
 		uint256 value;              // Value of the bundle to the bidder
 		uint256[] quantities;       // Corresponding quantities for each item
 		uint256 timestamp;          // When bundle was submitted
@@ -42,7 +41,7 @@ library AuctionTypes {
 	struct Allocation {
 		bytes32 allocationId;       // Unique identifier for the allocation
 		address allocator;          // Address of the allocator
-		uint256[] bundleIds;        // Array of selected bundle IDs
+		BundleId[] bundleIds;        // Array of selected bundle IDs
 		uint256 totalValue;         // Total value of the allocation
 		uint256 score;              // Allocation score
 		uint256 timestamp;          // When allocation was submitted
@@ -78,7 +77,11 @@ library AuctionTypes {
 		uint256 maxRounds;                  // Maximum clock rounds
 		uint256 allocatorStakeRequirement;  // Minimum stake for allocators
 		uint256 proxyStakeRequirement;      // Minimum stake for proxies
+		// uint256 proxyPhaseDuration;         // Duration of the proxy phase
 		uint256 allocationWindow;           // Time window for allocations
+		// uint256 allocationPhaseDuration;    // Duration of the allocation phase
+		// uint256 revealPhaseDuration;        // Duration of the reveal phase
+		// uint256 settlementPhaseDuration;     // Duration of the settlement phase
 		PoolKey[] poolKeys;                 // Pool keys for the auction
 		uint160[] initialSqrtPricesX96;     // Initial sqrt prices for each pool
 		int24[] priceIncrements;            // Price increments in ticks for each pool
