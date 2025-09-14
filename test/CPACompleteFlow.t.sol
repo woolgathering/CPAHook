@@ -339,7 +339,6 @@ contract CPACompleteFlowTest is CPATestBase {
             AuctionTypes.Bundle memory bundle1 = AuctionTypes.Bundle({
                 auctionId: auctionId,
                 commitHash: commitHash1,
-                bundleId: BundleIdLibrary.createId(commitHash1, keccak256(abi.encode(quantities1))),
                 value: calculateBidValue(quantities1),
                 quantities: quantities1,
                 timestamp: block.timestamp
@@ -361,7 +360,6 @@ contract CPACompleteFlowTest is CPATestBase {
             AuctionTypes.Bundle memory bundle3 = AuctionTypes.Bundle({
                 auctionId: auctionId,
                 commitHash: commitHash3,
-                bundleId: BundleIdLibrary.createId(commitHash3, keccak256(abi.encode(quantities3))),
                 value: calculateBidValue(quantities3),
                 quantities: quantities3,
                 timestamp: block.timestamp
@@ -383,7 +381,6 @@ contract CPACompleteFlowTest is CPATestBase {
             AuctionTypes.Bundle memory bundle2 = AuctionTypes.Bundle({
                 auctionId: auctionId,
                 commitHash: commitHash2,
-                bundleId: BundleIdLibrary.createId(commitHash2, keccak256(abi.encode(quantities2))),
                 value: calculateBidValue(quantities2),
                 quantities: quantities2,
                 timestamp: block.timestamp
@@ -431,15 +428,8 @@ contract CPACompleteFlowTest is CPATestBase {
         assertEq(bidder3Bundle.quantities[0], 25 * 10**18, "Bidder3 bundle should have correct asset1 quantity");
         assertEq(bidder3Bundle.quantities[1], 15 * 10**18, "Bidder3 bundle should have correct asset2 quantity");
         
-        // Verify bundle IDs are unique
-        for (uint256 i = 0; i < submittedBundles.length; i++) {
-            for (uint256 j = i + 1; j < submittedBundles.length; j++) {
-                assertTrue(
-                    BundleId.unwrap(submittedBundles[i].bundleId) != BundleId.unwrap(submittedBundles[j].bundleId),
-                    "All bundle IDs should be unique"
-                );
-            }
-        }
+        // Note: Bundle IDs are now generated internally by the submitBundle function
+        // and are guaranteed to be unique based on commitHash and quantities hash
         
         // Verify all bundles have valid values
         for (uint256 i = 0; i < submittedBundles.length; i++) {

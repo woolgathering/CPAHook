@@ -78,18 +78,20 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
         });
+        
+        // Generate bundleId for testing
+        BundleId expectedBundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
         
         // Expect the BundleSubmitted event to be emitted
         vm.expectEmit(true, true, true, true);
         emit IErrorsAndEvents.BundleSubmitted(
             auctionId,
             commitHash,
-            bundleData.bundleId,
+            expectedBundleId,
             quantities,
             bundleData.value
         );
@@ -106,10 +108,10 @@ contract CPAProxyPhaseTest is CPATestBase {
             uint256[] memory returnedQuantities, 
             uint256 returnedValue, 
             uint256 returnedTimestamp
-        ) = cpaManager.getBundle(auctionId, bundleData.bundleId);
+        ) = cpaManager.getBundle(auctionId, expectedBundleId);
         assertEq(AuctionId.unwrap(returnedAuctionId), AuctionId.unwrap(auctionId), "Bundle auction ID should match");
         assertEq(returnedCommitHash, commitHash, "Bundle commit hash should match");
-        assertEq(BundleId.unwrap(returnedBundleId), BundleId.unwrap(bundleData.bundleId), "Bundle ID should match");
+        assertEq(BundleId.unwrap(returnedBundleId), BundleId.unwrap(expectedBundleId), "Bundle ID should match");
         assertEq(returnedValue, bundleData.value, "Bundle value should match");
         assertEq(returnedQuantities.length, 2, "Bundle should have 2 quantities");
         assertEq(returnedQuantities[0], quantities[0], "First quantity should match");
@@ -125,7 +127,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -150,7 +151,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -172,7 +172,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -196,7 +195,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: invalidCommitHash,
-            bundleId: BundleIdLibrary.createId(invalidCommitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -227,7 +225,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: proxy2CommitHash, // Using proxy2's commit hash
-            bundleId: BundleIdLibrary.createId(proxy2CommitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -263,7 +260,6 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: bundleId,
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
@@ -295,15 +291,17 @@ contract CPAProxyPhaseTest is CPATestBase {
         AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
             auctionId: auctionId,
             commitHash: commitHash,
-            bundleId: BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities))),
             value: 1000 * 10**18,
             quantities: quantities,
             timestamp: block.timestamp
         });
         
+        // Generate bundleId for testing
+        BundleId expectedBundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
+        
         // Expect BundleSubmitted event
         vm.expectEmit(true, true, true, true);
-        emit IErrorsAndEvents.BundleSubmitted(auctionId, commitHash, bundleData.bundleId, quantities, bundleData.value);
+        emit IErrorsAndEvents.BundleSubmitted(auctionId, commitHash, expectedBundleId, quantities, bundleData.value);
         
         // Submit bundle (proxy commitment already set up in setUp)
         vm.prank(proxy1);
