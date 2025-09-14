@@ -27,7 +27,9 @@ contract CPACompleteFlowTest is CPATestBase {
     address testBidder3;
     
     // Bundle storage for allocation phase
+    // Note: bundleIds[i] corresponds to submittedBundles[i] - allocators will use bundleIds for allocations
     AuctionTypes.Bundle[] public submittedBundles;
+    BundleId[] public bundleIds;
     bytes32 saltA1;
     bytes32 saltB1;
     bytes32 saltA2;
@@ -344,6 +346,10 @@ contract CPACompleteFlowTest is CPATestBase {
                 timestamp: block.timestamp
             });
             
+            // Generate and save bundle ID for allocation phase
+            BundleId bundleId1 = BundleIdLibrary.createId(commitHash1, keccak256(abi.encode(quantities1)));
+            bundleIds.push(bundleId1);
+            
             // Save bundle for allocation phase
             submittedBundles.push(bundle1);
             
@@ -364,6 +370,10 @@ contract CPACompleteFlowTest is CPATestBase {
                 quantities: quantities3,
                 timestamp: block.timestamp
             });
+            
+            // Generate and save bundle ID for allocation phase
+            BundleId bundleId3 = BundleIdLibrary.createId(commitHash3, keccak256(abi.encode(quantities3)));
+            bundleIds.push(bundleId3);
             
             // Save bundle for allocation phase
             submittedBundles.push(bundle3);
@@ -386,6 +396,10 @@ contract CPACompleteFlowTest is CPATestBase {
                 timestamp: block.timestamp
             });
             
+            // Generate and save bundle ID for allocation phase
+            BundleId bundleId2 = BundleIdLibrary.createId(commitHash2, keccak256(abi.encode(quantities2)));
+            bundleIds.push(bundleId2);
+            
             // Save bundle for allocation phase
             submittedBundles.push(bundle2);
             
@@ -406,6 +420,7 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // Verify total bundles submitted
         assertEq(submittedBundles.length, 11, "Should have submitted 11 bundles total (4+3+4)");
+        assertEq(bundleIds.length, 11, "Should have 11 bundle IDs corresponding to submitted bundles");
         
         // Verify bundles were properly stored by checking a few key bundles
         // Check first bundle from bidder1
@@ -441,6 +456,18 @@ contract CPACompleteFlowTest is CPATestBase {
         
         console.log("Proxy phase verification completed successfully");
         console.log("Total bundles submitted:", submittedBundles.length);
+
+        for (uint256 i = 0; i < submittedBundles.length; i++) {
+            console.log("Bundle", i);
+            console.log("bundle ID:", uint256(BundleId.unwrap(bundleIds[i])));
+            console.log("commit hash (hex):", uint256(submittedBundles[i].commitHash));
+            console.log("value:", submittedBundles[i].value);
+            
+            // Log quantities individually since console.log can't handle arrays
+            for (uint256 j = 0; j < submittedBundles[i].quantities.length; j++) {
+                console.log("  quantity[%d]:", j, submittedBundles[i].quantities[j]);
+            }
+        }
 
     }
 }
