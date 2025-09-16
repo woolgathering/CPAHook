@@ -57,8 +57,8 @@ library CPAProxyPhase {
 		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
 		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy,
 		AuctionTypes.Bundle calldata bundleData
-	) internal {
-		BundleId bundleId = BundleIdLibrary.createId(bundleData.commitHash, keccak256(abi.encode(bundleData.quantities)));
+	) internal returns (BundleId bundleId) {
+		bundleId = BundleIdLibrary.createId(bundleData.commitHash, keccak256(abi.encode(bundleData.quantities)));
 
 		// check that the bundle is valid
 		bytes memory err = _isValidBundle(self, msg.sender, commitHash, bundleId, bundles, commitProxy, bundleData);

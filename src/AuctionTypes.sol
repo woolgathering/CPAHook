@@ -39,12 +39,18 @@ library AuctionTypes {
 
 	/// @notice Allocation structure for allocator submissions
 	struct Allocation {
-		bytes32 allocationId;       // Unique identifier for the allocation
+		AuctionId auctionId;        // ID of the auction for this allocation
 		address allocator;          // Address of the allocator
 		BundleId[] bundleIds;        // Array of selected bundle IDs
 		uint256 totalValue;         // Total value of the allocation
 		uint256 score;              // Allocation score
 		uint256 timestamp;          // When allocation was submitted
+	}
+
+	struct TopAllocation {
+		Allocation allocation;
+		uint256 score;
+		uint256 totalValue;
 	}
 
 	/// @notice Bid structure for clock phase
@@ -64,8 +70,6 @@ library AuctionTypes {
 		address proxy;              // Address of the proxy
 		bytes32 saltA;              // First salt for commit hash
 		bytes32 saltB;              // Second salt for commit hash
-		uint256 finalPurchaseAmount; // Final amount bidder will pay
-		uint256 timestamp;          // When reveal was submitted
 	}
 
 	/// @notice Configuration structure for auction parameters
@@ -114,9 +118,17 @@ library AuctionTypes {
 		address sender;
 		address token0;
 		address token1;
-		int128 amount0;  // ETH amount (positive for add)
-		int128 amount1;  // ETH amount (0 for single-sided)
+		int128 amount0;  
+		int128 amount1;  
 		uint256 deadline; // deadline for the operation
+	}
+
+	struct CallbackDataMintPosition {
+		PoolKey poolKey;
+		int24 tickLower;
+		int24 tickUpper;
+		uint256 liquidity;
+		bytes hookData;
 	}
 
 }

@@ -7,6 +7,7 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -107,8 +108,7 @@ abstract contract CPATestBase is Deployers {
         // Set auction manager in pool hook
         poolHook.setAuctionManager(address(cpaManager));
         
-        // Give CPAManager some numeraire tokens for price manipulation swaps
-        numeraireToken.mint(address(cpaManager), 1000000 * 10**18); // 1M numeraire tokens
+        // Note: CPAManager no longer needs numeraire tokens since we call PoolManager directly
         
         vm.stopPrank();
     }

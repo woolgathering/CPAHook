@@ -6,17 +6,14 @@ import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { AuctionTypes } from "./AuctionTypes.sol";
-import { AuctionId } from "./AuctionId.sol";
-import { CommitReveal } from "./CommitReveal.sol";
-// import { AllocationScoring } from "./AllocationScoring.sol";
-import { PoolHook } from "./PoolHook.sol";
 import { IClockProxyAuction } from "./interfaces/IClockProxyAuction.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
@@ -25,16 +22,20 @@ import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
 import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
-// import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
+import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 // import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
+
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
-import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
-import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+import { AuctionTypes } from "./AuctionTypes.sol";
+import { AuctionId } from "./AuctionId.sol";
+import { CommitReveal } from "./CommitReveal.sol";
+import { PoolHook } from "./PoolHook.sol";
+import { BundleId } from "./BundleId.sol";
 
 /**
  * @title CPAManager
  * @notice Main auction manager implementing clock-proxy auction with commit-reveal privacy
- * @author Clock-Proxy Auction Team
+ * @author notthatintodefi.eth
  */
 contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	using AuctionTypes for *;
@@ -299,8 +300,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionId auctionId,
 		bytes32 commitHash,
 		AuctionTypes.Bundle calldata bundleData
-	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
-		CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData);
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
+		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData);
 	}
 
 	// ========================================
@@ -323,9 +324,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionId auctionId,
 		AuctionTypes.Allocation calldata allocationData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized();
 		// TODO: Uncomment when CPAAllocationPhase is implemented
-		// CPAAllocationPhase.submitAllocation(this, allocationData);
-		revert("Not yet implemented");
+		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo, poolInfo, bundles);
+		// revert("Not yet implemented");
 	}
 
 	/**
@@ -352,7 +354,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Reveal);
 		*/
-		revert("Not yet implemented");
+		CPAAllocationPhase.endAllocationPhase(this, auctionId, topAllocation, auctionInfo, poolInfo);
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
 	}
 
 	// register as allocator
@@ -540,6 +543,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// Return the delta
 		return abi.encode(delta);
 	}
+	
+	/**
+	 * @dev Handle mint position after allocation
+	 * @param operationData The encoded operation data
+	 * @return returnData The encoded balance deltas
+	 */
+	function _handleMintPosition(bytes memory operationData) internal returns (bytes memory returnData) {
+		return CPAAllocationPhase.handleMintPosition(this, operationData);
+		// revert("Not yet implemented");
+	}
 
 	/**
 	 * @dev Unified unlock callback to handle multiple operation types
@@ -563,6 +576,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else if (operationType == 2) {
 			// Price update swap
 			return _handlePriceUpdateSwap(operationData);
+		} else if (operationType == 3) {
+			// Mint position after allocation
+			return _handleMintPosition(operationData);
 		} else {
 			revert("Invalid operation type");
 		}

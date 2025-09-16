@@ -50,7 +50,6 @@ abstract contract CPAStorage {
 
 	IPoolManager public manager;
 
-
 	//// getters
 	function getAuctionInfo(AuctionId auctionId) external view returns (address, address, AuctionTypes.AuctionConfig memory, AuctionTypes.AuctionPhase, AuctionTypes.AuctionStatus, uint256, AuctionTypes.Bid[] memory, uint256, PoolKey[] memory) {
     	return (
@@ -148,25 +147,18 @@ abstract contract CPAStorage {
     ////////
     // ALLOCATION PHASE
     ////////
-    /// @notice Allocation storage
-	mapping(AuctionId => AuctionTypes.Allocation[]) public allocations;
+    
+	/// @notice Top allocation storage
+	mapping(AuctionId => AuctionTypes.TopAllocation) public topAllocation;
+	
 
 	/**
-	 * @notice Get number of allocations
+	 * @notice Get top allocation
 	 * @param auctionId The auction ID
-	 * @return Number of allocations
+	 * @return Top allocation
 	 */
-	function getAllocationsLength(AuctionId auctionId) external view returns (uint256) {
-		return allocations[auctionId].length;
-	}
-
-	/**
-	 * @notice Add an allocation to the allocations array
-	 * @param auctionId The auction ID
-	 * @param allocation The allocation to add
-	 */
-	function _addAllocation(AuctionId auctionId, AuctionTypes.Allocation memory allocation) internal {
-		allocations[auctionId].push(allocation);
+	function getTopAllocation(AuctionId auctionId) external view returns (AuctionTypes.TopAllocation memory) {
+		return topAllocation[auctionId];
 	}
 
     ////////
@@ -184,12 +176,6 @@ abstract contract CPAStorage {
 	function _setRevealedMapping(AuctionId auctionId, bytes32 commitHash, address bidder) internal {
 		revealedMappings[auctionId][commitHash] = bidder;
 	}
-
-    /// @notice Final allocation
-	mapping(AuctionId => AuctionTypes.Allocation) public finalAllocation;
-
-    /// @notice Winning allocator
-	mapping(AuctionId => address) public winningAllocator;
 
 	/**
 	 * @notice Constructor

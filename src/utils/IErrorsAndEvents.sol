@@ -5,6 +5,7 @@ import { AuctionTypes } from "../AuctionTypes.sol";
 import { AuctionId } from "../AuctionId.sol";
 import { BundleId } from "../BundleId.sol";
 import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { AllocationId } from "../AllocationId.sol";
 
 /**
  * @title IClockProxyAuction
@@ -19,7 +20,7 @@ interface IErrorsAndEvents {
 	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase);
 	event BidSubmitted(AuctionId auctionId, address bidder, bytes32 commitHash, uint256 stakeAmount, uint256 round);
 	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, BundleId bundleId, uint256[] quantities, uint256 value);
-	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 allocationId);
+	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 score);
 	event RevealProcessed(AuctionId auctionId, address bidder, address proxy, bytes32 commitHash);
 	event AuctionPaused(AuctionId auctionId, address by);
 	event AuctionUnpaused(AuctionId auctionId, address by);
@@ -41,6 +42,8 @@ interface IErrorsAndEvents {
 	error InsufficientBidPoints();
 	error InvalidStakeAmount();
 	error DuplicateBundle();
+	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
+	error InvalidQuantities(AuctionId auctionId, uint256 quantities);
 	error DuplicateAllocation();
 	error InvalidReveal();
 	error Unauthorized();
