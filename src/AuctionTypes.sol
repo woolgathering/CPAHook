@@ -99,6 +99,7 @@ library AuctionTypes {
 		uint256 depositAmount;      // Amount deposited for auction
 		uint256 excessDemand;       // Current excess demand
 		AuctionId auctionId;        // ID of the auction for this pool
+		bytes32 positionId;         // ID of the position for this pool when we deposit liquidity
 	}
 
 	struct AuctionInfo {
@@ -129,6 +130,7 @@ library AuctionTypes {
 		int24 tickUpper;
 		uint256 liquidity;
 		bytes hookData;
+		AuctionId auctionId;
 	}
 
 }

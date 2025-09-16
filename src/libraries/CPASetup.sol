@@ -84,7 +84,8 @@ library CPASetup {
 					priceIncrement: config.priceIncrements[i],
 					depositAmount: 0, // Will be set during moveDeposit
 					excessDemand: 0,
-					auctionId: auctionId
+					auctionId: auctionId,
+					positionId: bytes32(0)
 				});
 				poolInfo[poolId] = poolInfoData;
 				

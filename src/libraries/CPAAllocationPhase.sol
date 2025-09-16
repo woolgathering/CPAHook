@@ -19,11 +19,12 @@ import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-// import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/IERC6909Claims.sol";	
 import { ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+import { Position } from "@uniswap/v4-core/src/libraries/Position.sol";
 
 import { PriceUtils } from "../utils/PriceUtils.sol";
+import { console } from "forge-std/console.sol";
 
 library CPAAllocationPhase {
 	using PriceUtils for IPoolManager;
@@ -201,11 +202,15 @@ library CPAAllocationPhase {
 					tickLower: tickLower,
 					tickUpper: tickUpper,
 					liquidity: liquidity,
-					hookData: ""
+					hookData: "",
+					auctionId: auctionId
 				}))
 			);
 			self.manager().unlock(callbackData);
 
+			// since this is being deposited on behalf of the auctioneer outside of the position manager,
+			// we need to keep track of the position id manually
+			poolInfo[poolKeys[i].toId()].positionId = Position.calculatePositionKey(address(self), tickLower, tickUpper, AuctionId.unwrap(auctionId));
 		}
 
 		// positionManager.multicall(params);
@@ -263,7 +268,7 @@ library CPAAllocationPhase {
 		}
 		
 		// Redeem ERC6909 claims to get actual tokens
-		// IERC6909Claims(self.manager()).redeem(Currency.wrap(assetAddress), pool.depositAmount);
+		// this is ugly and we can avoid doing this by just doing the settling directly
 		
 		// Note: No longer using PositionManager or Permit2 - calling PoolManager directly
 		
@@ -296,24 +301,41 @@ library CPAAllocationPhase {
 		// Determine currency order and calculate parameters
 		bool assetIsCurrency0 = auctionInfo[auctionId].commonNumeraire != address(Currency.unwrap(poolKey.currency0));
 		
+		// Debug output
+		console.log("=== TICK CALCULATION DEBUG ===");
+		console.log("PoolId:", uint256(PoolId.unwrap(poolId)));
+		console.log("Current tick:", tick);
+		console.log("Tick spacing:", poolKey.tickSpacing);
+		console.log("Asset is currency0:", assetIsCurrency0);
+		console.log("Deposit amount:", pool.depositAmount);
+		console.log("Currency0 address:", address(Currency.unwrap(poolKey.currency0)));
+		console.log("Currency1 address:", address(Currency.unwrap(poolKey.currency1)));
+		console.log("Common numeraire:", auctionInfo[auctionId].commonNumeraire);
+		
 		if (assetIsCurrency0) {
 			// Asset is currency0
-			tickLower = _alignComputedTickWithTickSpacing(true, tick, poolKey.tickSpacing);
+			tickLower = _alignComputedTickWithTickSpacing(false, tick, poolKey.tickSpacing);
 			tickUpper = tickLower + poolKey.tickSpacing;
 			liquidity = LiquidityAmounts.getLiquidityForAmount0(
 				TickMath.getSqrtPriceAtTick(tickLower), 
 				TickMath.getSqrtPriceAtTick(tickUpper), 
 				pool.depositAmount
 			);
+			console.log("Asset is currency0 - tickLower:", tickLower);
+			console.log("Asset is currency0 - tickUpper:", tickUpper);
+			console.log("Asset is currency0 - liquidity:", liquidity);
 		} else {
 			// Asset is currency1
-			tickUpper = _alignComputedTickWithTickSpacing(false, tick, poolKey.tickSpacing);
+			tickUpper = _alignComputedTickWithTickSpacing(true, tick, poolKey.tickSpacing);
 			tickLower = tickUpper - poolKey.tickSpacing;
 			liquidity = LiquidityAmounts.getLiquidityForAmount1(
 				TickMath.getSqrtPriceAtTick(tickLower), 
 				TickMath.getSqrtPriceAtTick(tickUpper), 
 				pool.depositAmount
 			);
+			console.log("Asset is currency1 - tickLower:", tickLower);
+			console.log("Asset is currency1 - tickUpper:", tickUpper);
+			console.log("Asset is currency1 - liquidity:", liquidity);
 		}
 	}
 
@@ -330,7 +352,7 @@ library CPAAllocationPhase {
                 tickLower: data.tickLower,
                 tickUpper: data.tickUpper,
                 liquidityDelta: data.liquidity.toInt128(),
-                salt: 0x0
+                salt: AuctionId.unwrap(data.auctionId)
             }),
             data.hookData
         );
