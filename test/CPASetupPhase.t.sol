@@ -205,7 +205,8 @@ contract CPASetupPhaseTest is Deployers {
 			int24 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
 			uint256 pool1ExcessDemand,
-			AuctionId pool1AuctionId
+			AuctionId pool1AuctionId,
+			bytes32 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
 		
 		(
@@ -214,7 +215,8 @@ contract CPASetupPhaseTest is Deployers {
 			int24 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
 			uint256 pool2ExcessDemand,
-			AuctionId pool2AuctionId
+			AuctionId pool2AuctionId,
+			bytes32 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
 		
 		// No main pool verification needed since CPAManager is not a hook
@@ -230,6 +232,7 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool1DepositAmount, 0, "Pool1 deposit amount should be 0 initially");
 		assertEq(pool1ExcessDemand, 0, "Pool1 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool1AuctionId) == AuctionId.unwrap(auctionId), "Pool1 should reference the correct auction");
+		assertEq(pool1PositionId, bytes32(0), "Pool1 position id should be 0 initially");
 		
 		// Verify pool2 info
 		assertEq(Currency.unwrap(pool2Key.currency0), Currency.unwrap(poolKeys[1].currency0), "Pool2 currency0 should match");
@@ -242,6 +245,7 @@ contract CPASetupPhaseTest is Deployers {
 		assertEq(pool2DepositAmount, 0, "Pool2 deposit amount should be 0 initially");
 		assertEq(pool2ExcessDemand, 0, "Pool2 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool2AuctionId) == AuctionId.unwrap(auctionId), "Pool2 should reference the correct auction");
+		assertEq(pool2PositionId, bytes32(0), "Pool2 position id should be 0 initially");
 		
 		// ============ Verify Pool to Auction ID Mapping ============
 		// Check that poolToAuctionId mapping is correct
@@ -393,7 +397,8 @@ contract CPASetupPhaseTest is Deployers {
 			int24 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
 			uint256 pool1ExcessDemand,
-			AuctionId pool1AuctionId
+			AuctionId pool1AuctionId,
+			bytes32 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
 		
 		(
@@ -402,7 +407,8 @@ contract CPASetupPhaseTest is Deployers {
 			int24 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
 			uint256 pool2ExcessDemand,
-			AuctionId pool2AuctionId
+			AuctionId pool2AuctionId,
+			bytes32 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
 		
 		// Verify pool1 info
@@ -566,7 +572,8 @@ contract CPASetupPhaseTest is Deployers {
 			,
 			uint256 pool1DepositAmountInPoolInfo,
 			,
-			AuctionId pool1AuctionIdInPoolInfo
+			AuctionId pool1AuctionIdInPoolInfo,
+			
 		) = cpaManager.poolInfo(pool1Id);
 		
 		assertEq(pool1DepositAmountInPoolInfo, depositAmount1, "Pool1 deposit amount should be updated");
@@ -588,7 +595,8 @@ contract CPASetupPhaseTest is Deployers {
 			,
 			uint256 pool2DepositAmountInPoolInfo,
 			,
-			AuctionId pool2AuctionIdInPoolInfo
+			AuctionId pool2AuctionIdInPoolInfo,
+			
 		) = cpaManager.poolInfo(pool2Id);
 		
 		assertEq(pool2DepositAmountInPoolInfo, depositAmount2, "Pool2 deposit amount should be updated");
