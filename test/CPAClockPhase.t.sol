@@ -244,8 +244,8 @@ contract CPAClockPhaseTest is CPATestBase {
 
     function test_CompleteBidFlow_WithProxyCommit() public {
         // Check pool info right after auction creation (before clock phase)
-        (PoolKey memory initialAsset1PoolKeyCheck, int24 initialAsset1StartingTick, int24 initialAsset1PriceIncrement, uint256 initialAsset1DepositAmount, uint256 initialAsset1ExcessDemand, ) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (PoolKey memory initialAsset2PoolKeyCheck, int24 initialAsset2StartingTick, int24 initialAsset2PriceIncrement, uint256 initialAsset2DepositAmount, uint256 initialAsset2ExcessDemand, ) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (PoolKey memory initialAsset1PoolKeyCheck, int24 initialAsset1StartingTick, int24 initialAsset1PriceIncrement, uint256 initialAsset1DepositAmount, uint256 initialAsset1ExcessDemand, , bytes32 initialAsset1PositionId) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (PoolKey memory initialAsset2PoolKeyCheck, int24 initialAsset2StartingTick, int24 initialAsset2PriceIncrement, uint256 initialAsset2DepositAmount, uint256 initialAsset2ExcessDemand, , bytes32 initialAsset2PositionId) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         
         // Verify pool keys match
         assertEq(Currency.unwrap(initialAsset1PoolKeyCheck.currency0), Currency.unwrap(asset1PoolKey.currency0), "Asset1 pool key currency0 should match");
@@ -458,8 +458,8 @@ contract CPAClockPhaseTest is CPATestBase {
         // Asset2 price should remain the same (no excess demand)
         
         // Get asset pool info (getPoolInfo returns startingTick, not currentTick)
-        (,int24 asset1StartingTick,int24 asset1PriceIncrement,,uint256 asset1ExcessDemand,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,int24 asset2StartingTick,int24 asset2PriceIncrement,,uint256 asset2ExcessDemand,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,int24 asset1StartingTick,int24 asset1PriceIncrement,,uint256 asset1ExcessDemand,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,int24 asset2StartingTick,int24 asset2PriceIncrement,,uint256 asset2ExcessDemand,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         
         // Get the current (actual) tick and sqrtPriceX96 for both assets
         (uint160 actualAsset1SqrtPriceX96, int24 actualAsset1CurrentTick, , ) = poolManager.getSlot0(asset1PoolKey.toId());
@@ -592,8 +592,8 @@ contract CPAClockPhaseTest is CPATestBase {
         
         // Get asset pool info (getPoolInfo returns startingTick, not currentTick)
         // we only need to redefine the excess demand since it was calculated in round 2 and everything else is the same
-        (,,,,uint256 asset1ExcessDemandRound2,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,,,,uint256 asset2ExcessDemandRound2,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,,,,uint256 asset1ExcessDemandRound2,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,,,,uint256 asset2ExcessDemandRound2,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         
         // Get the current (actual) tick and sqrtPriceX96 for both assets
         (uint160 actualAsset1SqrtPriceX96Round2, int24 actualAsset1CurrentTickRound2, , ) = poolManager.getSlot0(asset1PoolKey.toId());
@@ -631,8 +631,8 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(uint256(currentPhase6), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy after ending clock phase");
 
         // Verify no excess demand in second round (prices should not increase)
-        (,int24 asset1StartingTick2,int24 asset1PriceIncrement2,,uint256 asset1ExcessDemand2,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,int24 asset2StartingTick2,int24 asset2PriceIncrement2,,uint256 asset2ExcessDemand2,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,int24 asset1StartingTick2,int24 asset1PriceIncrement2,,uint256 asset1ExcessDemand2,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,int24 asset2StartingTick2,int24 asset2PriceIncrement2,,uint256 asset2ExcessDemand2,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         
         // Asset1: demand = 30 + 25 = 55, supply = 100, excess = 0 (no excess demand)
         // Asset2: demand = 20 + 15 = 35, supply = 150, excess = 0 (no excess demand)
