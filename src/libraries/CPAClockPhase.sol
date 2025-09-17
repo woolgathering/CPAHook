@@ -52,8 +52,7 @@ library CPAClockPhase {
 	 * @param self The contract instance
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
-	 * @param partialCommitHash The commit hash for privacy
-	 * @param stakeAmount Additional stake amount
+	 * @param maxStakeAmount Maximum stake amount the bidder is willing to provide
 	 * @param auctionInfo Mapping for auction info
 	 * @param bidderStake Mapping for bidder stakes
 	 * @param bidderBidPoints Mapping for bidder bid points
@@ -62,8 +61,7 @@ library CPAClockPhase {
 		CPAStorage self,
 		AuctionId auctionId,
 		uint256[] calldata demands,
-		bytes32 partialCommitHash,
-		uint256 stakeAmount,
+		uint256 maxStakeAmount,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
@@ -71,11 +69,7 @@ library CPAClockPhase {
 		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy
 	) internal {
 		if (auctionInfo[auctionId].clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
-		if (!CommitReveal.isValidCommitHash(partialCommitHash)) revert IErrorsAndEvents.InvalidCommitHash(); // necessary?
 		if (demands.length != auctionInfo[auctionId].poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
-		
-		// Check if commit hash is committed to by a proxy
-		// if (commitProxy[auctionId][partialCommitHash] == address(0)) revert IErrorsAndEvents.InvalidCommitHash();
 		
 		// Calculate total bid value first
 		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo, poolInfo, self.manager());
@@ -86,18 +80,17 @@ library CPAClockPhase {
 			// Bidder needs additional stake
 			uint256 requiredAdditionalStake = totalValue - currentBidPoints;
 
-			// I will want to adjust this so that we just give the stake amount and users don't have to bother
-			// calculating the additional stake amount themselves.
-			if (stakeAmount < requiredAdditionalStake) revert IErrorsAndEvents.InsufficientBidPoints();
+			// Safety check: ensure the bidder's max stake is sufficient for the required amount
+			if (maxStakeAmount < requiredAdditionalStake) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
 			
-			// Add stake to bidder
-			bidderStake[auctionId][msg.sender] += stakeAmount;
+			// Add the required stake amount to bidder (not the max, just what's needed)
+			bidderStake[auctionId][msg.sender] += requiredAdditionalStake;
 			
 			// Set bidder bid points
 			bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender]);
 			
-			// Transfer stake from bidder to auction contract via pool manager
-			if (stakeAmount > 0) {
+			// Transfer the required stake amount from bidder to auction contract via pool manager
+			if (requiredAdditionalStake > 0) {
 				// Call swap callback to transfer tokens from user to pool manager
 				// and mint ERC6909 claims to hook
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
@@ -105,7 +98,7 @@ library CPAClockPhase {
 					token0: address(0), // unused, we need to remove this
 					token1: auctionInfo[auctionId].commonNumeraire,
 					amount0: int128(int256(0)), // unused, we need to remove this
-					amount1: int128(int256(stakeAmount)), // numeraire amount (positive for add)
+					amount1: int128(int256(requiredAdditionalStake)), // numeraire amount (positive for add)
 					deadline: block.timestamp + 60
 				});
 				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
@@ -113,7 +106,7 @@ library CPAClockPhase {
 			}
 		} else {
 			// Bidder already has sufficient bid points, no additional stake needed
-			// Allow zero stake amount for this case
+			// No transfer needed in this case
 		}
 		// would be interesting to eventually have "deposits" for bidders who use the system often
 		// so that they don't have to transfer the common numeraire every time they bid.
@@ -121,11 +114,13 @@ library CPAClockPhase {
 		// this auction contract would make a "claim" against the deposits that are needed for staking.
 		// the complication is that we do not assert a common numeraire across all auction contracts.
 		
+		// Calculate the actual stake amount used for this bid
+		uint256 actualStakeAmount = totalValue > currentBidPoints ? totalValue - currentBidPoints : 0;
+		
 		// Record the bid
 		AuctionTypes.Bid memory bid = AuctionTypes.Bid({
 			bidder: msg.sender,
-			commitHash: partialCommitHash,
-			stakeAmount: stakeAmount,
+			stakeAmount: actualStakeAmount,
 			itemIds: new uint256[](0), // TODO: Add item IDs
 			quantities: demands,
 			round: auctionInfo[auctionId].currentRound,
@@ -134,7 +129,7 @@ library CPAClockPhase {
 		
 		auctionInfo[auctionId].roundBids.push(bid);
 		
-		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, partialCommitHash, stakeAmount, auctionInfo[auctionId].currentRound);
+		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, actualStakeAmount, auctionInfo[auctionId].currentRound);
 		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
 		// would be useful if there are participant-limited auctions where more people want in than actually got in.
 	}
@@ -144,42 +139,42 @@ library CPAClockPhase {
 		bidPoints = stakeAmount; // 1:1 ratio for now, could theoretically be anything
 	}
 
-    /**
-	 * @notice Dropout from auction with penalty
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param auctionInfo Mapping for auction info
-	 * @param bidderStake Mapping for bidder stakes
-	 * @param bidderBidPoints Mapping for bidder bid points
-	 * @param droppedBidders Mapping for dropped bidders
-	 */
-	function dropout(
-		AuctionId auctionId,
-		address bidder,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
-		mapping(AuctionId => mapping(address => bool)) storage droppedBidders
-	) internal {
-		uint256 stake = bidderStake[auctionId][bidder];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
+    // /**
+	//  * @notice Dropout from auction with penalty
+	//  * @param auctionId The auction ID
+	//  * @param bidder The bidder address
+	//  * @param auctionInfo Mapping for auction info
+	//  * @param bidderStake Mapping for bidder stakes
+	//  * @param bidderBidPoints Mapping for bidder bid points
+	//  * @param droppedBidders Mapping for dropped bidders
+	//  */
+	// function dropout(
+	// 	AuctionId auctionId,
+	// 	address bidder,
+	// 	mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+	// 	mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
+	// 	mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
+	// 	mapping(AuctionId => mapping(address => bool)) storage droppedBidders
+	// ) internal {
+	// 	uint256 stake = bidderStake[auctionId][bidder];
+	// 	if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
 		
-		uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
-		uint256 refund = stake - penalty;
+	// 	uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
+	// 	uint256 refund = stake - penalty;
 		
-		// Clear bidder data
-		bidderStake[auctionId][bidder] = 0;
-		bidderBidPoints[auctionId][bidder] = 0;
+	// 	// Clear bidder data
+	// 	bidderStake[auctionId][bidder] = 0;
+	// 	bidderBidPoints[auctionId][bidder] = 0;
 		
-		// Set dropped bidder status
-		droppedBidders[auctionId][bidder] = true;
+	// 	// Set dropped bidder status
+	// 	droppedBidders[auctionId][bidder] = true;
 		
-		// Transfer refund to bidder (simplified)
-		// In practice, this would use SafeERC20
+	// 	// Transfer refund to bidder (simplified)
+	// 	// In practice, this would use SafeERC20
 		
-		emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, penalty);
-		emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
-	}
+	// 	emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, penalty);
+	// 	emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
+	// }
     
 
 	/**

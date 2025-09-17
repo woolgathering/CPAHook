@@ -95,6 +95,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		_;
 	}
 
+	modifier whenAuctionCancelled(AuctionId auctionId) {
+		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Cancelled) revert IErrorsAndEvents.AuctionNotCancelled(auctionId);
+		_;
+	}
+
+
 	/**
 	 * @notice Modifier to ensure auction is in expected phase
 	 */
@@ -137,6 +143,36 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		_updatePoolHookStates(auctionId);
 		_refundAllStakes(auctionId);
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+	}
+
+	function reclaimStake(AuctionId auctionId) external {
+		// Allow reclaiming if auction is cancelled, finished, or bidder has dropped out
+		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Cancelled &&
+			auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Finished &&
+			availableToReclaim[auctionId][msg.sender] == 0) {
+			revert IErrorsAndEvents.AuctionNotActive(auctionId, auctionInfo[auctionId].currentStatus);
+		}
+		
+		uint256 refund =_reclaimStake(auctionId, msg.sender);
+
+		// then we need to do a callback to reclaim what they are owed
+		// manager.unlock(abi.encode(
+		// 	uint8(5),
+		// 	abi.encode(AuctionTypes.CallbackDataRefundStake({
+		// 	numeraire: auctionInfo[auctionId].commonNumeraire,
+		// 	bidder: msg.sender,
+		// 	auctionId: auctionId,
+		// 	amount: refund
+		// }))));
+	}
+
+	function _reclaimStake(AuctionId auctionId, address bidder) internal returns (uint256 stake) {
+		stake = bidderStake[auctionId][bidder];
+		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
+		bidderStake[auctionId][bidder] = 0;
+		bidderBidPoints[auctionId][bidder] = 0;
+		availableToReclaim[auctionId][bidder] = stake;
+		return stake;
 	}
 
 	// ========================================
@@ -234,21 +270,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Submit a bid during clock phase
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
-	 * @param partialCommitHash The commit hash for privacy
-	 * @param stakeAmount Additional stake amount
+	 * @param maxStakeAmount Maximum stake amount the bidder is willing to provide for this bid
 	 */
 	function submitBid(
 		AuctionId auctionId,
 		uint256[] calldata demands,
-		bytes32 partialCommitHash,
-		uint256 stakeAmount
+		uint256 maxStakeAmount
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		CPAClockPhase.processBid(
 			this,
 			auctionId,
 			demands,
-			partialCommitHash,
-			stakeAmount,
+			maxStakeAmount,
 			auctionInfo,
 			bidderStake,
 			bidderBidPoints,
@@ -258,8 +291,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
 
-
-	// Removed setPoolPrice - prices are now managed directly in pools
 
 	/**
 	 * @notice Commit to a bidder (proxy function)
@@ -275,9 +306,32 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * probably need to rewrite this to accept WHO is dropping out
 	 */
 	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) {
+		// the bidders can only dropout if the auction is BEFORE the proxy phase. In other words,
+		// only in setup or clock phase.
 		// TODO: Uncomment when CPAClockPhase is implemented
-		// CPAClockPhase.dropout(this);
-		revert("Not yet implemented");
+		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Proxy) revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Proxy, auctionInfo[auctionId].currentPhase);
+		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup && auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Clock) revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
+		
+		uint256 stake = bidderStake[auctionId][msg.sender];
+		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
+		
+		uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
+		uint256 refund = stake - penalty;
+		
+		// Clear bidder data
+		bidderStake[auctionId][msg.sender] = refund;
+		bidderBidPoints[auctionId][msg.sender] = 0;
+		
+		// Set dropped bidder status
+		droppedBidders[auctionId][msg.sender] = true;
+		
+		// Transfer refund to bidder (simplified)
+		// In practice, this would use SafeERC20
+		
+		emit IErrorsAndEvents.PenaltyApplied(auctionId, msg.sender, penalty);
+		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, refund);
+
+		// revert("Not yet implemented");
 	}
 
 	// ========================================
@@ -313,12 +367,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// ALLOCATION PHASE
 	// ========================================
 
-	/**
-	 * @notice Start allocation phase
-	 */
-	function startAllocationPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
-	}
 
 	/**
 	 * @notice Submit allocation during allocation phase
@@ -507,19 +555,45 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		}
 	}
 
-	/**
-	 * @notice Refund all stakes
-	 * @param auctionId The auction ID
-	 */
-	function _refundAllStakes(AuctionId auctionId) internal {
-		// TODO: Implement stake refunds
-		// This should iterate through all bidders and refund their stakes
-		// when auction is cancelled or auctioneer fails to uphold their end
-	}
-
 	// ========================================
 	// CALLBACK HANDLERS
 	// ========================================
+
+	/**
+	 * @dev Unified unlock callback to handle multiple operation types
+	 * @param rawData The callback data containing operation type and operation-specific data
+	 * @return returnData The encoded balance deltas
+	 */
+	function unlockCallback(bytes calldata rawData)
+		external
+		onlyPoolManager
+		returns (bytes memory returnData)
+	{
+		// Decode the operation type and operation-specific data
+		(uint8 operationType, bytes memory operationData) = abi.decode(rawData, (uint8, bytes));
+		
+		if (operationType == 0) {
+			// Bid as liquidity add
+			return _handleBid(operationData);
+		} else if (operationType == 1) {
+			// Deposit transfer (setup)
+			return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
+		} else if (operationType == 2) {
+			// Price update swap
+			return _handlePriceUpdateSwap(operationData);
+		} else if (operationType == 3) {
+			// Mint position after allocation
+			return _handleMintPosition(operationData);
+		} else if (operationType == 4) {
+			// Claim token settlement
+			return _handleClaimToken(operationData);
+		} else if (operationType == 5) {
+			// Simulate swap
+			return _refundStake(operationData);
+		} else {
+			revert("Invalid operation type");
+		}
+	}
 
 	/**
 	 * @dev Handle deposit transfer operation (setup)
@@ -535,7 +609,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @param operationData The encoded operation data containing (int128 amount0, int128 amount1)
 	 * @return returnData The encoded balance deltas
 	 */
-	function _handleBidAsLiquidity(bytes memory operationData) internal returns (bytes memory returnData) {
+	function _handleBid(bytes memory operationData) internal returns (bytes memory returnData) {
 		// Decode the callback data
 		(AuctionTypes.CallbackDataBid memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataBid));
 		address sender = data.sender;
@@ -579,42 +653,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	function _handleMintPosition(bytes memory operationData) internal returns (bytes memory returnData) {
 		return CPAAllocationPhase.handleMintPosition(this, operationData);
 		// revert("Not yet implemented");
-	}
-
-	/**
-	 * @dev Unified unlock callback to handle multiple operation types
-	 * @param rawData The callback data containing operation type and operation-specific data
-	 * @return returnData The encoded balance deltas
-	 */
-	function unlockCallback(bytes calldata rawData)
-		external
-		onlyPoolManager
-		returns (bytes memory returnData)
-	{
-		// Decode the operation type and operation-specific data
-		(uint8 operationType, bytes memory operationData) = abi.decode(rawData, (uint8, bytes));
-		
-		if (operationType == 0) {
-			// Bid as liquidity add
-			return _handleBidAsLiquidity(operationData);
-		} else if (operationType == 1) {
-			// Deposit transfer (setup)
-			return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
-		} else if (operationType == 2) {
-			// Price update swap
-			return _handlePriceUpdateSwap(operationData);
-		} else if (operationType == 3) {
-			// Mint position after allocation
-			return _handleMintPosition(operationData);
-		} else if (operationType == 4) {
-			// Claim token settlement
-			return _handleClaimToken(operationData);
-		} else if (operationType == 5) {
-			// Simulate swap
-			return _refundStake(operationData);
-		} else {
-			revert("Invalid operation type");
-		}
 	}
 
 	/**
@@ -678,9 +716,19 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		(AuctionTypes.CallbackDataRefundStake memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataRefundStake));
 		
 		// Refund the stake
-		manager.burn(address(this), data.numeraire.toId(), data.amount);
+		manager.burn(address(this), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.amount);
 		
 		// Return the balance delta
 		return abi.encode(data.amount);
+	}
+
+	/**
+	 * @notice Refund all stakes
+	 * @param auctionId The auction ID
+	 */
+	function _refundAllStakes(AuctionId auctionId) internal {
+		// TODO: Implement stake refunds
+		// This should iterate through all bidders and refund their stakes
+		// when auction is cancelled or auctioneer fails to uphold their end
 	}
 }

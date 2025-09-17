@@ -52,6 +52,8 @@ library CPASettlementPhase {
 
         // now set the revealed mapping
         revealedMappings[auctionId][computedCommitHash] = bidder;
+
+        emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
     }
 
     function claimToken(

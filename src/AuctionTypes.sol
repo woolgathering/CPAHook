@@ -44,7 +44,6 @@ library AuctionTypes {
 		address allocator;          // Address of the allocator
 		BundleId[] bundleIds;        // Array of selected bundle IDs
 		uint256 totalValue;         // Total value of the allocation
-		uint256 score;              // Allocation score
 		uint256 timestamp;          // When allocation was submitted
 	}
 
@@ -57,7 +56,6 @@ library AuctionTypes {
 	/// @notice Bid structure for clock phase
 	struct Bid {
 		address bidder;             // Address of the bidder
-		bytes32 commitHash;         // Commit hash for privacy
 		uint256 stakeAmount;        // Stake amount for this bid
 		uint256[] itemIds;          // Array of item IDs demanded
 		uint256[] quantities;       // Corresponding quantities demanded

@@ -18,7 +18,7 @@ interface IErrorsAndEvents {
 	/// @notice Events
 	event AuctionCreated(AuctionId auctionId, address auctionOwner);
 	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase);
-	event BidSubmitted(AuctionId auctionId, address bidder, bytes32 commitHash, uint256 stakeAmount, uint256 round);
+	event BidSubmitted(AuctionId auctionId, address bidder, uint256 stakeAmount, uint256 round);
 	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, BundleId bundleId, uint256[] quantities, uint256 value);
 	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 score);
 	event RevealProcessed(AuctionId auctionId, address bidder, address proxy, bytes32 commitHash);
@@ -37,9 +37,11 @@ interface IErrorsAndEvents {
 	error OnlyOwner();
 	error InvalidPhase(AuctionTypes.AuctionPhase expected, AuctionTypes.AuctionPhase actual);
 	error AuctionNotActive(AuctionId auctionId, AuctionTypes.AuctionStatus status);
+	error AuctionNotCancelled(AuctionId auctionId);
 	error ClockNotOpen();
 	error InvalidCommitHash();
 	error InsufficientBidPoints();
+	error MaxStakeTooLow(AuctionId auctionId);
 	error InvalidStakeAmount();
 	error DuplicateBundle();
 	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
