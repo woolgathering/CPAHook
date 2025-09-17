@@ -102,9 +102,9 @@ library CPAClockPhase {
 				// and mint ERC6909 claims to hook
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
 					sender: msg.sender,
-					token0: address(0), // dynamic so we can support other tokens later
+					token0: address(0), // unused, we need to remove this
 					token1: auctionInfo[auctionId].commonNumeraire,
-					amount0: int128(int256(0)), // ETH
+					amount0: int128(int256(0)), // unused, we need to remove this
 					amount1: int128(int256(stakeAmount)), // numeraire amount (positive for add)
 					deadline: block.timestamp + 60
 				});

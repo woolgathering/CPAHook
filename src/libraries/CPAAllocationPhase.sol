@@ -97,6 +97,7 @@ library CPAAllocationPhase {
 		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
 		uint256 totalValue = 0;
 		uint256[] memory quantities = new uint256[](poolKeys.length);
+		bytes32[] memory existingCommitHashes = new bytes32[](allocationData.bundleIds.length);
 
 		// in the bundle submission we have already verified that the length of the quantities is equal to the number of assets in the auction
 		// so we don't need to worry about reading beyond the array length
@@ -107,10 +108,17 @@ library CPAAllocationPhase {
 			// check that the bundle exists
 			if (bundles[auctionId][bundleId].commitHash == bytes32(0)) revert IErrorsAndEvents.InvalidBundle(auctionId, bundleId);
 
+			// check that no bidder (commitHash) has been allocated more than one bundle
+			if (_checkIfDuplicateAllocation(bundles[auctionId][bundleId].commitHash, existingCommitHashes, i)) revert IErrorsAndEvents.DuplicateAllocation(auctionId, bundles[auctionId][bundleId].commitHash);
+
+			// update the quantities
 			AuctionTypes.Bundle memory bundle = bundles[auctionId][bundleId];
 			for (uint256 j = 0; j < bundle.quantities.length; j++) {
 				quantities[j] += bundle.quantities[j];
 			}
+
+			// update the existing commit hashes
+			existingCommitHashes[i] = bundles[auctionId][bundleId].commitHash;
 		}
 
 		// Validate quantities and compute total value in a single loop
@@ -143,18 +151,35 @@ library CPAAllocationPhase {
 		return (totalValue, totalValue); // again, the total value is the same as the score here
 	}
 
+	function _checkIfDuplicateAllocation(
+		bytes32 commitHash,
+		bytes32[] memory existingCommitHashes,
+		uint256 index
+	) internal view returns (bool) {
+		for (uint256 i = 0; i < index; i++) {
+			if (existingCommitHashes[i] == commitHash) return true;
+		}
+		return false;
+	}
+
 	function endAllocationPhase(
 		CPAStorage self,
 		AuctionId auctionId,
 		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
-		// IPositionManager positionManager
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
+		mapping(bytes32 => BundleId) storage winningBundleIds
 	) internal {
 		// whatever allocation is the top one is the winner
 		// we check if the window has passed in the function that calls this
 		AuctionTypes.Allocation memory winner = topAllocation[auctionId].allocation;
 		// emit IErrorsAndEvents.AllocationWinner(auctionId, winner.allocator);
+
+		// store the winning bundle ids
+		for (uint i = 0; i < winner.bundleIds.length; i++) {
+			winningBundleIds[bundles[auctionId][winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
+		}
 		
 		// Transfer assets to pools at final prices
 		_transferAssetsToPools(self, auctionId, auctionInfo, poolInfo);
