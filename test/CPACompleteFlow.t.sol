@@ -535,11 +535,12 @@ contract CPACompleteFlowTest is CPATestBase {
         console.log("Allocator2's failed allocation did not change the top allocation");
 
         // Test allocator 3 submits a better allocation that beats allocator 1
-        // This uses bundles 0 and 1 (more than allocator 1 but within deposit limits)
+        // This uses bundles 0, 4, and 7 (one bundle from each bidder/proxy)
         address allocator3 = makeAddr("allocator3");
-        BundleId[] memory allocator3Bundles = new BundleId[](2);
-        allocator3Bundles[0] = bundleIds[0];
-        allocator3Bundles[1] = bundleIds[1];
+        BundleId[] memory allocator3Bundles = new BundleId[](3);
+        allocator3Bundles[0] = bundleIds[0];  // From testProxy1
+        allocator3Bundles[1] = bundleIds[4];  // From testProxy2  
+        allocator3Bundles[2] = bundleIds[7];  // From testProxy3
 
         AuctionTypes.Allocation memory allocation3 = AuctionTypes.Allocation({
             auctionId: auctionId,
@@ -556,9 +557,10 @@ contract CPACompleteFlowTest is CPATestBase {
         // Verify that allocator3's allocation replaced allocator1 as the top allocation
         (AuctionTypes.Allocation memory topAllocation3, uint256 topScore3, ) = cpaManager.topAllocation(auctionId);
         assertEq(topAllocation3.allocator, allocator3, "Allocator3 should now be the top allocation");
-        assertEq(topAllocation3.bundleIds.length, 2, "Allocator3 should have 2 bundles");
-        assertEq(BundleId.unwrap(topAllocation3.bundleIds[0]), BundleId.unwrap(bundleIds[0]), "Allocator3 should have bundle 0");
-        assertEq(BundleId.unwrap(topAllocation3.bundleIds[1]), BundleId.unwrap(bundleIds[1]), "Allocator3 should have bundle 1");
+        assertEq(topAllocation3.bundleIds.length, 3, "Allocator3 should have 3 bundles");
+        assertEq(BundleId.unwrap(topAllocation3.bundleIds[0]), BundleId.unwrap(bundleIds[0]), "Allocator3 should have bundle 0 (from testProxy1)");
+        assertEq(BundleId.unwrap(topAllocation3.bundleIds[1]), BundleId.unwrap(bundleIds[4]), "Allocator3 should have bundle 4 (from testProxy2)");
+        assertEq(BundleId.unwrap(topAllocation3.bundleIds[2]), BundleId.unwrap(bundleIds[7]), "Allocator3 should have bundle 7 (from testProxy3)");
         assertGt(topScore3, topScore1, "Allocator3 should have a higher score than allocator1");
         console.log("Allocator3 allocation recorded - Score:", topScore3);
         console.log("Allocator3 beat allocator1 - previous score:", topScore1);
@@ -729,6 +731,70 @@ contract CPACompleteFlowTest is CPATestBase {
         console.log("Winner bundle count:", winnerAllocation.bundleIds.length);
         console.log("Allocator1 (small allocation) was beaten by allocator3");
         console.log("Allocator2 (excessive allocation) failed validation");
+
+        // ========================================
+        // REVEAL PHASE - REVEAL BIDDER MAPPINGS
+        // ========================================
+        console.log("\n=== REVEAL PHASE ===");
+        
+        // Reveal bidder1's commit hash
+        vm.prank(testBidder1);
+        cpaManager.reveal(auctionId, testProxy1, saltA1, saltB1);
+        console.log("Bidder1 revealed successfully");
+        
+        // Reveal bidder2's commit hash  
+        vm.prank(testBidder2);
+        cpaManager.reveal(auctionId, testProxy2, saltA2, saltB2);
+        console.log("Bidder2 revealed successfully");
+        
+        // Reveal bidder3's commit hash
+        vm.prank(testBidder3);
+        cpaManager.reveal(auctionId, testProxy1, saltA3, saltB3);
+        console.log("Bidder3 revealed successfully");
+        
+        // Verify the reveal mappings
+        address revealedBidder1 = cpaManager.revealedMappings(auctionId, commitHash1);
+        address revealedBidder2 = cpaManager.revealedMappings(auctionId, commitHash2);
+        address revealedBidder3 = cpaManager.revealedMappings(auctionId, commitHash3);
+        
+        assertEq(revealedBidder1, testBidder1, "Bidder1 should be revealed correctly");
+        assertEq(revealedBidder2, testBidder2, "Bidder2 should be revealed correctly");
+        assertEq(revealedBidder3, testBidder3, "Bidder3 should be revealed correctly");
+        
+        console.log("All bidders revealed successfully");
+        console.log("Revealed bidder1:", revealedBidder1);
+        console.log("Revealed bidder2:", revealedBidder2);
+        console.log("Revealed bidder3:", revealedBidder3);
+
+        // ========================================
+        // CLAIM PHASE - BIDDER1 CLAIMS ALLOCATION
+        // ========================================
+        console.log("\n=== CLAIM PHASE ===");
+        
+        // Get the winning allocation to see which bundles are included
+        (AuctionTypes.Allocation memory winnerAllocation2, , ) = cpaManager.topAllocation(auctionId);
+        console.log("Winner allocation has", winnerAllocation2.bundleIds.length, "bundles");
+        
+        // Try to claim from the first pool (asset1) for bidder1
+        // We'll use commitHash1 since that's what bidder1 used
+        PoolId asset1PoolId = asset1PoolKey.toId();
+        
+        console.log("Bidder1 attempting to claim from asset1 pool...");
+        
+        // Check bidder1's stake before claiming
+        uint256 bidder1StakeBefore = cpaManager.bidderStake(auctionId, testBidder1);
+        console.log("Bidder1 stake before claim:", bidder1StakeBefore);
+        
+        // Attempt to claim
+        vm.prank(testBidder1);
+        cpaManager.claimToken(auctionId, commitHash1, asset1PoolId);
+        
+        console.log("Bidder1 claim completed successfully");
+        
+        // Check bidder1's stake after claiming
+        uint256 bidder1StakeAfter = cpaManager.bidderStake(auctionId, testBidder1);
+        console.log("Bidder1 stake after claim:", bidder1StakeAfter);
+        console.log("Stake used for claim:", bidder1StakeBefore - bidder1StakeAfter);
 
     }
 
