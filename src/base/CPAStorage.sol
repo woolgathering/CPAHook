@@ -125,6 +125,9 @@ abstract contract CPAStorage {
     /// @notice Bidder bid points mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
 
+	/// @notice Number of bidders in an auction
+	// mapping(AuctionId => uint256) public numBidders;
+
     ////////
     // PROXY PHASE
     ////////
@@ -151,6 +154,14 @@ abstract contract CPAStorage {
     
 	/// @notice Top allocation storage
 	mapping(AuctionId => AuctionTypes.TopAllocation) public topAllocation;
+
+	/// @notice Winning bundle ids storage
+	/// commitHash -> bundleId
+	mapping(bytes32 => BundleId) public winningBundleIds;
+
+	/// @notice Already allocated
+	/// checks if a bundle has been allocated 
+	// mapping(AuctionId => mapping(bytes32 => bool)) public alreadyAllocated;
 	
 
 	/**
@@ -163,9 +174,9 @@ abstract contract CPAStorage {
 	}
 
     ////////
-    // REVEAL PHASE
+    // SETTLEMENT PHASE
     ////////
-    /// @notice Revealed mappings
+    /// @notice Revealed mappings. AuctionId -> CommitHash -> Bidder Address
 	mapping(AuctionId => mapping(bytes32 => address)) public revealedMappings;
 
 	/**

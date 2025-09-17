@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { AuctionId } from "./AuctionId.sol";
 import { BundleId } from "./BundleId.sol";
 
@@ -131,6 +132,19 @@ library AuctionTypes {
 		uint256 liquidity;
 		bytes hookData;
 		AuctionId auctionId;
+	}
+
+	struct CallbackDataClaimToken {
+		address bidder;
+		address numeraire;
+		AuctionId auctionId;
+		PoolKey poolKey;
+		SwapParams swapParams;
+	}
+
+	struct CallbackDataRefundStake {
+		address numeraire;
+		uint256 amount;
 	}
 
 }

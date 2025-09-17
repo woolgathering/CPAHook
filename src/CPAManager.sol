@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
+import { console } from "forge-std/console.sol";
+
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -14,6 +16,8 @@ import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-cor
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
+import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import { CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
@@ -23,7 +27,7 @@ import { CPASetup } from "./libraries/CPASetup.sol";
 import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
-// import { CPARevealPhase } from "./libraries/CPARevealPhase.sol";
+import { CPASettlementPhase } from "./libraries/CPASettlementPhase.sol";
 
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "./AuctionTypes.sol";
@@ -42,7 +46,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	using PoolIdLibrary for PoolKey;
 	using CurrencySettler for Currency;
 	using BalanceDeltaLibrary for BalanceDelta;
-	// using CPASetup for CPAStorage;
+	using CurrencyLibrary for Currency;
+	using SafeCast for *;
 
 	// ========================================
 	// CONSTANTS AND STATE VARIABLES
@@ -354,7 +359,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Reveal);
 		*/
-		CPAAllocationPhase.endAllocationPhase(this, auctionId, topAllocation, auctionInfo, poolInfo);
+		CPAAllocationPhase.endAllocationPhase(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles, winningBundleIds);
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
 	}
 
@@ -374,23 +379,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	/**
 	 * @notice Reveal bidder identity
 	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
 	 * @param proxy The proxy address
 	 * @param saltA First salt
 	 * @param saltB Second salt
-	 * @param finalPurchaseAmount Final purchase amount
+	 * @dev This is called by the before any settlement by the bidder to reveal their identity.
 	 */
 	function reveal(
 		AuctionId auctionId,
-		address bidder,
 		address proxy,
 		bytes32 saltA,
-		bytes32 saltB,
-		uint256 finalPurchaseAmount
+		bytes32 saltB
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		// TODO: Uncomment when CPARevealPhase is implemented
-		// CPARevealPhase.reveal(this, bidder, proxy, saltA, saltB, finalPurchaseAmount);
-		revert("Not yet implemented");
+		CPASettlementPhase.reveal(this, auctionId, msg.sender, proxy, saltA, saltB, commitProxy, revealedMappings);
 	}
 
 	// /**
@@ -411,6 +411,33 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// end settlement phase
 
 	// claim item(s)
+
+	/**
+	 * @notice Claim tokens from winning allocation
+	 * @param auctionId The auction ID
+	 * @param commitHash The commit hash for the bidder
+	 * @param poolId The pool ID to claim from
+	 */
+	function claimToken(AuctionId auctionId, bytes32 commitHash, PoolId poolId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+		// Get the top allocation
+		AuctionTypes.TopAllocation storage topAlloc = topAllocation[auctionId];
+		AuctionTypes.Allocation memory topAllocation = topAlloc.allocation;
+		
+		// Call the settlement phase
+		CPASettlementPhase.claimToken(
+			this,
+			msg.sender,
+			auctionId,
+			commitHash,
+			poolId,
+			topAllocation,
+			auctionInfo[auctionId],
+			bundles[auctionId],
+			winningBundleIds,
+			bidderStake[auctionId],
+			revealedMappings[auctionId]
+		);
+	}
 
 	// ========================================
 	// UTILITY FUNCTIONS
@@ -579,9 +606,81 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else if (operationType == 3) {
 			// Mint position after allocation
 			return _handleMintPosition(operationData);
+		} else if (operationType == 4) {
+			// Claim token settlement
+			return _handleClaimToken(operationData);
+		} else if (operationType == 5) {
+			// Simulate swap
+			return _refundStake(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
 	}
 
+	/**
+	 * @notice Handle claim token settlement operation
+	 * @param operationData The encoded operation data
+	 * @return returnData The encoded balance deltas
+	 */
+	function _handleClaimToken(bytes memory operationData) internal returns (bytes memory returnData) {
+		// Decode the operation data
+		AuctionTypes.CallbackDataClaimToken memory callbackData = abi.decode(operationData, (AuctionTypes.CallbackDataClaimToken));
+		
+		// now that we have everything, we need to call swap on the pool manager
+		BalanceDelta delta = manager.swap(callbackData.poolKey, callbackData.swapParams, "");
+
+		console.log("delta amount0", delta.amount0());
+		console.log("delta amount1", delta.amount1());
+
+		Currency numeraire = Currency.wrap(callbackData.numeraire);
+		uint256 numeraireOwed;
+		uint256 assetGained;
+		{
+			Currency asset;
+			if (callbackData.swapParams.zeroForOne) {
+				// if zeroForOne is true, this means that the numeraire is token0
+				if (delta.amount1() < 0) revert("Should not owe asset");
+				numeraireOwed = uint256((-delta.amount0()).toUint128());
+				assetGained = uint256((delta.amount1()).toUint128());
+				asset = callbackData.poolKey.currency1;
+			} else {
+				// if zeroForOne is false, this means that the numeraire is token1
+				if (delta.amount0() < 0) revert("Should not owe asset");
+				numeraireOwed = uint256((-delta.amount1()).toUint128());
+				assetGained = uint256((delta.amount0()).toUint128());
+				asset = callbackData.poolKey.currency0;
+			}
+			asset.take(manager, callbackData.bidder, assetGained, false);
+		}
+
+		console.log("numeraireOwed", numeraireOwed);
+		console.log("assetGained", assetGained);
+
+		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
+		uint256 numerairePaidByManager = 0;
+		if (bidderStake >= numeraireOwed) {
+			// since they have enough to cover, we can settle directly
+			numeraire.settle(manager, address(this), numeraireOwed, true); // might need to be true since the manager has ERC6909 claims
+			numerairePaidByManager = numeraireOwed;
+		} else {
+			//since they don't have enough, we need to do two settles
+			numeraire.settle(manager, address(this), bidderStake, true); // might need to be true since the manager has ERC6909 claims
+			numeraire.settle(manager, callbackData.bidder, numeraireOwed - bidderStake, false); // the bidder pays in ERC20
+			numerairePaidByManager = bidderStake;
+		}
+		
+		// Return the balance delta
+		return abi.encode(numerairePaidByManager, assetGained);
+	}
+
+	function _refundStake(bytes memory operationData) internal returns (bytes memory returnData) {
+		// Decode the operation data
+		(AuctionTypes.CallbackDataRefundStake memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataRefundStake));
+		
+		// Refund the stake
+		manager.burn(address(this), data.numeraire.toId(), data.amount);
+		
+		// Return the balance delta
+		return abi.encode(data.amount);
+	}
 }
