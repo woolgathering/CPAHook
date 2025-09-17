@@ -41,10 +41,6 @@ contract CPAClockPhaseTest is CPATestBase {
         // Mint tokens to auctioneer for deposits
         mintTokensToAuctioneer(1000000 * 10**18);
         
-        // Set deposit amounts smaller than total demand to create excess demand
-        // depositAmount1 = 100 * 10**18;  // 100 tokens (less than 175 total demand)
-        // depositAmount2 = 150 * 10**18;  // 150 tokens (more than 75 total demand)
-        
         // Approve CPAManager to spend auctioneer's tokens
         approveTokens(address(asset1Token), address(cpaManager), depositAmount1);
         approveTokens(address(asset2Token), address(cpaManager), depositAmount2);
@@ -120,67 +116,11 @@ contract CPAClockPhaseTest is CPATestBase {
     }
 
     function test_StartClockRound_SetupNotComplete() public {
-        // Create fake tokens for a new auction without deposits
-        MockERC20 fakeNumeraire = new MockERC20("Fake Numeraire", "FAKE_NUM", 18);
-        MockERC20 fakeAsset1 = new MockERC20("Fake Asset 1", "FAKE_AST1", 18);
-        MockERC20 fakeAsset2 = new MockERC20("Fake Asset 2", "FAKE_AST2", 18);
-        
-        // Create fake pool keys
-        PoolKey memory fakeAsset1PoolKey = PoolKey({
-            currency0: Currency.wrap(address(fakeAsset1)),
-            currency1: Currency.wrap(address(fakeNumeraire)),
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
-            tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
-        });
-        
-        PoolKey memory fakeAsset2PoolKey = PoolKey({
-            currency0: Currency.wrap(address(fakeAsset2)),
-            currency1: Currency.wrap(address(fakeNumeraire)),
-            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
-            tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
-        });
-        
-        // Sort currencies by address
-        (fakeAsset1PoolKey.currency0, fakeAsset1PoolKey.currency1) = fakeAsset1PoolKey.currency0 < fakeAsset1PoolKey.currency1
-            ? (fakeAsset1PoolKey.currency0, fakeAsset1PoolKey.currency1)
-            : (fakeAsset1PoolKey.currency1, fakeAsset1PoolKey.currency0);
-            
-        (fakeAsset2PoolKey.currency0, fakeAsset2PoolKey.currency1) = fakeAsset2PoolKey.currency0 < fakeAsset2PoolKey.currency1
-            ? (fakeAsset2PoolKey.currency0, fakeAsset2PoolKey.currency1)
-            : (fakeAsset2PoolKey.currency1, fakeAsset2PoolKey.currency0);
-        
-        // Create auction config with fake tokens
-        PoolKey[] memory poolKeys = new PoolKey[](2);
-        poolKeys[0] = fakeAsset1PoolKey;
-        poolKeys[1] = fakeAsset2PoolKey;
-        
-        uint160[] memory initialSqrtPricesX96 = new uint160[](2);
-        initialSqrtPricesX96[0] = 79228162514264337593543950336; // sqrt(1) * 2^96
-        initialSqrtPricesX96[1] = 112045541949572287496682733568; // sqrt(2) * 2^96
-        
-        int24[] memory priceIncrements = new int24[](2);
-        priceIncrements[0] = 60 * 10; // tickSpacing * 10
-        priceIncrements[1] = 60 * 5;  // tickSpacing * 5
-        
-        AuctionTypes.AuctionConfig memory config = AuctionTypes.AuctionConfig({
-            commonNumeraire: address(fakeNumeraire),
-            minSpendRatio: 1000,
-            dropoutSlashRatio: 1000,
-            spendingViolationSlashRatio: 2000,
-            maxRounds: 100,
-            allocatorStakeRequirement: 10000 * 10**18,
-            proxyStakeRequirement: 1000 * 10**18,
-            allocationWindow: 1800,
-            poolKeys: poolKeys,
-            initialSqrtPricesX96: initialSqrtPricesX96,
-            priceIncrements: priceIncrements
-        });
-        
-        // Create new auction without deposits
+        // Create a new auction with different pool keys but without deposits
+        AuctionTypes.AuctionConfig memory config = createNewAuctionConfig();
         AuctionId newAuctionId = createAuction(config, auctioneer);
         
+        // Don't move any deposits - auction setup is not complete
         // Try to start clock phase without deposits - should revert
         vm.prank(auctioneer);
         vm.expectRevert(IErrorsAndEvents.SetupNotComplete.selector);
@@ -284,7 +224,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA"); // known only to the bidder
         bytes32 saltB = keccak256("saltB"); // known only to the bidder and the proxy
         bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA, saltB); // shared with the proxy
-        bytes32 partialCommit = CommitReveal.getBidderHash(bidder1, saltA); // submitted by the bidder with their bids
 
 
         ///// CREATE BIDDER2 AND PROXY2
@@ -300,7 +239,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA2 = keccak256("saltA2");
         bytes32 saltB2 = keccak256("saltB2");
         bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
-        bytes32 partialCommit2 = CommitReveal.getBidderHash(bidder2, saltA2);
 
         // Start clock phase
         ////////////////////////////////////////
@@ -333,14 +271,14 @@ contract CPAClockPhaseTest is CPATestBase {
         
         // Calculate expected bid value using current pool prices
         uint256 expectedBidValue = calculateBidValue(demands);
-        uint256 stakeAmount = expectedBidValue;
+        uint256 maxStakeAmount = expectedBidValue; // Set max to exactly what's needed
 
         // Approve numeraire tokens for the auction contract
         approveNumeraireForBidder(bidder1, 250000 * 10**18);
 
-        // Submit bid using partial commit (preserves anonymity)
+        // Submit bid
         vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands, partialCommit, stakeAmount);
+        cpaManager.submitBid(auctionId, demands, maxStakeAmount);
 
         // Verify bid was recorded
         (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,uint256 currentRound,) = cpaManager.getAuctionInfo(auctionId);
@@ -348,21 +286,20 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(currentRound, 1, "Current round should be 1");
         assertEq(roundBids.length, 1, "Should have exactly 1 bid after first bidder");
         assertEq(roundBids[0].bidder, bidder1, "First bid should be from bidder1");
-        assertEq(roundBids[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
-        assertEq(roundBids[0].stakeAmount, stakeAmount, "First bid should have correct stake amount");
+        assertEq(roundBids[0].stakeAmount, expectedBidValue, "First bid should have correct stake amount");
         assertEq(roundBids[0].quantities.length, 2, "First bid should have 2 quantities");
         assertEq(roundBids[0].quantities[0], 100 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 100");
         assertEq(roundBids[0].quantities[1], 50 * 10**asset2Token.decimals(), "First bid asset2 quantity should be 50");
         assertEq(roundBids[0].round, 1, "First bid should be in round 1");
 
         // Verify bidder stake and bid points were updated
-        assertEq(cpaManager.bidderStake(auctionId, bidder1), stakeAmount, "Bidder1 stake should match stake amount");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), stakeAmount, "Bidder1 bid points should match stake amount (1:1 ratio)");
+        assertEq(cpaManager.bidderStake(auctionId, bidder1), expectedBidValue, "Bidder1 stake should match expected bid value");
+        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), expectedBidValue, "Bidder1 bid points should match expected bid value (1:1 ratio)");
 
         // Verify numeraire tokens were transferred
-        assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - stakeAmount, "Bidder1 should have remaining balance after stake");
-        assertEq(numeraireToken.balanceOf(address(poolManager)), stakeAmount, "Pool manager should have received stake amount");
-        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), stakeAmount, "CPAManager should have ERC6909 claims for total stakes");
+        assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - expectedBidValue, "Bidder1 should have remaining balance after stake");
+        assertEq(numeraireToken.balanceOf(address(poolManager)), expectedBidValue, "Pool manager should have received expected bid value");
+        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), expectedBidValue, "CPAManager should have ERC6909 claims for expected bid value");
 
         // Verify that the sqrtPriceX96 of either pool has not moved during inter-round bidding
         (uint160 asset1SqrtPriceX96AfterFirstBid, , , ) = poolManager.getSlot0(asset1PoolKey.toId());
@@ -388,7 +325,7 @@ contract CPAClockPhaseTest is CPATestBase {
 
         // Submit second bid using partial commit (preserves anonymity)
         vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2, partialCommit2, stakeAmount2);
+        cpaManager.submitBid(auctionId, demands2, stakeAmount2);
 
         ///////////////
         // VERIFICATION OF BOTH BIDS IN ROUND 1
@@ -401,30 +338,28 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(roundBids.length, 2, "Should have exactly 2 bids after second bidder");
         
         // Verify first bidder's bid again
-        assertEq(roundBids[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
         assertEq(roundBids[0].bidder, bidder1, "First bid should be from bidder1");
-        assertEq(roundBids[0].stakeAmount, stakeAmount, "First bid should have correct stake amount");
+        assertEq(roundBids[0].stakeAmount, expectedBidValue, "First bid should have correct stake amount");
         assertEq(roundBids[0].quantities[0], 100 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 100");
         assertEq(roundBids[0].quantities[1], 50 * 10**asset2Token.decimals(), "First bid asset2 quantity should be 50");
         
         // Verify second bidder's bid
         assertEq(roundBids[1].bidder, bidder2, "Second bid should be from bidder2");
-        assertEq(roundBids[1].commitHash, partialCommit2, "Second bid should have correct partial commit hash2");
-        assertEq(roundBids[1].stakeAmount, stakeAmount2, "Second bid should have correct stake amount2");
+        assertEq(roundBids[1].stakeAmount, expectedBidValue2, "Second bid should have correct stake amount2");
         assertEq(roundBids[1].quantities[0], 75 * 10**asset1Token.decimals(), "Second bid asset1 quantity should be 75");
         assertEq(roundBids[1].quantities[1], 25 * 10**asset2Token.decimals(), "Second bid asset2 quantity should be 25");
 
         // Verify both bidders' stakes and bid points
-        assertEq(cpaManager.bidderStake(auctionId, bidder1), stakeAmount, "Bidder1 stake should match stake amount");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), stakeAmount, "Bidder1 bid points should match stake amount");
-        assertEq(cpaManager.bidderStake(auctionId, bidder2), stakeAmount2, "Bidder2 stake should match stake amount2");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder2), stakeAmount2, "Bidder2 bid points should match stake amount2");
+        assertEq(cpaManager.bidderStake(auctionId, bidder1), expectedBidValue, "Bidder1 stake should match expected bid value");
+        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), expectedBidValue, "Bidder1 bid points should match expected bid value");
+        assertEq(cpaManager.bidderStake(auctionId, bidder2), expectedBidValue2, "Bidder2 stake should match expected bid value2");
+        assertEq(cpaManager.bidderBidPoints(auctionId, bidder2), expectedBidValue2, "Bidder2 bid points should match expected bid value2");
 
         // Verify token balances
-        assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - stakeAmount, "Bidder1 should have remaining balance after stake");
-        assertEq(numeraireToken.balanceOf(bidder2), bidder2OriginalBalance - stakeAmount2, "Bidder2 should have remaining balance after stake");
-        assertEq(numeraireToken.balanceOf(address(poolManager)), stakeAmount + stakeAmount2, "Pool manager should have total stakes");
-        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), stakeAmount + stakeAmount2, "CPAManager should have ERC6909 claims for total stakes");
+        assertEq(numeraireToken.balanceOf(bidder1), bidder1OriginalBalance - expectedBidValue, "Bidder1 should have remaining balance after stake");
+        assertEq(numeraireToken.balanceOf(bidder2), bidder2OriginalBalance - expectedBidValue2, "Bidder2 should have remaining balance after stake");
+        assertEq(numeraireToken.balanceOf(address(poolManager)), expectedBidValue + expectedBidValue2, "Pool manager should have total stakes");
+        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), expectedBidValue + expectedBidValue2, "CPAManager should have ERC6909 claims for total stakes");
 
         // Verify that sqrtPriceX96 still has not moved after second bid (inter-round bidding)
         (uint160 asset1SqrtPriceX96AfterSecondBid, , , ) = poolManager.getSlot0(asset1PoolKey.toId());
@@ -519,7 +454,7 @@ contract CPAClockPhaseTest is CPATestBase {
 
         // Submit bidder1's second round bid using same partial commit
         vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands1_round2, partialCommit, additionalStake1);
+        cpaManager.submitBid(auctionId, demands1_round2, additionalStake1);
 
         // Bidder2 submits smaller bid: demands [25, 15] for assets [asset1, asset2]
         uint256[] memory demands2_round2 = new uint256[](2);
@@ -539,7 +474,7 @@ contract CPAClockPhaseTest is CPATestBase {
 
         // Submit bidder2's second round bid using same partial commit
         vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2_round2, partialCommit2, additionalStake2);
+        cpaManager.submitBid(auctionId, demands2_round2, additionalStake2);
 
         // Verify both bids were recorded in round 2
         (,,,,,uint256 clockOpen4,AuctionTypes.Bid[] memory roundBids4,uint256 currentRound4,) = cpaManager.getAuctionInfo(auctionId);
@@ -549,14 +484,12 @@ contract CPAClockPhaseTest is CPATestBase {
         
         // Verify bidder1's second round bid
         assertEq(roundBids4[0].bidder, bidder1, "First bid in round 2 should be from bidder1");
-        assertEq(roundBids4[0].commitHash, partialCommit, "First bid should have correct partial commit hash");
         assertEq(roundBids4[0].stakeAmount, additionalStake1, "First bid should have correct additional stake amount");
         assertEq(roundBids4[0].quantities[0], 30 * 10**asset1Token.decimals(), "First bid asset1 quantity should be 30");
         assertEq(roundBids4[0].quantities[1], 20 * 10**asset2Token.decimals(), "First bid asset2 quantity should be 20");
         
         // Verify bidder2's second round bid
         assertEq(roundBids4[1].bidder, bidder2, "Second bid in round 2 should be from bidder2");
-        assertEq(roundBids4[1].commitHash, partialCommit2, "Second bid should have correct partial commit hash2");
         assertEq(roundBids4[1].stakeAmount, additionalStake2, "Second bid should have correct additional stake amount");
         assertEq(roundBids4[1].quantities[0], 25 * 10**asset1Token.decimals(), "Second bid asset1 quantity should be 25");
         assertEq(roundBids4[1].quantities[1], 15 * 10**asset2Token.decimals(), "Second bid asset2 quantity should be 15");
@@ -677,7 +610,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Proxy commits
         vm.prank(testProxy);
@@ -692,7 +624,7 @@ contract CPAClockPhaseTest is CPATestBase {
         approveNumeraireForBidder(testBidder, requiredStake);
         
         vm.prank(testBidder);
-        cpaManager.submitBid(auctionId, zeroDemands, partialCommit, requiredStake);
+        cpaManager.submitBid(auctionId, zeroDemands, requiredStake);
         
         // Verify the zero bid was accepted
         (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
@@ -715,7 +647,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Proxy commits
         vm.prank(testProxy);
@@ -730,36 +661,13 @@ contract CPAClockPhaseTest is CPATestBase {
         approveNumeraireForBidder(testBidder, requiredStake);
         
         vm.prank(testBidder);
-        cpaManager.submitBid(auctionId, largeDemands, partialCommit, requiredStake);
+        cpaManager.submitBid(auctionId, largeDemands, requiredStake);
         
         // Verify the large bid was accepted
         (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
         assertEq(roundBids.length, 1, "Should have 1 bid after large demand submission");
     }
 
-    function test_SubmitBid_InvalidCommitHash() public {
-        // Start clock phase
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
-
-        // Create bidder
-        address testBidder = makeAddr("testBidder");
-        createBidder(testBidder, 100000 * 10**18);
-
-        // Test with invalid commit hash (all zeros)
-        uint256[] memory demands = new uint256[](2);
-        demands[0] = 100 * 10**18;
-        demands[1] = 50 * 10**18;
-        
-        uint256 requiredStake = calculateBidValue(demands);
-        approveNumeraireForBidder(testBidder, requiredStake);
-        
-        bytes32 invalidCommit = bytes32(0);
-        
-        vm.prank(testBidder);
-        vm.expectRevert(IErrorsAndEvents.InvalidCommitHash.selector);
-        cpaManager.submitBid(auctionId, demands, invalidCommit, requiredStake);
-    }
 
     function test_SubmitBid_BidderWithoutProxyCommitment() public {
         // Start clock phase
@@ -774,7 +682,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, makeAddr("testProxy"), saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Test with uncommitted hash
         uint256[] memory demands = new uint256[](2);
@@ -786,7 +693,7 @@ contract CPAClockPhaseTest is CPATestBase {
         
         vm.prank(testBidder);
         // This should succeed since the proxy commitment check is commented out
-        cpaManager.submitBid(auctionId, demands, partialCommit, requiredStake);
+        cpaManager.submitBid(auctionId, demands, requiredStake);
     }
 
     function test_CommitToBidder_ProxyCommitsToMultipleBidders() public {
@@ -833,34 +740,32 @@ contract CPAClockPhaseTest is CPATestBase {
         approveNumeraireForBidder(bidder2, requiredStake2);
         
         bytes32 partialCommit1 = CommitReveal.getBidderHash(bidder1, saltA1);
-        bytes32 partialCommit2 = CommitReveal.getBidderHash(bidder2, saltA2);
         
         vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands1, partialCommit1, requiredStake1);
+        cpaManager.submitBid(auctionId, demands1, requiredStake1);
         
         vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2, partialCommit2, requiredStake2);
+        cpaManager.submitBid(auctionId, demands2, requiredStake2);
         
         // Verify both bids were accepted
         (,,,,,uint256 clockOpen,AuctionTypes.Bid[] memory roundBids,,) = cpaManager.getAuctionInfo(auctionId);
         assertEq(roundBids.length, 2, "Should have 2 bids after both bidders submit");
     }
 
-    function test_SubmitBid_InsufficientStake() public {
+    function test_SubmitBid_InsufficientMaxStake() public {
         // Start clock phase
         vm.prank(auctioneer);
         cpaManager.startClockRound(auctionId);
 
-        // Create bidder with limited funds
+        // Create bidder with sufficient funds but low max stake
         address testBidder = makeAddr("testBidder");
         address testProxy = makeAddr("testProxy");
-        createBidder(testBidder, 1000 * 10**18); // Limited funds
+        createBidder(testBidder, 1000000 * 10**18); // Sufficient funds
 
         // Generate commit hash
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Proxy commits
         vm.prank(testProxy);
@@ -872,13 +777,13 @@ contract CPAClockPhaseTest is CPATestBase {
         largeDemands[1] = 50000 * 10**18;
         
         uint256 requiredStake = calculateBidValue(largeDemands);
-        uint256 insufficientStake = requiredStake - 1; // One less than required
+        uint256 insufficientMaxStake = requiredStake - 1; // Max stake is less than required
         
-        approveNumeraireForBidder(testBidder, insufficientStake);
+        approveNumeraireForBidder(testBidder, requiredStake); // Approve enough tokens
         
         vm.prank(testBidder);
-        vm.expectRevert(IErrorsAndEvents.InsufficientBidPoints.selector);
-        cpaManager.submitBid(auctionId, largeDemands, partialCommit, insufficientStake);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.MaxStakeTooLow.selector, auctionId));
+        cpaManager.submitBid(auctionId, largeDemands, insufficientMaxStake); // But max stake is too low
     }
 
     function test_SubmitBid_NotInClockPhase() public {
@@ -893,7 +798,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Proxy commits
         vm.prank(testProxy);
@@ -909,7 +813,7 @@ contract CPAClockPhaseTest is CPATestBase {
         
         vm.prank(testBidder);
         vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, uint8(AuctionTypes.AuctionPhase.Clock), uint8(AuctionTypes.AuctionPhase.Setup)));
-        cpaManager.submitBid(auctionId, demands, partialCommit, requiredStake);
+        cpaManager.submitBid(auctionId, demands, requiredStake);
     }
 
     function test_SubmitBid_InvalidAuctionId() public {
@@ -926,7 +830,6 @@ contract CPAClockPhaseTest is CPATestBase {
         bytes32 saltA = keccak256("saltA");
         bytes32 saltB = keccak256("saltB");
         bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
-        bytes32 partialCommit = CommitReveal.getBidderHash(testBidder, saltA);
 
         // Proxy commits
         vm.prank(testProxy);
@@ -944,6 +847,6 @@ contract CPAClockPhaseTest is CPATestBase {
         
         vm.prank(testBidder);
         vm.expectRevert(); // Should revert due to invalid auction
-        cpaManager.submitBid(invalidAuctionId, demands, partialCommit, requiredStake);
+        cpaManager.submitBid(invalidAuctionId, demands, requiredStake);
     }
 }

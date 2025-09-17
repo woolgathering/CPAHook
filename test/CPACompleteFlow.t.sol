@@ -108,9 +108,6 @@ contract CPACompleteFlowTest is CPATestBase {
         commitHash2 = CommitReveal.generateCommitHash(testBidder2, testProxy2, saltA2, saltB2);
         commitHash3 = CommitReveal.generateCommitHash(testBidder3, testProxy1, saltA3, saltB3);
         
-        partialCommit1 = CommitReveal.getBidderHash(testBidder1, saltA1);
-        partialCommit2 = CommitReveal.getBidderHash(testBidder2, saltA2);
-        partialCommit3 = CommitReveal.getBidderHash(testBidder3, saltA3);
         
         // Generate proxy commit-reveal data
         proxySaltA1 = keccak256("proxySaltA1");
@@ -159,13 +156,13 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // Submit bids
         vm.prank(testBidder1);
-        cpaManager.submitBid(auctionId, demands1, partialCommit1, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands1, 1000 * 10**18);
         
         vm.prank(testBidder2);
-        cpaManager.submitBid(auctionId, demands2, partialCommit2, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands2, 1000 * 10**18);
         
         vm.prank(testBidder3);
-        cpaManager.submitBid(auctionId, demands3, partialCommit3, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands3, 1000 * 10**18);
         
         // End round 1 - should create excess demand and increase prices
         vm.prank(auctioneer);
@@ -210,13 +207,13 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // All 3 bidders submit in round 2
         vm.prank(testBidder1);
-        cpaManager.submitBid(auctionId, demands1_2, partialCommit1, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands1_2, 1000 * 10**18);
         
         vm.prank(testBidder2);
-        cpaManager.submitBid(auctionId, demands2_2, partialCommit2, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands2_2, 1000 * 10**18);
         
         vm.prank(testBidder3);
-        cpaManager.submitBid(auctionId, demands3_2, partialCommit3, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands3_2, 1000 * 10**18);
         
         // End round 2
         vm.prank(auctioneer);
@@ -263,13 +260,13 @@ contract CPACompleteFlowTest is CPATestBase {
         demands3_3[1] = 30 * 10**18;  // Further reduced
         
         vm.prank(testBidder1);
-        cpaManager.submitBid(auctionId, demands1_3, partialCommit1, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands1_3, 1000 * 10**18);
         
         vm.prank(testBidder2);
-        cpaManager.submitBid(auctionId, demands2_3, partialCommit2, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands2_3, 1000 * 10**18);
         
         vm.prank(testBidder3);
-        cpaManager.submitBid(auctionId, demands3_3, partialCommit3, 1000 * 10**18);
+        cpaManager.submitBid(auctionId, demands3_3, 1000 * 10**18);
         
         // End round 3
         vm.prank(auctioneer);
@@ -491,7 +488,6 @@ contract CPACompleteFlowTest is CPATestBase {
             allocator: allocator1,
             bundleIds: allocator1Bundles,
             totalValue: 0,
-            score: 0,
             timestamp: block.timestamp
         });
 
@@ -519,7 +515,6 @@ contract CPACompleteFlowTest is CPATestBase {
             allocator: allocator2,
             bundleIds: allocator2Bundles,
             totalValue: 0,
-            score: 0,
             timestamp: block.timestamp
         });
 
@@ -547,7 +542,6 @@ contract CPACompleteFlowTest is CPATestBase {
             allocator: allocator3,
             bundleIds: allocator3Bundles,
             totalValue: 0,
-            score: 0,
             timestamp: block.timestamp
         });
 
