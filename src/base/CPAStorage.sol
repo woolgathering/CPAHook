@@ -122,6 +122,9 @@ abstract contract CPAStorage {
     /// @notice Bidder stake mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderStake;
 
+	/// @notice The amount of stake that is available to be reclaimed by a bidder
+	mapping(AuctionId => mapping(address => uint256)) public availableToReclaim;
+
     /// @notice Bidder bid points mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
 

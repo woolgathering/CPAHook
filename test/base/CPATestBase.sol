@@ -25,6 +25,7 @@ import { AuctionId } from "../../src/AuctionId.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { IErrorsAndEvents } from "../../src/utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "../../src/CommitReveal.sol";
+import { BundleId, BundleIdLibrary } from "../../src/BundleId.sol";
 import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 /// @title CPATestBase
@@ -51,6 +52,12 @@ abstract contract CPATestBase is Deployers {
     address public bidder2;
     address public proxy1;
     address public proxy2;
+    
+    // Additional test accounts for over-allocation testing
+    address public bidder3;
+    address public proxy3;
+    address public bidder4;
+    address public proxy4;
     
     // Pool keys
     PoolKey public asset1PoolKey;
@@ -93,6 +100,12 @@ abstract contract CPATestBase is Deployers {
         bidder2 = makeAddr("bidder2");
         proxy1 = makeAddr("proxy1");
         proxy2 = makeAddr("proxy2");
+        
+        // Additional accounts for over-allocation testing
+        bidder3 = makeAddr("bidder3");
+        proxy3 = makeAddr("proxy3");
+        bidder4 = makeAddr("bidder4");
+        proxy4 = makeAddr("proxy4");
     }
 
     /// @notice Deploy core contracts
@@ -173,6 +186,66 @@ abstract contract CPATestBase is Deployers {
     ) internal returns (AuctionId) {
         vm.prank(owner);
         return cpaManager.createAuction(config, owner);
+    }
+
+    /// @notice Create a new auction configuration with different pool keys for testing
+    function createNewAuctionConfig() internal returns (AuctionTypes.AuctionConfig memory) {
+        // Create new tokens for a separate auction
+        MockERC20 newAsset1Token = new MockERC20("New Asset 1", "NA1", 18);
+        MockERC20 newAsset2Token = new MockERC20("New Asset 2", "NA2", 18);
+        
+        // Create new pool keys with different tokens
+        PoolKey memory newAsset1PoolKey = PoolKey({
+            currency0: Currency.wrap(address(newAsset1Token)),
+            currency1: Currency.wrap(address(numeraireToken)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(poolHook))
+        });
+
+        PoolKey memory newAsset2PoolKey = PoolKey({
+            currency0: Currency.wrap(address(newAsset2Token)),
+            currency1: Currency.wrap(address(numeraireToken)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: 60,
+            hooks: IHooks(address(poolHook))
+        });
+
+        // Sort currencies by address
+        (newAsset1PoolKey.currency0, newAsset1PoolKey.currency1) = newAsset1PoolKey.currency0 < newAsset1PoolKey.currency1
+            ? (newAsset1PoolKey.currency0, newAsset1PoolKey.currency1)
+            : (newAsset1PoolKey.currency1, newAsset1PoolKey.currency0);
+
+        (newAsset2PoolKey.currency0, newAsset2PoolKey.currency1) = newAsset2PoolKey.currency0 < newAsset2PoolKey.currency1
+            ? (newAsset2PoolKey.currency0, newAsset2PoolKey.currency1)
+            : (newAsset2PoolKey.currency1, newAsset2PoolKey.currency0);
+
+        // Create auction config with new pool keys
+        PoolKey[] memory newPoolKeys = new PoolKey[](2);
+        newPoolKeys[0] = newAsset1PoolKey;
+        newPoolKeys[1] = newAsset2PoolKey;
+
+        uint160[] memory newInitialSqrtPricesX96 = new uint160[](2);
+        newInitialSqrtPricesX96[0] = 79228162514264337593543950336; // Price = 1
+        newInitialSqrtPricesX96[1] = 112045541949572287496682733568; // Price = 2
+
+        int24[] memory newPriceIncrements = new int24[](2);
+        newPriceIncrements[0] = 60 * 10; // 600 ticks
+        newPriceIncrements[1] = 60 * 5; // 300 ticks
+
+        return AuctionTypes.AuctionConfig({
+            commonNumeraire: address(numeraireToken),
+            minSpendRatio: 1000,
+            dropoutSlashRatio: 1000,
+            spendingViolationSlashRatio: 2000,
+            maxRounds: 100,
+            allocatorStakeRequirement: 10000 * 10**18,
+            proxyStakeRequirement: 1000 * 10**18,
+            allocationWindow: 1800,
+            poolKeys: newPoolKeys,
+            initialSqrtPricesX96: newInitialSqrtPricesX96,
+            priceIncrements: newPriceIncrements
+        });
     }
 
     /// @notice Create a standard auction configuration for testing
@@ -337,5 +410,111 @@ abstract contract CPATestBase is Deployers {
         }
         
         return price;
+    }
+    
+    /// @notice Submit bundles during proxy phase with specific quantities for testing
+    /// @param _auctionId The auction ID
+    /// @param _proxy The proxy address
+    /// @param _bidder The bidder address  
+    /// @param _quantities Array of quantities for each asset
+    /// @param _saltA Salt for bidder
+    /// @param _saltB Salt for proxy
+    /// @return bundleId The created bundle ID
+    function submitTestBundle(
+        AuctionId _auctionId,
+        address _proxy,
+        address _bidder,
+        uint256[] memory _quantities,
+        string memory _saltA,
+        string memory _saltB
+    ) internal returns (BundleId bundleId) {
+        // Create commit-reveal data
+        bytes32 saltA = keccak256(bytes(_saltA));
+        bytes32 saltB = keccak256(bytes(_saltB));
+        bytes32 commitHash = CommitReveal.generateCommitHash(_bidder, _proxy, saltA, saltB);
+        
+        // Set up proxy commitment
+        vm.prank(_proxy);
+        cpaManager.commitToBidder(_auctionId, commitHash);
+        
+        // Submit bundle
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: _auctionId,
+            commitHash: commitHash,
+            value: 2000 * 10**18,
+            quantities: _quantities,
+            timestamp: block.timestamp
+        });
+        
+        vm.prank(_proxy);
+        cpaManager.submitBundle(_auctionId, commitHash, bundleData);
+        
+        // Generate bundle ID
+        bundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(_quantities)));
+        
+        return bundleId;
+    }
+
+    /// @notice Create additional bundles for over-allocation testing during proxy phase
+    /// @param _auctionId The auction ID
+    /// @return bundleId3 Bundle ID for proxy1 with full deposit amounts (over-allocation)
+    /// @return bundleId4 Bundle ID for proxy2 with partial amounts (valid allocation)
+    function createOverAllocationBundles(AuctionId _auctionId) internal returns (BundleId bundleId3, BundleId bundleId4) {
+        // Create additional bundle from proxy1 that demands full deposit amounts (guaranteed over-allocation)
+        // Reuse existing proxy1 commitment but with different quantities
+        uint256[] memory fullDemands = new uint256[](2);
+        fullDemands[0] = 1000 * 10**18; // Full asset1 deposit
+        fullDemands[1] = 1000 * 10**18; // Full asset2 deposit
+        
+        // Create new commit hash for proxy1 with different quantities
+        bytes32 saltA1_alt = keccak256("saltA1_alt");
+        bytes32 saltB1_alt = keccak256("saltB1_alt");
+        bytes32 commitHash1_alt = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1_alt, saltB1_alt);
+        
+        // Set up proxy commitment for the alternative bundle
+        vm.prank(proxy1);
+        cpaManager.commitToBidder(_auctionId, commitHash1_alt);
+        
+        // Submit the full deposit bundle
+        AuctionTypes.Bundle memory bundleData3 = AuctionTypes.Bundle({
+            auctionId: _auctionId,
+            commitHash: commitHash1_alt,
+            value: 2000 * 10**18,
+            quantities: fullDemands,
+            timestamp: block.timestamp
+        });
+        
+        vm.prank(proxy1);
+        cpaManager.submitBundle(_auctionId, commitHash1_alt, bundleData3);
+        bundleId3 = BundleIdLibrary.createId(commitHash1_alt, keccak256(abi.encode(fullDemands)));
+        
+        // Create additional bundle from proxy2 with smaller amounts (for valid allocation testing)
+        uint256[] memory partialDemands = new uint256[](2);
+        partialDemands[0] = 200 * 10**18; // Smaller asset1 quantity
+        partialDemands[1] = 300 * 10**18; // Smaller asset2 quantity
+        
+        // Create new commit hash for proxy2 with different quantities
+        bytes32 saltA2_alt = keccak256("saltA2_alt");
+        bytes32 saltB2_alt = keccak256("saltB2_alt");
+        bytes32 commitHash2_alt = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2_alt, saltB2_alt);
+        
+        // Set up proxy commitment for the alternative bundle
+        vm.prank(proxy2);
+        cpaManager.commitToBidder(_auctionId, commitHash2_alt);
+        
+        // Submit the smaller quantity bundle
+        AuctionTypes.Bundle memory bundleData4 = AuctionTypes.Bundle({
+            auctionId: _auctionId,
+            commitHash: commitHash2_alt,
+            value: 2000 * 10**18,
+            quantities: partialDemands,
+            timestamp: block.timestamp
+        });
+        
+        vm.prank(proxy2);
+        cpaManager.submitBundle(_auctionId, commitHash2_alt, bundleData4);
+        bundleId4 = BundleIdLibrary.createId(commitHash2_alt, keccak256(abi.encode(partialDemands)));
+        
+        return (bundleId3, bundleId4);
     }
 }

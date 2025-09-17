@@ -6,52 +6,15 @@ import { CPATestBase } from "./base/CPATestBase.sol";
 import { PriceUtils } from "../src/utils/PriceUtils.sol";
 import { console } from "forge-std/console.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { FullMath } from "@uniswap/v4-core/src/libraries/FullMath.sol";
+import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 contract PriceUtilsTest is CPATestBase {
 
     function setUp() public override {
         super.setUp();
         
-    }   
-
-    function testPrintPrices() public {
-        // Initialize asset1 pool
-        poolManager.initialize(asset1PoolKey, 79228162514264337593543950336); // sqrtPriceX96 for price ~1
-        
-        // Initialize asset2 pool  
-        poolManager.initialize(asset2PoolKey, 112045541949572287496682733568); // sqrtPriceX96 for price ~2
-
-        // Test asset1 pool prices
-        uint256 asset1Price0 = PriceUtils.getPriceOfCurrency0(poolManager, asset1PoolKey);
-        uint256 asset1Price1 = PriceUtils.getPriceOfCurrency1(poolManager, asset1PoolKey);
-
-        console.log("=== Asset1 Pool Prices ===");
-        console.log("Price of Currency0 in terms of Currency1 (fixed-point):", asset1Price0);
-        console.log("Price of Currency1 in terms of Currency0 (fixed-point):", asset1Price1);
-
-        // Test asset2 pool prices
-        uint256 asset2Price0 = PriceUtils.getPriceOfCurrency0(poolManager, asset2PoolKey);
-        uint256 asset2Price1 = PriceUtils.getPriceOfCurrency1(poolManager, asset2PoolKey);
-
-        console.log("=== Asset2 Pool Prices ===");
-        console.log("Price of Currency0 in terms of Currency1 (fixed-point):", asset2Price0);
-        console.log("Price of Currency1 in terms of Currency0 (fixed-point):", asset2Price1);
-
-        // Test getting price of specific currencies
-        uint256 asset1PriceInNumeraire = PriceUtils.getPriceOfCurrency(
-            poolManager, 
-            asset1PoolKey, 
-            address(asset1Token)
-        );
-        uint256 asset2PriceInNumeraire = PriceUtils.getPriceOfCurrency(
-            poolManager, 
-            asset2PoolKey, 
-            address(asset2Token)
-        );
-
-        console.log("=== Asset Prices in Numeraire ===");
-        console.log("Asset1 price in numeraire:", asset1PriceInNumeraire);
-        console.log("Asset2 price in numeraire:", asset2PriceInNumeraire);
     }
 
     function testAsset1PoolPrices() public {
@@ -162,11 +125,33 @@ contract PriceUtilsTest is CPATestBase {
         }
     }
 
+    // Test edge cases with explicit revert expectations
+    function testPriceUtilsBounds() public {
+        // Test with sqrtPriceX96 that will result in price = 0
+        uint160 testPrice = TickMath.MIN_SQRT_PRICE; // Use minimum price
+        poolManager.initialize(asset1PoolKey, testPrice);
+        
+        // This should revert with our zero price checking
+        vm.expectRevert("PriceUtils: price too small to compute accurately");
+        PriceUtils.getPriceOfCurrency(poolManager, asset1PoolKey, address(asset1Token));
+    }
+    
+    // Simple test to verify PriceUtils works
+    function testPriceUtilsBasic() public {
+        // Use a reasonable price that should work
+        uint160 testPrice = TickMath.MIN_SQRT_PRICE + 1000000; // Above minimum
+        poolManager.initialize(asset1PoolKey, testPrice);
+        
+        // This should work without reverting
+        uint256 price = PriceUtils.getPriceOfCurrency(poolManager, asset1PoolKey, address(asset1Token));
+        assertGt(price, 0, "Price should be positive");
+    }
+
     // Fuzz tests for comprehensive price testing
     function testFuzzPriceConsistency(uint160 sqrtPriceX96) public {
-        // Bound the sqrtPriceX96 to reasonable values (avoiding overflow/underflow)
-        vm.assume(sqrtPriceX96 >= 4295128739); // ~0.0001 price
-        vm.assume(sqrtPriceX96 <= 79228162514264337593543950336); // ~1 price (more conservative upper bound)
+        // Bound the sqrtPriceX96 to valid Uniswap V4 values
+        vm.assume(sqrtPriceX96 >= TickMath.MIN_SQRT_PRICE);
+        vm.assume(sqrtPriceX96 <= TickMath.MAX_SQRT_PRICE);
         
         // Initialize pool with fuzzed price
         poolManager.initialize(asset1PoolKey, sqrtPriceX96);
@@ -181,9 +166,9 @@ contract PriceUtilsTest is CPATestBase {
     }
 
     function testFuzzDirectVsCurrencyFunctions(uint160 sqrtPriceX96) public {
-        // Bound the sqrtPriceX96 to reasonable values
-        vm.assume(sqrtPriceX96 >= 4295128739); // ~0.0001 price
-        vm.assume(sqrtPriceX96 <= 79228162514264337593543950336); // ~1 price (more conservative upper bound)
+        // Bound the sqrtPriceX96 to valid Uniswap V4 values
+        vm.assume(sqrtPriceX96 >= TickMath.MIN_SQRT_PRICE);
+        vm.assume(sqrtPriceX96 <= TickMath.MAX_SQRT_PRICE);
         
         // Initialize pool with fuzzed price
         poolManager.initialize(asset1PoolKey, sqrtPriceX96);
@@ -214,9 +199,9 @@ contract PriceUtilsTest is CPATestBase {
     }
 
     function testFuzzPriceInversion(uint160 sqrtPriceX96) public {
-        // Bound the sqrtPriceX96 to reasonable values
-        vm.assume(sqrtPriceX96 >= 4295128739); // ~0.0001 price
-        vm.assume(sqrtPriceX96 <= 79228162514264337593543950336); // ~1 price (more conservative upper bound)
+        // Bound the sqrtPriceX96 to valid Uniswap V4 values
+        vm.assume(sqrtPriceX96 >= TickMath.MIN_SQRT_PRICE);
+        vm.assume(sqrtPriceX96 <= TickMath.MAX_SQRT_PRICE);
         
         // Initialize pool with fuzzed price
         poolManager.initialize(asset1PoolKey, sqrtPriceX96);
@@ -239,9 +224,9 @@ contract PriceUtilsTest is CPATestBase {
     }
 
     function testFuzzPriceRange(uint160 sqrtPriceX96) public {
-        // Bound the sqrtPriceX96 to reasonable values
-        vm.assume(sqrtPriceX96 >= 4295128739); // ~0.0001 price
-        vm.assume(sqrtPriceX96 <= 79228162514264337593543950336); // ~1 price (more conservative upper bound)
+        // Bound the sqrtPriceX96 to valid Uniswap V4 values
+        vm.assume(sqrtPriceX96 >= TickMath.MIN_SQRT_PRICE);
+        vm.assume(sqrtPriceX96 <= TickMath.MAX_SQRT_PRICE);
         
         // Initialize pool with fuzzed price
         poolManager.initialize(asset1PoolKey, sqrtPriceX96);
@@ -267,9 +252,9 @@ contract PriceUtilsTest is CPATestBase {
     }
 
     function testFuzzMultiplePools(uint160 sqrtPriceX96_1, uint160 sqrtPriceX96_2) public {
-        // Bound the sqrtPriceX96 values to reasonable ranges
-        vm.assume(sqrtPriceX96_1 >= 4295128739 && sqrtPriceX96_1 <= 79228162514264337593543950336);
-        vm.assume(sqrtPriceX96_2 >= 4295128739 && sqrtPriceX96_2 <= 79228162514264337593543950336);
+        // Bound the sqrtPriceX96 values to valid Uniswap V4 ranges
+        vm.assume(sqrtPriceX96_1 >= TickMath.MIN_SQRT_PRICE && sqrtPriceX96_1 <= TickMath.MAX_SQRT_PRICE);
+        vm.assume(sqrtPriceX96_2 >= TickMath.MIN_SQRT_PRICE && sqrtPriceX96_2 <= TickMath.MAX_SQRT_PRICE);
         
         // Initialize both pools with different fuzzed prices
         poolManager.initialize(asset1PoolKey, sqrtPriceX96_1);

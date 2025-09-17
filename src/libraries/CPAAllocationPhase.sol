@@ -326,17 +326,6 @@ library CPAAllocationPhase {
 		// Determine currency order and calculate parameters
 		bool assetIsCurrency0 = auctionInfo[auctionId].commonNumeraire != address(Currency.unwrap(poolKey.currency0));
 		
-		// Debug output
-		console.log("=== TICK CALCULATION DEBUG ===");
-		console.log("PoolId:", uint256(PoolId.unwrap(poolId)));
-		console.log("Current tick:", tick);
-		console.log("Tick spacing:", poolKey.tickSpacing);
-		console.log("Asset is currency0:", assetIsCurrency0);
-		console.log("Deposit amount:", pool.depositAmount);
-		console.log("Currency0 address:", address(Currency.unwrap(poolKey.currency0)));
-		console.log("Currency1 address:", address(Currency.unwrap(poolKey.currency1)));
-		console.log("Common numeraire:", auctionInfo[auctionId].commonNumeraire);
-		
 		if (assetIsCurrency0) {
 			// Asset is currency0
 			tickLower = _alignComputedTickWithTickSpacing(false, tick, poolKey.tickSpacing);
@@ -346,9 +335,6 @@ library CPAAllocationPhase {
 				TickMath.getSqrtPriceAtTick(tickUpper), 
 				pool.depositAmount
 			);
-			console.log("Asset is currency0 - tickLower:", tickLower);
-			console.log("Asset is currency0 - tickUpper:", tickUpper);
-			console.log("Asset is currency0 - liquidity:", liquidity);
 		} else {
 			// Asset is currency1
 			tickUpper = _alignComputedTickWithTickSpacing(true, tick, poolKey.tickSpacing);
@@ -358,9 +344,6 @@ library CPAAllocationPhase {
 				TickMath.getSqrtPriceAtTick(tickUpper), 
 				pool.depositAmount
 			);
-			console.log("Asset is currency1 - tickLower:", tickLower);
-			console.log("Asset is currency1 - tickUpper:", tickUpper);
-			console.log("Asset is currency1 - liquidity:", liquidity);
 		}
 	}
 
