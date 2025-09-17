@@ -44,8 +44,10 @@ interface IErrorsAndEvents {
 	error DuplicateBundle();
 	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
 	error InvalidQuantities(AuctionId auctionId, uint256 quantities);
-	error DuplicateAllocation();
-	error InvalidReveal();
+	error DuplicateAllocation(AuctionId auctionId, bytes32 commitHash);
+	error NoSuchCommitHash(AuctionId auctionId, bytes32 commitHash);
+	error DuplicateReveal(AuctionId auctionId, bytes32 commitHash);
+	error CommitHashNotYetRevealed(AuctionId auctionId, bytes32 commitHash);
 	error Unauthorized();
 	error SetupNotComplete();
 	error InvalidNumeraire();
@@ -61,4 +63,5 @@ interface IErrorsAndEvents {
 	error ClockAlreadyOpen();
 	error InvalidBidsLength();
 	error PoolPriceUpdateFailed();
+	error PoolNotFound(AuctionId auctionId, PoolId poolId);
 }
