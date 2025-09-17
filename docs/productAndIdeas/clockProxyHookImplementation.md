@@ -403,6 +403,9 @@ function selectWinningAllocation(...) pure returns (uint256)
 - [ ] Add security measures
 - [ ] Create deployment scripts
 
+### Phase 10: Misc Updates
+- [ ] Normalize price computations for tokens in different decimals
+
 ## Key Design Decisions
 
 ### 1. CPAManager as Pure Manager Contract
