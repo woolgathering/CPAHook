@@ -20,4 +20,4 @@ docs/papers/
 # Node modules
 node_modules/
 
-lib/dopper/lib/
+lib/dopper/lib/docs/doppler/
