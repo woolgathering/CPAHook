@@ -4,10 +4,10 @@ pragma solidity ^0.8.24;
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { BundleId } from "../BundleId.sol";
+import { BundleId } from "../types/BundleId.sol";
 
-import { AuctionTypes } from "../AuctionTypes.sol";
-import { AuctionId } from "../AuctionId.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 
 abstract contract CPAStorage {

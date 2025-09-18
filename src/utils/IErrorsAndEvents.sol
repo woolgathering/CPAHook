@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { AuctionTypes } from "../AuctionTypes.sol";
-import { AuctionId } from "../AuctionId.sol";
-import { BundleId } from "../BundleId.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
+import { BundleId } from "../types/BundleId.sol";
 import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { AllocationId } from "../AllocationId.sol";
+import { AllocationId } from "../types/AllocationId.sol";
 
 /**
  * @title IClockProxyAuction

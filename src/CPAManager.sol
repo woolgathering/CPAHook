@@ -8,7 +8,6 @@ import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { IClockProxyAuction } from "./interfaces/IClockProxyAuction.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
@@ -22,6 +21,7 @@ import { CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol"; 
+
 import { CPAStorage } from "./base/CPAStorage.sol";
 import { CPASetup } from "./libraries/CPASetup.sol";
 import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
@@ -30,11 +30,11 @@ import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 import { CPASettlementPhase } from "./libraries/CPASettlementPhase.sol";
 
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
-import { AuctionTypes } from "./AuctionTypes.sol";
-import { AuctionId } from "./AuctionId.sol";
-import { CommitReveal } from "./CommitReveal.sol";
+import { AuctionTypes } from "./types/AuctionTypes.sol";
+import { AuctionId } from "./types/AuctionId.sol";
+import { CommitReveal } from "./utils/CommitReveal.sol";
 import { PoolHook } from "./PoolHook.sol";
-import { BundleId } from "./BundleId.sol";
+import { BundleId } from "./types/BundleId.sol";
 
 /**
  * @title CPAManager
