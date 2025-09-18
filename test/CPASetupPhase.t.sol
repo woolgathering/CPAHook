@@ -52,31 +52,21 @@ contract CPASetupPhaseTest is CPATestBase {
 
 		// ============ Verify Auction Info Struct ============
 		// Check that auctionInfo is properly populated
-		(
-			address auctionOwner,
-			address commonNumeraire,
-			AuctionTypes.AuctionConfig memory auctionConfig,
-			AuctionTypes.AuctionPhase currentPhase,
-			AuctionTypes.AuctionStatus currentStatus,
-			uint256 clockOpen,
-			AuctionTypes.Bid[] memory roundBids,
-			uint256 currentRound,
-			PoolKey[] memory auctionPoolKeys
-		) = cpaManager.getAuctionInfo(auctionId);
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
 		
-		assertEq(auctionOwner, protocolOwner, "Auction owner should be the protocol owner");
-		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire should be the numeraire token");
-		assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
-		assertEq(uint8(currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
-		assertEq(clockOpen, 1, "Clock should not be open initially");
-		assertEq(currentRound, 0, "Current round should be 0");
-		assertEq(auctionPoolKeys.length, 2, "Should have 2 asset pools");
+		assertEq(auctionInfo.auctionOwner, protocolOwner, "Auction owner should be the protocol owner");
+		assertEq(auctionInfo.commonNumeraire, address(numeraireToken), "Common numeraire should be the numeraire token");
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
+		assertEq(uint8(auctionInfo.currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
+		assertEq(auctionInfo.clockOpen, 1, "Clock should not be open initially");
+		assertEq(auctionInfo.currentRound, 0, "Current round should be 0");
+		assertEq(auctionInfo.poolKeys.length, 2, "Should have 2 asset pools");
 		
 		// Verify the pool keys in auctionInfo match CPATestBase's pool keys
-		assertEq(Currency.unwrap(auctionPoolKeys[0].currency0), Currency.unwrap(asset1PoolKey.currency0), "Asset1 pool currency0 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[0].currency1), Currency.unwrap(asset1PoolKey.currency1), "Asset1 pool currency1 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[1].currency0), Currency.unwrap(asset2PoolKey.currency0), "Asset2 pool currency0 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[1].currency1), Currency.unwrap(asset2PoolKey.currency1), "Asset2 pool currency1 should match");
+		assertEq(Currency.unwrap(auctionInfo.poolKeys[0].currency0), Currency.unwrap(asset1PoolKey.currency0), "Asset1 pool currency0 should match");
+		assertEq(Currency.unwrap(auctionInfo.poolKeys[0].currency1), Currency.unwrap(asset1PoolKey.currency1), "Asset1 pool currency1 should match");
+		assertEq(Currency.unwrap(auctionInfo.poolKeys[1].currency0), Currency.unwrap(asset2PoolKey.currency0), "Asset2 pool currency0 should match");
+		assertEq(Currency.unwrap(auctionInfo.poolKeys[1].currency1), Currency.unwrap(asset2PoolKey.currency1), "Asset2 pool currency1 should match");
 		
 		// ============ Verify Pool Info Structs ============
 		// Check that poolInfo is properly populated for each pool
@@ -142,7 +132,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		// ============ Verify Auction Config ============
 		// We can't directly access the config struct from auctionInfo, but we can verify
 		// that the commonNumeraire matches what we expect
-		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire in auctionInfo should match config");
+		assertEq(auctionInfo.commonNumeraire, address(numeraireToken), "Common numeraire in auctionInfo should match config");
 		
 
 	}
@@ -187,31 +177,21 @@ contract CPASetupPhaseTest is CPATestBase {
 		
 		// ============ Verify Auction Info Struct ============
 		// Check that auctionInfo is properly populated
-		(
-			address auctionOwner,
-			address commonNumeraire,
-			, // config
-			AuctionTypes.AuctionPhase currentPhase,
-			AuctionTypes.AuctionStatus currentStatus,
-			uint256 clockOpen,
-			, // roundBids
-			uint256 currentRound,
-			PoolKey[] memory auctionPoolKeys
-		) = cpaManager.getAuctionInfo(auctionId);
+		AuctionTypes.AuctionInfo memory auctionInfo2 = cpaManager.getAuctionInfo(auctionId);
 		
-		assertEq(auctionOwner, auctioneer, "Auction owner should be the auctioneer");
-		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire should be the numeraire token");
-		assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
-		assertEq(uint8(currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
-		assertEq(clockOpen, 1, "Clock should not be open initially");
-		assertEq(currentRound, 0, "Current round should be 0");
-		assertEq(auctionPoolKeys.length, 2, "Should have 2 asset pools");
+		assertEq(auctionInfo2.auctionOwner, auctioneer, "Auction owner should be the auctioneer");
+		assertEq(auctionInfo2.commonNumeraire, address(numeraireToken), "Common numeraire should be the numeraire token");
+		assertEq(uint8(auctionInfo2.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Auction should start in Setup phase");
+		assertEq(uint8(auctionInfo2.currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Auction should be Active");
+		assertEq(auctionInfo2.clockOpen, 1, "Clock should not be open initially");
+		assertEq(auctionInfo2.currentRound, 0, "Current round should be 0");
+		assertEq(auctionInfo2.poolKeys.length, 2, "Should have 2 asset pools");
 		
 		// Verify the pool keys in auctionInfo match CPATestBase's pool keys
-		assertEq(Currency.unwrap(auctionPoolKeys[0].currency0), Currency.unwrap(asset1PoolKey.currency0), "First pool currency0 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[0].currency1), Currency.unwrap(asset1PoolKey.currency1), "First pool currency1 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[1].currency0), Currency.unwrap(asset2PoolKey.currency0), "Second pool currency0 should match");
-		assertEq(Currency.unwrap(auctionPoolKeys[1].currency1), Currency.unwrap(asset2PoolKey.currency1), "Second pool currency1 should match");
+		assertEq(Currency.unwrap(auctionInfo2.poolKeys[0].currency0), Currency.unwrap(asset1PoolKey.currency0), "First pool currency0 should match");
+		assertEq(Currency.unwrap(auctionInfo2.poolKeys[0].currency1), Currency.unwrap(asset1PoolKey.currency1), "First pool currency1 should match");
+		assertEq(Currency.unwrap(auctionInfo2.poolKeys[1].currency0), Currency.unwrap(asset2PoolKey.currency0), "Second pool currency0 should match");
+		assertEq(Currency.unwrap(auctionInfo2.poolKeys[1].currency1), Currency.unwrap(asset2PoolKey.currency1), "Second pool currency1 should match");
 		
 		// ============ Verify Pool Info Structs ============
 		// Check that poolInfo is properly populated for each asset pool
@@ -273,7 +253,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		// ============ Verify Auction Config ============
 		// We can't directly access the config struct from auctionInfo, but we can verify
 		// that the commonNumeraire matches what we expect
-		assertEq(commonNumeraire, address(numeraireToken), "Common numeraire in auctionInfo should match config");
+		assertEq(auctionInfo2.commonNumeraire, address(numeraireToken), "Common numeraire in auctionInfo should match config");
 		
 		// Test that the auction manager can actually move tokens
 		// This will be important for testing the deposit and settlement functionality

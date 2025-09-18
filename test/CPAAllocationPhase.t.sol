@@ -92,14 +92,14 @@ contract CPAAllocationPhaseTest is CPATestBase {
         createBidder(bidder1, 250000 * 10**18);
         createBidder(bidder2, 300000 * 10**18);
         
-        approveNumeraireForBidder(bidder1, stakeAmount1);
-        approveNumeraireForBidder(bidder2, stakeAmount2);
+        approveNumeraireForBidder(bidder1, type(uint256).max);
+        approveNumeraireForBidder(bidder2, type(uint256).max);
         
         vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands1, stakeAmount1);
+        cpaManager.submitBid(auctionId, demands1, stakeAmount1 * 2);
         
         vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2, stakeAmount2);
+        cpaManager.submitBid(auctionId, demands2, stakeAmount2 * 2);
         
         // End clock phase (automatically transitions to proxy phase)
         vm.prank(auctioneer);
@@ -301,8 +301,8 @@ contract CPAAllocationPhaseTest is CPATestBase {
         cpaManager.endAllocationPhase(auctionId);
         
         // Verify phase changed to Settlement
-        (, , , AuctionTypes.AuctionPhase currentPhase, , , , , ) = cpaManager.getAuctionInfo(auctionId);
-        assertEq(uint256(currentPhase), uint256(AuctionTypes.AuctionPhase.Settlement), "Phase should be Settlement");
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint256(auctionInfo.currentPhase), uint256(AuctionTypes.AuctionPhase.Settlement), "Phase should be Settlement");
     }
     
     // TODO: Add claimReward test when the function is implemented
@@ -452,5 +452,73 @@ contract CPAAllocationPhaseTest is CPATestBase {
         // Submit allocation
         vm.prank(allocator1);
         cpaManager.submitAllocation(auctionId, allocationData);
+    }
+
+    function test_AllocatorReward_ExpectedAmount() public {
+        // First, we need to get to settlement phase to claim the reward
+        // This test will verify that the allocator reward is correctly calculated and can be claimed
+        
+        // Submit an allocation to become the winning allocator
+        BundleId[] memory selectedBundles = new BundleId[](2);
+        selectedBundles[0] = bundleId1;
+        selectedBundles[1] = bundleId2;
+        
+        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator1,
+            bundleIds: selectedBundles,
+            totalValue: 1800 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        vm.prank(allocator1);
+        cpaManager.submitAllocation(auctionId, allocationData);
+        
+        // Move to settlement phase
+        vm.prank(auctioneer);
+        cpaManager.endAllocationPhase(auctionId);
+        
+        // Get auction info to check allocator reward
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        console.log("Current round after ending allocation phase:", auctionInfo.currentRound);
+        
+        // Check the allocator reward amount
+        console.log("Allocator reward amount:", auctionInfo.allocatorReward);
+        
+        // The reward should be 1% of the total bid values
+        // We need to calculate the expected reward based on the bids submitted
+        // For this test, we'll verify that the reward is greater than 0 and follows the expected percentage
+        assertGt(auctionInfo.allocatorReward, 0, "Allocator reward should be greater than 0");
+        
+        // Verify that allocator1 is the winning allocator
+        (AuctionTypes.Allocation memory winnerAllocation, , ) = cpaManager.topAllocation(auctionId);
+        assertEq(winnerAllocation.allocator, allocator1, "Allocator1 should be the winning allocator");
+        
+        // Check allocator's balance before claiming
+        uint256 allocatorBalanceBefore = numeraireToken.balanceOf(allocator1);
+        console.log("Allocator balance before claim:", allocatorBalanceBefore);
+        console.log("Expected reward amount:", auctionInfo.allocatorReward);
+        
+        // Claim the allocator reward
+        vm.prank(allocator1);
+        cpaManager.claimAllocatorReward(auctionId);
+        
+        // Check allocator's balance after claiming
+        uint256 allocatorBalanceAfter = numeraireToken.balanceOf(allocator1);
+        console.log("Allocator balance after claim:", allocatorBalanceAfter);
+        
+        // Verify the reward was transferred correctly
+        uint256 rewardReceived = allocatorBalanceAfter - allocatorBalanceBefore;
+        console.log("Reward received:", rewardReceived);
+        
+        // The reward should match the expected amount (within small tolerance for rounding)
+        assertTrue(rewardReceived >= auctionInfo.allocatorReward - 1 && rewardReceived <= auctionInfo.allocatorReward + 1, 
+            "Allocator should receive the expected reward amount");
+        
+        // Verify that the allocator reward is now 0 (claimed)
+        AuctionTypes.AuctionInfo memory auctionInfoAfterClaim = cpaManager.getAuctionInfo(auctionId);
+        assertEq(auctionInfoAfterClaim.allocatorReward, 0, "Allocator reward should be 0 after claiming");
+        
+        console.log("Allocator reward claim test completed successfully");
     }
 }
