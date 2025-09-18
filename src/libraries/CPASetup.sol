@@ -11,11 +11,10 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { PoolUtils } from "../utils/PoolUtils.sol";
-import { AuctionTypes } from "../AuctionTypes.sol";
-import { AuctionId, AuctionIdLibrary } from "../AuctionId.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId, AuctionIdLibrary } from "../types/AuctionId.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
-import { IClockProxyAuction } from "../interfaces/IClockProxyAuction.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
 
@@ -114,20 +113,6 @@ library CPASetup {
 
 		return auctionId;
 	}
-
-	// function moveDepositsToPools(
-	// 	CPAStorage self, 
-	// 	mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo, 
-	// 	mapping(AuctionId => mapping(PoolId => AuctionTypes.PoolInfo)) storage poolInfo, 
-	// 	AuctionId auctionId
-	// ) internal {
-	// 	// go through the pools and transfer the deposit amount from the sender to the hook via the pool manager
-	// 	PoolKey[] memory pools = auctionInfo[auctionId].poolKeys;
-	// 	for (uint256 i = 0; i < pools.length; i++) {
-	// 		PoolId poolId = pools[i].toId();
-	// 		moveDeposit(self, auctionId, poolId, poolInfo[auctionId][poolId].depositAmount);
-	// 	}
-	// }
 
 	/**
 	 * @notice Move deposits from auction owner to a single pool, giving ERC6909 claims to PoolHook

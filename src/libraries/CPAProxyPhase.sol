@@ -6,11 +6,11 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { AuctionTypes } from "../AuctionTypes.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
-import { AuctionId } from "../AuctionId.sol";
-import { BundleId, BundleIdLibrary } from "../BundleId.sol";
+import { AuctionId } from "../types/AuctionId.sol";
+import { BundleId, BundleIdLibrary } from "../types/BundleId.sol";
 
 library CPAProxyPhase {
 

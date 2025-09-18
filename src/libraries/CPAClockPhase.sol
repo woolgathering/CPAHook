@@ -10,12 +10,12 @@ import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import { AuctionTypes } from "../AuctionTypes.sol";
-import { AuctionId } from "../AuctionId.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { CommitReveal } from "../CommitReveal.sol";
+import { CommitReveal } from "../utils/CommitReveal.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
 
