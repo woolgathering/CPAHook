@@ -4,33 +4,36 @@ Rok is a privacy-preserving auction protocol built on Uniswap V4 hooks that enab
 
 ## Overview
 
-This project implements a clock-proxy auction system that leverages Uniswap V4 hooks to create a novel auction mechanism. Clock-proxy auctions are established systems for combinatorial price discovery, proven in complex asset distributions across traditional finance.
+Rok implements a clock-proxy auction system that leverages hooks and the singleton architecture of Uniswap V4. Clock-proxy auctions are established systems for combinatorial price discovery, proven in complex asset distributions across traditional finance. See [The Clock-Proxy Auction:
+A Practical Combinatorial Auction Design](https://web.stanford.edu/~milgrom/publishedarticles/clock-proxy-auction.pdf) or [Clock Auctions, Proxy Auctions, and Possible Hybrids](https://wireless.fcc.gov/auctions/conferences/combin2003/presentations/ausubel-hybrid-clock-proxy-auctions.ppt) for more information.
 
-The system addresses the need for institutional-grade auction mechanisms in DeFi by providing combinatorial price discovery through iterative bidding with privacy-preserving commit-reveal mechanisms and competitive allocation determination. This brings battle-tested auction mechanisms to the blockchain ecosystem.
-
-The auction system is designed for scenarios requiring fair distribution of assets with price discovery, such as token launches, asset bundle sales, and private auctions. It enables bidders to express preferences across multiple assets while maintaining privacy through commit-reveal mechanisms, and uses allocator competition to determine optimal allocations with on-chain rewards.
+The system addresses the need for institutional-grade auction mechanisms in DeFi by providing combinatorial price discovery through iterative bidding with privacy-preserving commit-reveal mechanisms and competitive allocation determination. This brings a well-understood and studied auction mechanism to the blockchain ecosystem. The architecture uses a two-contract design with CPAManager handling auction logic and CPAHook controlling Uniswap V4 pools during auctions. The auction system is designed for scenarios requiring fair distribution of assets with price discovery, such as token launches, asset bundle sales, and private auctions. It enables bidders to express preferences across multiple assets while maintaining privacy through commit-reveal mechanisms, and uses allocator competition to determine optimal allocations with on-chain rewards.
 
 ### Key Features
 
-- **Privacy-Preserving Bidding**: Commit-reveal system maintains bidder-proxy anonymity during auction
-- **Multi-Asset Auctions**: Support for auctions across multiple token pairs with shared numeraire
-- **Allocator Competition**: On-chain scoring system with 1% rewards for optimal allocations
-- **Batch Settlement**: Efficient token claiming with `claimAllTokens()` function
-- **Uniswap V4 Integration**: Built using V4 hooks for pool control and price manipulation
+- Privacy-Preserving Bidding: Commit-reveal system maintains bidder-proxy anonymity during auction
+- Multi-Asset Auctions: Support for auctions across multiple token pairs with shared numeraire
+- Allocator Competition: On-chain scoring system with 1% rewards for optimal allocations
+- Batch Settlement: Efficient token claiming with `claimAllTokens()` function
+- Uniswap V4 Integration: Built using V4 hooks for pool control and price manipulation
 
 ## Architecture
 
 The system uses a two-contract architecture:
 
-- **CPAManager**: Manager contract that handles auction logic and state management
-- **CPAHook**: V4 hook that controls asset pools during auctions
+- CPAManager: Manager contract that handles auction logic and state management
+- CPAHook: V4 hook that controls asset pools during auctions
 
 ### Uniswap V4 Integration
 
 The system integrates with Uniswap V4 through:
-- **CPAHook**: Implements V4 hook interface to control pool operations
-- **Price Manipulation**: Uses Doppler-style swaps for price discovery during the clock phase
-- **Settlement**: Executes swaps for token distribution
+- CPAHook: Implements V4 hook interface to control pool operations
+- Price Manipulation: Uses Doppler-style swaps for price discovery during the clock phase
+- Settlement: Executes swaps for token distribution
+
+## Commit-Reveal Privacy System
+
+The auction system implements a two-salt commit-reveal mechanism to maintain bidder-proxy anonymity during the auction process. Bidders generate a commit hash using two salts (saltA and saltB) and their chosen proxy address, then register this hash before any bidding begins. The proxy receives the entire commit hash privately so that the bidder can later reveal the relationship. This privacy is maintained throughout the clock and proxy phases with the actual bidder-proxy mapping only disclosed during the reveal phase. This anonymity is fundamental to the proxy auction mechanism, ensuring that allocators can submit optimal allocations without bias during the allocation phase.
 
 ## Auction Mechanics
 
@@ -54,33 +57,33 @@ Finished Phase
 
 ### Phase Details
 
-**Setup Phase**: Auction creation with asset pools and configuration
+Setup Phase: Auction creation with asset pools and configuration
 - Create asset pools (A<>USDC, B<>USDC, C<>USDC) with CPAHook attached
 - Configure auction parameters and numeraire
 
-**Clock Phase**: Price discovery through iterative bidding
+Clock Phase: Price discovery through iterative bidding
 - Bidders submit bids with stake: `submitBid(auctionId, demands, stakeAmount)`
 - Commit-reveal privacy: `registerCommit(commitHash)` before bidding
 - Price discovery through Doppler-style manipulation
-- **Off-chain**: Bidders share their commit hash with their chosen proxy
+- Off-chain: Bidders share their commit hash with their chosen proxy
 
-**Proxy Phase**: Bundle submission with privacy
+Proxy Phase: Bundle submission with privacy
 - Proxies submit bundles: `submitBundle(commitHash, bundleData)`
 - Bundle data includes quantities for each asset
 - Privacy maintained through commit hashes
-- **Off-chain**: Bidders communicate bundle preferences to proxies
+- Off-chain: Bidders communicate bundle preferences to proxies
 
-**Reveal Phase**: Identity disclosure
+Reveal Phase: Identity disclosure
 - Bidders reveal identity: `reveal(bidderID, saltA, proxyAddress, saltB)`
 - Links bidder ↔ proxy publicly
 - Enables verification of bidder-proxy relationship
 
-**Allocation Phase**: Competitive allocation determination
+Allocation Phase: Competitive allocation determination
 - Allocators submit allocations: `submitAllocation(allocationData)`
 - On-chain scoring determines winning allocation (would be powerful to move offchain)
 - Winning allocator receives a reward according to the auctioneers' configuration: `claimAllocatorReward(auctionId)`
 
-**Settlement Phase**: Token claiming
+Settlement Phase: Token claiming
 - Batch claiming: `claimAllTokens(auctionId, commitHash)`
 - Individual claiming: `claimToken(auctionId, commitHash, poolId)` (owner only)
 - Uses deposited stake first, additional numeraire if needed
@@ -333,22 +336,22 @@ forge test --match-path test/CPASettlementPhase.t.sol
 
 ### Test Coverage
 
-- **Complete Flow Tests**: End-to-end auction scenarios
-- **Phase Transition Tests**: All auction phase changes
-- **Privacy Tests**: Commit-reveal mechanism validation
-- **Settlement Tests**: Token claiming and stake management
+- Complete Flow Tests: End-to-end auction scenarios
+- Phase Transition Tests: All auction phase changes
+- Privacy Tests: Commit-reveal mechanism validation
+- Settlement Tests: Token claiming and stake management
 
 ## Documentation
 
 Technical documentation is available in the `docs/` directory. It is not technical and is not guarenteed to be up-to-date.:
 
-- **Implementation Specification**: `docs/productAndIdeas/clockProxyHookImplementation.md`
-- **Logic Flow**: `docs/productAndIdeas/mainLogicFlow.md`
-- **V4 Analysis**: `docs/productAndIdeas/clockProxyV4Analysis.md`
+- Implementation Specification: `docs/productAndIdeas/clockProxyHookImplementation.md`
+- Logic Flow: `docs/productAndIdeas/mainLogicFlow.md`
+- V4 Analysis: `docs/productAndIdeas/clockProxyV4Analysis.md`
 
 ## Partner Integrations
 
-**No partner integrations** - This project focuses on core Uniswap V4 hook functionality without external integrations.
+No partner integrations - This project focuses on core Uniswap V4 hook functionality without external integrations.
 
 ## Development
 
@@ -371,11 +374,11 @@ src/
 
 ### Key Components
 
-- **Auction Management**: Multi-auction support with isolated state
-- **Privacy System**: Two-salt commit-reveal for bidder-proxy anonymity
-- **Allocator Rewards**: 1% fee system with on-chain claiming
-- **Batch Operations**: Efficient settlement with `claimAllTokens()`
-- **Gas Optimization**: Library-based architecture for efficiency
+- Auction Management: Multi-auction support with isolated state
+- Privacy System: Two-salt commit-reveal for bidder-proxy anonymity
+- Allocator Rewards: 1% fee system with on-chain claiming
+- Batch Operations: Efficient settlement with `claimAllTokens()`
+- Gas Optimization: Library-based architecture for efficiency
 
 ## License
 
