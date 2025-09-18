@@ -47,6 +47,7 @@ library CPAAllocationPhase {
 	) external {
 		AuctionId auctionId = allocationData.auctionId;
 
+
 		// check if the submitted allocation outscores the existing top allocation
 		(uint256 score, uint256 totalValue) = _scoreAllocation(self, auctionId, allocationData, auctionInfo, poolInfo, bundles);
 		if (score > topAllocation[auctionId].score) {
