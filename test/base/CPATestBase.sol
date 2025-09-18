@@ -20,12 +20,12 @@ import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import { CPAManager } from "../../src/CPAManager.sol";
 import { PoolHook } from "../../src/PoolHook.sol";
-import { AuctionTypes } from "../../src/AuctionTypes.sol";
-import { AuctionId } from "../../src/AuctionId.sol";
+import { AuctionTypes } from "../../src/types/AuctionTypes.sol";
+import { AuctionId } from "../../src/types/AuctionId.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { IErrorsAndEvents } from "../../src/utils/IErrorsAndEvents.sol";
-import { CommitReveal } from "../../src/CommitReveal.sol";
-import { BundleId, BundleIdLibrary } from "../../src/BundleId.sol";
+import { CommitReveal } from "../../src/utils/CommitReveal.sol";
+import { BundleId, BundleIdLibrary } from "../../src/types/BundleId.sol";
 import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import { PriceUtils } from "../../src/utils/PriceUtils.sol";
 

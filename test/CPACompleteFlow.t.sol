@@ -3,11 +3,11 @@ pragma solidity ^0.8.24;
 
 import { Test, console } from "forge-std/Test.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
-import { AuctionTypes } from "../src/AuctionTypes.sol";
-import { AuctionId } from "../src/AuctionId.sol";
-import { BundleId, BundleIdLibrary } from "../src/BundleId.sol";
+import { AuctionTypes } from "../src/types/AuctionTypes.sol";
+import { AuctionId } from "../src/types/AuctionId.sol";
+import { BundleId, BundleIdLibrary } from "../src/types/BundleId.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol"; 
-import { CommitReveal } from "../src/CommitReveal.sol";
+import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { IErrorsAndEvents } from "../src/utils/IErrorsAndEvents.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";

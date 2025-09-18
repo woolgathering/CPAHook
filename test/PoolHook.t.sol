@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import { Test, console2 } from "forge-std/Test.sol";
 import { PoolHook } from "../src/PoolHook.sol";
 import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
-import { AuctionTypes } from "../src/AuctionTypes.sol";
+import { AuctionTypes } from "../src/types/AuctionTypes.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";

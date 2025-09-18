@@ -16,10 +16,10 @@ import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 
 import { CPAManager } from "../src/CPAManager.sol";
-import { AuctionTypes } from "../src/AuctionTypes.sol";
-import { AuctionId } from "../src/AuctionId.sol";
+import { AuctionTypes } from "../src/types/AuctionTypes.sol";
+import { AuctionId } from "../src/types/AuctionId.sol";
 import { IErrorsAndEvents } from "../src/utils/IErrorsAndEvents.sol";
-import { CommitReveal } from "../src/CommitReveal.sol";
+import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
 
 contract CPAClockPhaseTest is CPATestBase {

@@ -8,8 +8,8 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { AuctionTypes } from "../src/AuctionTypes.sol";
-import { AuctionId } from "../src/AuctionId.sol";
+import { AuctionTypes } from "../src/types/AuctionTypes.sol";
+import { AuctionId } from "../src/types/AuctionId.sol";
 
 contract CPAManagerTest is Deployers {
 	CPAManager public manager;

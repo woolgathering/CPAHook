@@ -3,10 +3,10 @@ pragma solidity ^0.8.24;
 
 import { Test, console } from "forge-std/Test.sol";
 import { CPAManager } from "../src/CPAManager.sol";
-import { AuctionTypes } from "../src/AuctionTypes.sol";
-import { AuctionId } from "../src/AuctionId.sol";
-import { BundleId, BundleIdLibrary } from "../src/BundleId.sol";
-import { CommitReveal } from "../src/CommitReveal.sol";
+import { AuctionTypes } from "../src/types/AuctionTypes.sol";
+import { AuctionId } from "../src/types/AuctionId.sol";
+import { BundleId, BundleIdLibrary } from "../src/types/BundleId.sol";
+import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { IErrorsAndEvents } from "../src/utils/IErrorsAndEvents.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
 
