@@ -78,13 +78,8 @@ library AuctionTypes {
 		uint256 dropoutSlashRatio;          // Dropout penalty ratio (basis points)
 		uint256 spendingViolationSlashRatio; // Spending violation penalty (basis points)
 		uint256 maxRounds;                  // Maximum clock rounds
-		uint256 allocatorStakeRequirement;  // Minimum stake for allocators
-		uint256 proxyStakeRequirement;      // Minimum stake for proxies
-		// uint256 proxyPhaseDuration;         // Duration of the proxy phase
-		uint256 allocationWindow;           // Time window for allocations
-		// uint256 allocationPhaseDuration;    // Duration of the allocation phase
-		// uint256 revealPhaseDuration;        // Duration of the reveal phase
-		// uint256 settlementPhaseDuration;     // Duration of the settlement phase
+		uint256 allocatorRewardPct;         // Allocator reward for an auction in terms of numeraire (basis points)ttlement phase
+		uint256[] phaseDurations;                // Durations for each phase [clock, proxy, allocation, settlement]
 		PoolKey[] poolKeys;                 // Pool keys for the auction
 		uint160[] initialSqrtPricesX96;     // Initial sqrt prices for each pool
 		int24[] priceIncrements;            // Price increments in ticks for each pool
@@ -111,6 +106,7 @@ library AuctionTypes {
 		AuctionTypes.Bid[] roundBids;
 		uint256 currentRound;
 		PoolKey[] poolKeys;         // Array of pool keys for this auction
+		uint256 allocatorReward;
 	}
 	
 	/// @notice Callback data structure for bid as liquidity operations
@@ -140,9 +136,23 @@ library AuctionTypes {
 		SwapParams swapParams;
 	}
 
+	struct CallbackDataClaimAllTokens {
+		address bidder;
+		address numeraire;
+		AuctionId auctionId;
+		PoolKey[] poolKeys;
+		uint256[] allocatedQuantities;
+	}
+
 	struct CallbackDataRefundStake {
 		address numeraire;
 		uint256 amount;
+	}	
+
+	struct CallbackDataClaimAllocatorReward {
+		address allocator;
+		address numeraire;
+		uint256 reward;
 	}
 
 }

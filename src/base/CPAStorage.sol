@@ -31,9 +31,6 @@ abstract contract CPAStorage {
 	/// @notice Pool key to auction owner mapping
 	mapping(PoolId => AuctionId) public poolToAuctionId;
 
-	/// @notice Auction owner mapping
-	// mapping(AuctionId => address) public auctionOwner;
-
 	/// @notice Auction info mapping
 	mapping(AuctionId => AuctionTypes.AuctionInfo) public auctionInfo;
 
@@ -51,18 +48,8 @@ abstract contract CPAStorage {
 	IPoolManager public manager;
 
 	//// getters
-	function getAuctionInfo(AuctionId auctionId) external view returns (address, address, AuctionTypes.AuctionConfig memory, AuctionTypes.AuctionPhase, AuctionTypes.AuctionStatus, uint256, AuctionTypes.Bid[] memory, uint256, PoolKey[] memory) {
-    	return (
-			auctionInfo[auctionId].auctionOwner,
-			auctionInfo[auctionId].commonNumeraire,
-			auctionInfo[auctionId].config,
-			auctionInfo[auctionId].currentPhase,
-			auctionInfo[auctionId].currentStatus,
-			auctionInfo[auctionId].clockOpen,
-			auctionInfo[auctionId].roundBids,
-			auctionInfo[auctionId].currentRound,
-			auctionInfo[auctionId].poolKeys
-		);
+	function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory) {
+    	return auctionInfo[auctionId];
 	}
 
 	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, uint256, AuctionId, bytes32) {
@@ -77,21 +64,6 @@ abstract contract CPAStorage {
 		);
 	}
 
-	function getAuctionConfig(AuctionId auctionId) external view returns (address, uint256, uint256, uint256, uint256, uint256, uint256, PoolKey[] memory, uint160[] memory, int24[] memory) {
-		AuctionTypes.AuctionConfig memory config = auctionInfo[auctionId].config;
-		return (
-			config.commonNumeraire,
-			config.minSpendRatio,
-			config.dropoutSlashRatio,
-			config.spendingViolationSlashRatio,
-			config.maxRounds,
-			config.allocatorStakeRequirement,
-			config.proxyStakeRequirement,
-			config.poolKeys,
-			config.initialSqrtPricesX96,
-			config.priceIncrements
-		);
-	}
 
 	///////
 	// SETUP PHASE
