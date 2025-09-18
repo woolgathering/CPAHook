@@ -32,6 +32,7 @@ interface IErrorsAndEvents {
 	event AssetsWithdrawn(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 	event ClockRoundOpened(AuctionId auctionId, uint256 round);
 	event ClockRoundClosed(AuctionId auctionId, uint256 round, uint256 totalBids);
+	event AllocatorRewardClaimed(AuctionId auctionId, address allocator, uint256 reward);
 
 	/// @notice Shared errors
 	error OnlyOwner();

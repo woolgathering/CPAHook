@@ -17,9 +17,12 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { CommitReveal } from "../CommitReveal.sol";
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { PriceUtils } from "../utils/PriceUtils.sol";
 
 library CPAClockPhase {
 	using StateLibrary for IPoolManager;
+	using PriceUtils for IPoolManager;
+
 	/**
 	 * @notice Get current price from pool using tick-based calculation
 	 * @param poolId The pool ID
@@ -93,6 +96,12 @@ library CPAClockPhase {
 			if (requiredAdditionalStake > 0) {
 				// Call swap callback to transfer tokens from user to pool manager
 				// and mint ERC6909 claims to hook
+
+				uint256 allocatorRewardAmount = (requiredAdditionalStake * auctionInfo[auctionId].config.allocatorRewardPct) / 10000;
+				auctionInfo[auctionId].allocatorReward += allocatorRewardAmount; // add this to the allocator reward
+				requiredAdditionalStake = requiredAdditionalStake + allocatorRewardAmount; // update
+
+
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
 					sender: msg.sender,
 					token0: address(0), // unused, we need to remove this
@@ -104,9 +113,6 @@ library CPAClockPhase {
 				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
 				self.manager().unlock(callbackData);
 			}
-		} else {
-			// Bidder already has sufficient bid points, no additional stake needed
-			// No transfer needed in this case
 		}
 		// would be interesting to eventually have "deposits" for bidders who use the system often
 		// so that they don't have to transfer the common numeraire every time they bid.
@@ -309,7 +315,14 @@ library CPAClockPhase {
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
 			// Get the pool ID and its current price from the pool
 			PoolId poolId = poolKeys[i].toId();
-			uint256 price = getCurrentPoolPrice(poolId, poolManager);
+			uint256 price;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo[auctionId].commonNumeraire) {
+				// Since the numeraire is currency0, we need to get the price of currency1
+				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+			} else {
+				// Since the numeraire is currency1, we need to get the price of currency0
+				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+			}
 			
 			// Add to total value: demand * price
 			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)

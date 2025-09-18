@@ -106,7 +106,8 @@ library CPASetup {
 			clockOpen: 1,
 			roundBids: new AuctionTypes.Bid[](0),
 			currentRound: 0,
-			poolKeys: config.poolKeys
+			poolKeys: config.poolKeys,
+			allocatorReward: 0
 		});
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
@@ -137,22 +138,22 @@ library CPASetup {
 	 */
 	function moveDeposit(
 		CPAStorage self, 
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey,
 		AuctionId auctionId, 
 		uint256 depositAmount
 	) internal {
 		// confirm that the auction is in the Setup phase
-		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
+		if (auctionInfo.currentPhase != AuctionTypes.AuctionPhase.Setup) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo.currentPhase);
 		}
 
 		// Update the deposit amount in poolInfo
 		poolInfo[poolKey.toId()].depositAmount = depositAmount;
 		
 		// Determine which currency is the item (non-numeraire)
-		address numeraireAddress = auctionInfo[auctionId].commonNumeraire;
+		address numeraireAddress = auctionInfo.commonNumeraire;
 		Currency itemCurrency;
 		
 		if (address(Currency.unwrap(poolKey.currency0)) == numeraireAddress) {
@@ -190,7 +191,7 @@ library CPASetup {
 	 */
 	function handleDepositTransfer(
 		CPAStorage self, 
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		bytes memory operationData
 	) internal returns (bytes memory returnData) {
@@ -199,7 +200,7 @@ library CPASetup {
 			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
 		
 		// Verify this is a legitimate auction owner (original caller, not msg.sender)
-		require(originalCaller == auctionInfo[auctionId].auctionOwner, "Not auction owner");
+		require(originalCaller == auctionInfo.auctionOwner, "Not auction owner");
 		
 		// Directly transfer assets using V4's settle/take mechanism
 		// This bypasses V4's native liquidity functionality
@@ -229,16 +230,16 @@ library CPASetup {
     function confirmSetupComplete(
 		CPAStorage self,
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
 	) internal view returns (bool) {
         // Check that auction is in Setup phase
-        if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup) {
+        if (auctionInfo.currentPhase != AuctionTypes.AuctionPhase.Setup) {
             return false;
         }
         
         // Check that all asset pools have deposits
-        PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+        PoolKey[] memory poolKeys = auctionInfo.poolKeys;
         for (uint256 i = 0; i < poolKeys.length; i++) {
             PoolId poolId = poolKeys[i].toId();
             AuctionTypes.PoolInfo memory pool = poolInfo[poolId];
