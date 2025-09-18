@@ -318,10 +318,15 @@ contract IntegrationTest is Deployers {
             minSpendRatio: 1000,
             dropoutSlashRatio: 500,
             spendingViolationSlashRatio: 1000,
+            allocatorRewardPct: 100, // 1% reward
             maxRounds: 10,
             allocatorStakeRequirement: 1000,
             proxyStakeRequirement: 500,
-            allocationWindow: 7200,
+            proxyPhaseDuration: 3600, // 1 hour
+            allocationWindow: 7200, // 2 hours
+            allocationPhaseDuration: 3600, // 1 hour
+            revealPhaseDuration: 1800, // 30 minutes
+            settlementPhaseDuration: 3600, // 1 hour
             poolKeys: poolKeys,
             initialSqrtPricesX96: new uint160[](1),
             priceIncrements: new int24[](1)
