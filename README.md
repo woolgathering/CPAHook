@@ -9,6 +9,8 @@ A Practical Combinatorial Auction Design](https://web.stanford.edu/~milgrom/publ
 
 The system addresses the need for institutional-grade auction mechanisms in DeFi by providing combinatorial price discovery through iterative bidding with privacy-preserving commit-reveal mechanisms and competitive allocation determination. This brings a well-understood and studied auction mechanism to the blockchain ecosystem. The architecture uses a two-contract design with CPAManager handling auction logic and CPAHook controlling Uniswap V4 pools during auctions. The auction system is designed for scenarios requiring fair distribution of assets with price discovery, such as token launches, asset bundle sales, and private auctions. It enables bidders to express preferences across multiple assets while maintaining privacy through commit-reveal mechanisms, and uses allocator competition to determine optimal allocations with on-chain rewards.
 
+A proper whitepaper is forthcoming.
+
 ### Key Features
 
 - Privacy-Preserving Bidding: Commit-reveal system maintains bidder-proxy anonymity during auction
