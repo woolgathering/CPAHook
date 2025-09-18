@@ -27,6 +27,7 @@ import { IErrorsAndEvents } from "../../src/utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "../../src/CommitReveal.sol";
 import { BundleId, BundleIdLibrary } from "../../src/BundleId.sol";
 import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
+import { PriceUtils } from "../../src/utils/PriceUtils.sol";
 
 /// @title CPATestBase
 /// @notice Abstract base contract for CPA tests that provides common deployment and setup functionality
@@ -35,7 +36,8 @@ abstract contract CPATestBase is Deployers {
     using CurrencyLibrary for Currency;
     using FixedPointMathLib for uint256;
     using StateLibrary for IPoolManager;
-
+    using PriceUtils for IPoolManager;
+    
     // Core contracts
     CPAManager public cpaManager;
     PoolHook public poolHook;
@@ -66,6 +68,7 @@ abstract contract CPATestBase is Deployers {
     // Auction data
     AuctionId public auctionId;
     uint256 public numeraireCurrencyId;
+    uint256 public allocatorRewardPct;
     
     // Price data (for reference, actual prices come from pools)
     uint256 public asset1InitialPrice;
@@ -233,15 +236,22 @@ abstract contract CPATestBase is Deployers {
         newPriceIncrements[0] = 60 * 10; // 600 ticks
         newPriceIncrements[1] = 60 * 5; // 300 ticks
 
+        uint256[] memory phaseDurations = new uint256[](4);
+        phaseDurations[0] = 3600; // 1 hour
+        phaseDurations[1] = 1800; // 30 minutes
+        phaseDurations[2] = 3600; // 1 hour
+        phaseDurations[3] = 3600; // 1 hour
+
+        allocatorRewardPct = 100; // 1% reward
+
         return AuctionTypes.AuctionConfig({
             commonNumeraire: address(numeraireToken),
             minSpendRatio: 1000,
             dropoutSlashRatio: 1000,
             spendingViolationSlashRatio: 2000,
+            allocatorRewardPct: allocatorRewardPct, // 1% reward
             maxRounds: 100,
-            allocatorStakeRequirement: 10000 * 10**18,
-            proxyStakeRequirement: 1000 * 10**18,
-            allocationWindow: 1800,
+            phaseDurations: phaseDurations,
             poolKeys: newPoolKeys,
             initialSqrtPricesX96: newInitialSqrtPricesX96,
             priceIncrements: newPriceIncrements
@@ -249,7 +259,7 @@ abstract contract CPATestBase is Deployers {
     }
 
     /// @notice Create a standard auction configuration for testing
-    function createStandardAuctionConfig() internal view returns (AuctionTypes.AuctionConfig memory) {
+    function createStandardAuctionConfig() internal returns (AuctionTypes.AuctionConfig memory) {
         // Convert initial prices to sqrtPriceX96 based on currency ordering
         // uint160 asset1SqrtPriceX96 = convertAssetPriceToSqrtPriceX96(asset1PoolKey, asset1InitialPrice);
         // uint160 asset2SqrtPriceX96 = convertAssetPriceToSqrtPriceX96(asset2PoolKey, asset2InitialPrice);
@@ -269,15 +279,22 @@ abstract contract CPATestBase is Deployers {
         priceIncrements[0] = asset1PoolKey.tickSpacing * 10; // 1 tick increment
         priceIncrements[1] = asset2PoolKey.tickSpacing * 5; // 1 tick increment
 
+        uint256[] memory phaseDurations = new uint256[](4);
+        phaseDurations[0] = 3600; // 1 hour
+        phaseDurations[1] = 1800; // 30 minutes
+        phaseDurations[2] = 3600; // 1 hour
+        phaseDurations[3] = 3600; // 1 hour
+
+        allocatorRewardPct = 100; // 1% reward
+
         return AuctionTypes.AuctionConfig({
             commonNumeraire: address(numeraireToken),
             minSpendRatio: 1000,
             dropoutSlashRatio: 1000, // 10%
             spendingViolationSlashRatio: 2000, // 20%
+            allocatorRewardPct: allocatorRewardPct, // 1% reward
             maxRounds: 100,
-            allocatorStakeRequirement: 10000 * 10**18,
-            proxyStakeRequirement: 1000 * 10**18,
-            allocationWindow: 1800,
+            phaseDurations: phaseDurations,
             poolKeys: poolKeys,
             initialSqrtPricesX96: initialSqrtPricesX96,
             priceIncrements: priceIncrements
@@ -374,7 +391,13 @@ abstract contract CPATestBase is Deployers {
         poolKeys[1] = asset2PoolKey;
         
         for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-            uint256 price = getCurrentPoolPriceWithOrdering(poolKeys[i]);
+            // uint256 price = getCurrentPoolPriceWithOrdering(poolKeys[i]);
+            uint256 price;
+            if (Currency.unwrap(poolKeys[i].currency0) == address(numeraireToken)) {
+                price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+            } else {
+                price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+            }
             totalValue += (demands[i] * price) / 10**18;
         }
         
