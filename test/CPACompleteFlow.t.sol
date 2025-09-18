@@ -301,8 +301,8 @@ contract CPACompleteFlowTest is CPATestBase {
         // ========================================
         
         // Verify auction is now in proxy phase
-        (,,,AuctionTypes.AuctionPhase currentPhase,,,,,) = cpaManager.getAuctionInfo(auctionId);
-        assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Proxy), "Auction should be in proxy phase");
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Proxy), "Auction should be in proxy phase");
         
         // Verify final pool states
         (, int24 asset1StartingTick, , uint256 asset1FinalDeposit, uint256 asset1FinalExcessDemand,,bytes32 asset1FinalPositionId) = cpaManager.getPoolInfo(asset1PoolKey.toId());
@@ -416,8 +416,8 @@ contract CPACompleteFlowTest is CPATestBase {
         // ========================================
 
         // Verify auction is now in allocation phase
-        (,,,AuctionTypes.AuctionPhase phaseAfterProxyPhase,,,,,) = cpaManager.getAuctionInfo(auctionId);
-        assertEq(uint8(phaseAfterProxyPhase), uint8(AuctionTypes.AuctionPhase.Allocation), "Auction should be in allocation phase");
+        AuctionTypes.AuctionInfo memory auctionInfoAfterProxy = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfoAfterProxy.currentPhase), uint8(AuctionTypes.AuctionPhase.Allocation), "Auction should be in allocation phase");
         
         // Verify total bundles submitted
         assertEq(submittedBundles.length, 11, "Should have submitted 11 bundles total (4+3+4)");
@@ -475,8 +475,8 @@ contract CPACompleteFlowTest is CPATestBase {
         // ========================================
 
         // Verify auction is now in allocation phase
-        (,,, currentPhase,,,,,) = cpaManager.getAuctionInfo(auctionId);
-        assertEq(uint8(currentPhase), uint8(AuctionTypes.AuctionPhase.Allocation), "Auction should be in allocation phase");
+        AuctionTypes.AuctionInfo memory auctionInfoAllocation = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfoAllocation.currentPhase), uint8(AuctionTypes.AuctionPhase.Allocation), "Auction should be in allocation phase");
 
         // Test allocator 1 submits an allocation with just bundle 0 (small allocation)
         address allocator1 = makeAddr("allocator1");
@@ -566,7 +566,8 @@ contract CPACompleteFlowTest is CPATestBase {
         console.log("\n=== COMPREHENSIVE BALANCE CHECK BEFORE ALLOCATION PHASE ENDS ===");
         
         // Get pool keys for the auction
-        (,,,,,,,,PoolKey[] memory poolKeys) = cpaManager.getAuctionInfo(auctionId);
+        AuctionTypes.AuctionInfo memory auctionInfoPools = cpaManager.getAuctionInfo(auctionId);
+        PoolKey[] memory poolKeys = auctionInfoPools.poolKeys;
         
         // Check ERC20 balances for all tokens
         console.log("=== ERC20 BALANCES BEFORE ALLOCATION PHASE ENDS ===");
@@ -711,8 +712,8 @@ contract CPACompleteFlowTest is CPATestBase {
         // The individual balance checks above provide sufficient verification
 
         // Verify auction is now in settlement phase
-        (,,,AuctionTypes.AuctionPhase finalPhase,,,,,) = cpaManager.getAuctionInfo(auctionId);
-        assertEq(uint8(finalPhase), uint8(AuctionTypes.AuctionPhase.Settlement), "Auction should be in settlement phase");
+        AuctionTypes.AuctionInfo memory auctionInfoSettlement = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfoSettlement.currentPhase), uint8(AuctionTypes.AuctionPhase.Settlement), "Auction should be in settlement phase");
 
         // Verify the winner was determined (should be allocator3 with the better allocation)
         (AuctionTypes.Allocation memory winnerAllocation, uint256 winnerScore, ) = cpaManager.topAllocation(auctionId);
@@ -769,26 +770,62 @@ contract CPACompleteFlowTest is CPATestBase {
         (AuctionTypes.Allocation memory winnerAllocation2, , ) = cpaManager.topAllocation(auctionId);
         console.log("Winner allocation has", winnerAllocation2.bundleIds.length, "bundles");
         
-        // Try to claim from the first pool (asset1) for bidder1
+        // Try to claim all tokens for bidder1
         // We'll use commitHash1 since that's what bidder1 used
-        PoolId asset1PoolId = asset1PoolKey.toId();
         
-        console.log("Bidder1 attempting to claim from asset1 pool...");
+        console.log("Bidder1 attempting to claim all tokens...");
         
-        // Check bidder1's stake before claiming
+        // Check bidder1's balances before claiming
         uint256 bidder1StakeBefore = cpaManager.bidderStake(auctionId, testBidder1);
+        uint256 bidder1Asset1BalanceBefore = asset1Token.balanceOf(testBidder1);
+        uint256 bidder1Asset2BalanceBefore = asset2Token.balanceOf(testBidder1);
         console.log("Bidder1 stake before claim:", bidder1StakeBefore);
+        console.log("Bidder1 asset1 balance before claim:", bidder1Asset1BalanceBefore);
+        console.log("Bidder1 asset2 balance before claim:", bidder1Asset2BalanceBefore);
         
-        // Attempt to claim
+        // Attempt to claim all tokens
         vm.prank(testBidder1);
-        cpaManager.claimToken(auctionId, commitHash1, asset1PoolId);
+        cpaManager.claimAllTokens(auctionId, commitHash1);
         
-        console.log("Bidder1 claim completed successfully");
+        console.log("Bidder1 claim all tokens completed successfully");
         
-        // Check bidder1's stake after claiming
+        // Check bidder1's balances after claiming
         uint256 bidder1StakeAfter = cpaManager.bidderStake(auctionId, testBidder1);
+        uint256 bidder1Asset1BalanceAfter = asset1Token.balanceOf(testBidder1);
+        uint256 bidder1Asset2BalanceAfter = asset2Token.balanceOf(testBidder1);
         console.log("Bidder1 stake after claim:", bidder1StakeAfter);
+        console.log("Bidder1 asset1 balance after claim:", bidder1Asset1BalanceAfter);
+        console.log("Bidder1 asset2 balance after claim:", bidder1Asset2BalanceAfter);
         console.log("Stake used for claim:", bidder1StakeBefore - bidder1StakeAfter);
+        
+        // Verify that the bidder received assets
+        assertGt(bidder1Asset1BalanceAfter, bidder1Asset1BalanceBefore, "Bidder1 should have received asset1 tokens");
+        assertGt(bidder1Asset2BalanceAfter, bidder1Asset2BalanceBefore, "Bidder1 should have received asset2 tokens");
+
+        // ========================================
+        // ALLOCATOR REWARD CLAIM
+        // ========================================
+        console.log("\n=== ALLOCATOR REWARD CLAIM ===");
+        
+        // Get the winning allocator (allocator3) and claim their reward
+        (AuctionTypes.Allocation memory currentWinnerAllocation, , ) = cpaManager.topAllocation(auctionId);
+        address winningAllocator = currentWinnerAllocation.allocator;
+        console.log("Winning allocator claiming reward:", winningAllocator);
+        
+        // Check allocator's balance before claiming
+        uint256 allocatorBalanceBefore = numeraireToken.balanceOf(winningAllocator);
+        console.log("Allocator balance before claim:", allocatorBalanceBefore);
+        
+        // Claim the allocator reward
+        vm.prank(winningAllocator);
+        cpaManager.claimAllocatorReward(auctionId);
+        
+        // Check allocator's balance after claiming
+        uint256 allocatorBalanceAfter = numeraireToken.balanceOf(winningAllocator);
+        console.log("Allocator balance after claim:", allocatorBalanceAfter);
+        console.log("Reward claimed:", allocatorBalanceAfter - allocatorBalanceBefore);
+        
+        console.log("Allocator reward claim completed successfully");
 
     }
 
