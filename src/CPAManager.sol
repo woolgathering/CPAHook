@@ -205,7 +205,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		PoolKey memory poolKey,
 		uint256 depositAmount
 	) external onlyAuctionOwner(auctionId) {
-		CPASetup.moveDeposit(this, auctionInfo, poolInfo, poolKey, auctionId, depositAmount);
+		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
 		_updatePoolHookStates(auctionId);
 	}
 
@@ -220,7 +220,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 function startClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
 		// Handle first-time transition from Setup to Clock phase
 		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Setup) {
-			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo, poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
+			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
 			_updatePoolHookStates(auctionId);
@@ -466,10 +466,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @param commitHash The commit hash for the bidder
 	 * @param poolId The pool ID to claim from
 	 */
-	function claimToken(AuctionId auctionId, bytes32 commitHash, PoolId poolId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		// Get the top allocation
-		AuctionTypes.TopAllocation storage topAlloc = topAllocation[auctionId];
-		AuctionTypes.Allocation memory topAllocation = topAlloc.allocation;
+	function claimToken(AuctionId auctionId, bytes32 commitHash, PoolId poolId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) onlyOwner() {
+		// we only allow the owner to claim individual tokens on behalf of the bidder because in this function,
+		// we do not ever remove the bundle from the winning bundle ids.
+		// the owner here is NOT the auction owner, but the owner of the CPA protocol itself.
 		
 		// Call the settlement phase
 		CPASettlementPhase.claimToken(
@@ -478,13 +478,72 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			auctionId,
 			commitHash,
 			poolId,
-			topAllocation,
+			topAllocation[auctionId].allocation,
 			auctionInfo[auctionId],
 			bundles[auctionId],
 			winningBundleIds,
 			bidderStake[auctionId],
 			revealedMappings[auctionId]
 		);
+	}
+
+	/**
+	 * @notice Claim all tokens from winning allocation for a bidder.
+	 * @param auctionId The auction ID
+	 * @param commitHash The commit hash for the bidder
+	 */
+	function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+		CPASettlementPhase.claimAllTokens(
+			this,
+			msg.sender,
+			auctionId,
+			commitHash,
+			// topAllocation[auctionId],
+			auctionInfo[auctionId],
+			revealedMappings[auctionId],
+			bidderStake[auctionId],
+			bundles[auctionId],
+			winningBundleIds
+		);
+
+		// now that they've claimed all their tokens, delete the bundle at the commit hash from the winning bundle ids
+		winningBundleIds[commitHash] = BundleId.wrap(0);
+	}
+
+	function endSettlementPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+		CPASettlementPhase.endSettlementPhase(this, auctionId);
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Finished);
+	}
+
+	/**
+	 * @notice Claim the allocator reward for the winning allocation.
+	 * @dev Only callable by the winning allocator during or after the settlement phase.
+	 *      This function will trigger a callback to transfer the reward to the allocator.
+	 * @param auctionId The auction ID
+	 */
+	function claimAllocatorReward(AuctionId auctionId) external {
+		// AuctionTypes.TopAllocation storage topAlloc = topAllocation[auctionId];
+		address winningAllocator = topAllocation[auctionId].allocation.allocator;
+		if (msg.sender != winningAllocator) revert Unauthorized();
+
+		AuctionTypes.AuctionPhase phase = auctionInfo[auctionId].currentPhase;
+		if (
+			phase != AuctionTypes.AuctionPhase.Settlement &&
+			phase != AuctionTypes.AuctionPhase.Finished
+		) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Settlement, phase);
+		}
+
+		// Call the settlement phase to handle the actual reward transfer (callback will be implemented separately)
+		AuctionTypes.CallbackDataClaimAllocatorReward memory data = AuctionTypes.CallbackDataClaimAllocatorReward({
+			allocator: winningAllocator,
+			reward: auctionInfo[auctionId].allocatorReward,
+			numeraire: auctionInfo[auctionId].commonNumeraire
+		});
+		manager.unlock(abi.encode(uint8(6), abi.encode(data)));
+		auctionInfo[auctionId].allocatorReward = 0; // update their reward to 0 since it was claimed
+
+		emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, winningAllocator, auctionInfo[auctionId].allocatorReward);
 	}
 
 	// ========================================
@@ -577,7 +636,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			return _handleBid(operationData);
 		} else if (operationType == 1) {
 			// Deposit transfer (setup)
-			return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
+			return _handleDepositTransfer(operationData);
 		} else if (operationType == 2) {
 			// Price update swap
 			return _handlePriceUpdateSwap(operationData);
@@ -590,6 +649,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else if (operationType == 5) {
 			// Simulate swap
 			return _refundStake(operationData);
+		} else if (operationType == 6) {
+			// Claim allocator reward
+			return _handleClaimAllocatorReward(operationData);
+		} else if (operationType == 7) {
+			// Claim all tokens
+			return _handleClaimAllTokens(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
@@ -601,7 +666,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @return returnData The encoded balance deltas
 	 */
 	function _handleDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
-		return CPASetup.handleDepositTransfer(this, auctionInfo, poolInfo, operationData);
+		(, , , AuctionId auctionId, ) = 
+			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
+		return CPASetup.handleDepositTransfer(this, auctionInfo[auctionId], poolInfo, operationData);
 	}
 	
 	/**
@@ -667,9 +734,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// now that we have everything, we need to call swap on the pool manager
 		BalanceDelta delta = manager.swap(callbackData.poolKey, callbackData.swapParams, "");
 
-		console.log("delta amount0", delta.amount0());
-		console.log("delta amount1", delta.amount1());
-
 		Currency numeraire = Currency.wrap(callbackData.numeraire);
 		uint256 numeraireOwed;
 		uint256 assetGained;
@@ -691,9 +755,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			asset.take(manager, callbackData.bidder, assetGained, false);
 		}
 
-		console.log("numeraireOwed", numeraireOwed);
-		console.log("assetGained", assetGained);
-
 		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
 		uint256 numerairePaidByManager = 0;
 		if (bidderStake >= numeraireOwed) {
@@ -711,6 +772,85 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		return abi.encode(numerairePaidByManager, assetGained);
 	}
 
+
+	/**
+	 * @notice Handle claim token settlement operation
+	 * @param operationData The encoded operation data
+	 * @return returnData The encoded balance deltas
+	 */
+	function _handleClaimAllTokens(bytes memory operationData) internal returns (bytes memory returnData) {
+		// Decode the operation data
+		AuctionTypes.CallbackDataClaimAllTokens memory callbackData = abi.decode(operationData, (AuctionTypes.CallbackDataClaimAllTokens));
+		
+		Currency numeraire = Currency.wrap(callbackData.numeraire);
+		uint256 totalNumeraireOwed = 0;
+		
+		// Loop through all pool keys and execute swaps for tokens the bidder is owed
+		for (uint256 i = 0; i < callbackData.poolKeys.length; i++) {
+			uint256 amountOwed = callbackData.allocatedQuantities[i];
+			if (amountOwed > 0) {
+				PoolKey memory poolKey = callbackData.poolKeys[i];
+				bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == callbackData.numeraire);
+
+				SwapParams memory params = SwapParams({
+					zeroForOne: numeraireIsCurrency0,
+					amountSpecified: (amountOwed.toInt256()),
+					sqrtPriceLimitX96: numeraireIsCurrency0
+						? TickMath.MIN_SQRT_PRICE + 1
+						: TickMath.MAX_SQRT_PRICE - 1
+				});
+				
+				// Execute swap on this pool
+				BalanceDelta delta = manager.swap(poolKey, params, "");
+
+				uint256 numeraireOwed;
+				{
+					Currency asset;
+					if (params.zeroForOne) {
+						// if zeroForOne is true, this means that the numeraire is token0
+						if (delta.amount1() < 0) revert("Should not owe asset");
+						numeraireOwed = uint256((-delta.amount0()).toUint128());
+						uint256 assetGained = uint256((delta.amount1()).toUint128());
+						asset = poolKey.currency1;
+						asset.take(manager, callbackData.bidder, assetGained, false);
+					} else {
+						// if zeroForOne is false, this means that the numeraire is token1
+						if (delta.amount0() < 0) revert("Should not owe asset");
+						numeraireOwed = uint256((-delta.amount1()).toUint128());
+						uint256 assetGained = uint256((delta.amount0()).toUint128());
+						asset = poolKey.currency0;
+						asset.take(manager, callbackData.bidder, assetGained, false);
+					}
+				}
+				
+				// Add to total numeraire owed
+				totalNumeraireOwed += numeraireOwed;
+			}
+		}
+
+		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
+		uint256 numerairePaidByManager = 0;
+		if (bidderStake >= totalNumeraireOwed) {
+			// since they have enough to cover, we can settle directly
+			numeraire.settle(manager, address(this), totalNumeraireOwed, true); // might need to be true since the manager has ERC6909 claims
+			numerairePaidByManager = totalNumeraireOwed;
+
+			// since they had enough, refund any leftover numeraire
+			manager.burn(address(this), CurrencyLibrary.toId(numeraire), bidderStake - totalNumeraireOwed);
+			numeraire.take(manager, callbackData.bidder, bidderStake - totalNumeraireOwed, false);
+		} else {
+			//since they don't have enough, we need to do two settles
+			numeraire.settle(manager, address(this), bidderStake, true); // might need to be true since the manager has ERC6909 claims
+			numeraire.settle(manager, callbackData.bidder, totalNumeraireOwed - bidderStake, false); // the bidder pays in ERC20
+			numerairePaidByManager = bidderStake;
+
+			// bidder has no leftover stake so all is well here
+		}
+		
+		// Return the balance delta
+		return abi.encode(numerairePaidByManager);
+	}
+
 	function _refundStake(bytes memory operationData) internal returns (bytes memory returnData) {
 		// Decode the operation data
 		(AuctionTypes.CallbackDataRefundStake memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataRefundStake));
@@ -720,6 +860,13 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		
 		// Return the balance delta
 		return abi.encode(data.amount);
+	}
+
+	function _handleClaimAllocatorReward(bytes memory operationData) internal returns (bytes memory returnData) {
+		// Decode the operation data
+		(AuctionTypes.CallbackDataClaimAllocatorReward memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataClaimAllocatorReward));
+		CPASettlementPhase.handleClaimAllocatorReward(this, data);
+		return abi.encode(data.reward);
 	}
 
 	/**
