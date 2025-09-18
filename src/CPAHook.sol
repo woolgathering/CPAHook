@@ -10,11 +10,11 @@ import { AuctionTypes } from "./types/AuctionTypes.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
- * @title PoolHook
+ * @title CPAHook
  * @notice Simple hook that blocks all operations when controlled by auction
  * @author Clock-Proxy Auction Team
  */
-contract PoolHook is BaseHook, Ownable {
+contract CPAHook is BaseHook, Ownable {
 	using PoolIdLibrary for PoolKey;
 	
 	/// @notice Address of the auction that controls this pool hook

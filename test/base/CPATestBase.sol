@@ -19,7 +19,7 @@ import { FixedPointMathLib } from "solmate/src/utils/FixedPointMathLib.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol"; 
 
 import { CPAManager } from "../../src/CPAManager.sol";
-import { PoolHook } from "../../src/PoolHook.sol";
+import { CPAHook } from "../../src/CPAHook.sol";
 import { AuctionTypes } from "../../src/types/AuctionTypes.sol";
 import { AuctionId } from "../../src/types/AuctionId.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -40,7 +40,7 @@ abstract contract CPATestBase is Deployers {
     
     // Core contracts
     CPAManager public cpaManager;
-    PoolHook public poolHook;
+    CPAHook public cpaHook;
     
     // Test tokens
     MockERC20 public numeraireToken;
@@ -115,14 +115,14 @@ abstract contract CPATestBase is Deployers {
     function deployContracts() internal {
         vm.startPrank(protocolOwner);
         
-        // Deploy PoolHook with proper address mining
-        poolHook = deployPoolHook(poolManager);
+        // Deploy CPAHook with proper address mining
+        cpaHook = deployCPAHook(poolManager);
         
         // Deploy CPAManager (no longer a hook, simple deployment)
-        cpaManager = new CPAManager(poolManager, protocolOwner, address(poolHook));
+        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook));
         
         // Set auction manager in pool hook
-        poolHook.setAuctionManager(address(cpaManager));
+        cpaHook.setAuctionManager(address(cpaManager));
         
         // Note: CPAManager no longer needs numeraire tokens since we call PoolManager directly
         
@@ -137,7 +137,7 @@ abstract contract CPATestBase is Deployers {
             currency1: Currency.wrap(address(numeraireToken)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
             tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
+            hooks: IHooks(address(cpaHook))
         });
 
         asset2PoolKey = PoolKey({
@@ -145,7 +145,7 @@ abstract contract CPATestBase is Deployers {
             currency1: Currency.wrap(address(numeraireToken)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
             tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
+            hooks: IHooks(address(cpaHook))
         });
 
         // Sort currencies by address
@@ -158,8 +158,8 @@ abstract contract CPATestBase is Deployers {
             : (asset2PoolKey.currency1, asset2PoolKey.currency0);
     }
 
-    /// @notice Deploy PoolHook with proper address mining and flag setting
-    function deployPoolHook(IPoolManager _poolManager) internal returns (PoolHook) {
+    /// @notice Deploy CPAHook with proper address mining and flag setting
+    function deployCPAHook(IPoolManager _poolManager) internal returns (CPAHook) {
         uint160 flags = uint160(
             Hooks.BEFORE_INITIALIZE_FLAG |
             Hooks.BEFORE_SWAP_FLAG |
@@ -173,11 +173,11 @@ abstract contract CPATestBase is Deployers {
         (address hookAddress, bytes32 salt) = HookMiner.find(
             protocolOwner,
             flags,
-            type(PoolHook).creationCode,
+            type(CPAHook).creationCode,
             constructorArgs
         );
         
-        PoolHook deployedHook = new PoolHook{salt: salt}(_poolManager);
+        CPAHook deployedHook = new CPAHook{salt: salt}(_poolManager);
         require(address(deployedHook) == hookAddress, "Hook address mismatch");
         return deployedHook;
     }
@@ -203,7 +203,7 @@ abstract contract CPATestBase is Deployers {
             currency1: Currency.wrap(address(numeraireToken)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
             tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
+            hooks: IHooks(address(cpaHook))
         });
 
         PoolKey memory newAsset2PoolKey = PoolKey({
@@ -211,7 +211,7 @@ abstract contract CPATestBase is Deployers {
             currency1: Currency.wrap(address(numeraireToken)),
             fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
             tickSpacing: 60,
-            hooks: IHooks(address(poolHook))
+            hooks: IHooks(address(cpaHook))
         });
 
         // Sort currencies by address

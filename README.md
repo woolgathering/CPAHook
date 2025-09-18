@@ -23,12 +23,12 @@ The auction system is designed for scenarios requiring fair distribution of asse
 The system uses a two-contract architecture:
 
 - **CPAManager**: Manager contract that handles auction logic and state management
-- **PoolHook**: V4 hook that controls asset pools during auctions
+- **CPAHook**: V4 hook that controls asset pools during auctions
 
 ### Uniswap V4 Integration
 
 The system integrates with Uniswap V4 through:
-- **PoolHook**: Implements V4 hook interface to control pool operations
+- **CPAHook**: Implements V4 hook interface to control pool operations
 - **Price Manipulation**: Uses Doppler-style swaps for price discovery during the clock phase
 - **Settlement**: Executes swaps for token distribution
 
@@ -55,7 +55,7 @@ Finished Phase
 ### Phase Details
 
 **Setup Phase**: Auction creation with asset pools and configuration
-- Create asset pools (A<>USDC, B<>USDC, C<>USDC) with PoolHook attached
+- Create asset pools (A<>USDC, B<>USDC, C<>USDC) with CPAHook attached
 - Configure auction parameters and numeraire
 
 **Clock Phase**: Price discovery through iterative bidding
@@ -112,7 +112,7 @@ forge test
 ### Creating an Auction
 
 ```solidity
-// Assume CPAManager and PoolHook are already deployed
+// Assume CPAManager and CPAHook are already deployed
 ICPAManager manager = ICPAManager(MANAGER_ADDRESS);
 
 // Create auction with configuration
@@ -357,7 +357,7 @@ Technical documentation is available in the `docs/` directory. It is not technic
 ```
 src/
 ├── CPAManager.sol              # Main auction manager
-├── PoolHook.sol               # V4 hook for pool control
+├── CPAHook.sol                # V4 hook for pool control
 ├── AuctionTypes.sol            # Type definitions
 ├── base/
 │   └── CPAStorage.sol         # Storage patterns

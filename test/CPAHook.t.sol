@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { Test, console2 } from "forge-std/Test.sol";
-import { PoolHook } from "../src/PoolHook.sol";
+import { CPAHook } from "../src/CPAHook.sol";
 import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
@@ -16,10 +16,10 @@ import { Deployers } from "./utils/Deployers.sol";
 import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {Constants} from "../lib/uniswap-hooks/lib/v4-core/test/utils/Constants.sol";
 
-contract PoolHookTest is Deployers {
+contract CPAHookTest is Deployers {
     using PoolIdLibrary for PoolKey;
 
-    PoolHook public hook;
+    CPAHook public hook;
     address public owner;
     address public auctionManager;
     address public nonOwner;
@@ -51,8 +51,8 @@ contract PoolHookTest is Deployers {
     }
 
     /// @notice Deploy hook with proper address mining and flag setting
-    function deployHook(IPoolManager _poolManager) internal returns (PoolHook) {
-        // Set the required hook flags for PoolHook based on getHookPermissions()
+    function deployHook(IPoolManager _poolManager) internal returns (CPAHook) {
+        // Set the required hook flags for CPAHook based on getHookPermissions()
         uint160 flags = uint160(
             Hooks.BEFORE_INITIALIZE_FLAG |
             Hooks.BEFORE_SWAP_FLAG |
@@ -67,12 +67,12 @@ contract PoolHookTest is Deployers {
         (address hookAddress, bytes32 salt) = HookMiner.find(
             address(this),
             flags,
-            type(PoolHook).creationCode,
+            type(CPAHook).creationCode,
             constructorArgs
         );
         
         // Deploy the hook using CREATE2 with the mined salt
-        PoolHook deployedHook = new PoolHook{salt: salt}(_poolManager);
+        CPAHook deployedHook = new CPAHook{salt: salt}(_poolManager);
         
         // Verify the hook was deployed to the expected address
         require(address(deployedHook) == hookAddress, "Hook address mismatch");
@@ -101,7 +101,7 @@ contract PoolHookTest is Deployers {
     function test_SetAuctionManager_OnlyOwner() public {
         // Non-owner should not be able to set auction manager
         vm.prank(nonOwner);
-        vm.expectRevert(PoolHook.OnlyOwner.selector);
+        vm.expectRevert(CPAHook.OnlyOwner.selector);
         hook.setAuctionManager(auctionManager);
         
         // Owner should be able to set auction manager
@@ -128,7 +128,7 @@ contract PoolHookTest is Deployers {
         
         // Non-auction manager should not be able to set pool state
         vm.prank(nonAuctionManager);
-        vm.expectRevert(PoolHook.OnlyAuction.selector);
+        vm.expectRevert(CPAHook.OnlyAuction.selector);
         hook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
         
         // Auction manager should be able to set pool state
@@ -327,7 +327,7 @@ contract PoolHookTest is Deployers {
         assertEq(hook.auctionManager(), address(0));
         
         // Zero address auction manager cannot call restricted functions
-        vm.expectRevert(PoolHook.OnlyAuction.selector);
+        vm.expectRevert(CPAHook.OnlyAuction.selector);
         hook.setPoolState(testPoolKey, AuctionTypes.AuctionPhase.Settlement);
     }
 

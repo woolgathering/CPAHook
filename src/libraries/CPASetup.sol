@@ -115,7 +115,7 @@ library CPASetup {
 	}
 
 	/**
-	 * @notice Move deposits from auction owner to a single pool, giving ERC6909 claims to PoolHook
+	 * @notice Move deposits from auction owner to a single pool, giving ERC6909 claims to CPAHook
 	 * @param self The contract instance
 	 * @param auctionId The auction ID
 	 * @param poolKey The pool key to deposit to

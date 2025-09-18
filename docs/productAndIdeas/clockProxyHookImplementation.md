@@ -5,15 +5,15 @@
 The Clock-Proxy Auction system uses two contracts:
 
 1. **CPAManager**: Manager contract that handles auction logic and state management
-2. **PoolHook**: Hook contract that all asset pools attach to, controlled by the CPAManager
+2. **CPAHook**: Hook contract that all asset pools attach to, controlled by the CPAManager
 
-The CPAManager is not a hook but a pure manager contract that interfaces with V4 pools through the PoolHook.
+The CPAManager is not a hook but a pure manager contract that interfaces with V4 pools through the CPAHook.
 
 ### Architecture Overview
 ```plaintext
 CPAManager (single contract) - manages multiple auctions
     ↓ controls
-PoolHook (single contract) - attached to all asset pools
+CPAHook (single contract) - attached to all asset pools
     ↓ attached to
 Asset Pool 1 (A<>USDC) - prices stored as sqrtPriceX96, operations blocked during auction
 Asset Pool 2 (B<>USDC) - prices stored as sqrtPriceX96, operations blocked during auction  
@@ -22,7 +22,7 @@ Asset Pool 3 (C<>USDC) - prices stored as sqrtPriceX96, operations blocked durin
 
 ### Initialization Process (this only happens once and is ready for all future auctions)
 1. **Deploy CPAManager**: Single contract that will manage all auctions
-2. **Deploy PoolHook**: With CPAManager address as constructor argument (allows CPAManager to modify state of the PoolHook)
+2. **Deploy CPAHook**: With CPAManager address as constructor argument (allows CPAManager to modify state of the CPAHook)
 
 
 ### Multi-Auction Support
@@ -32,22 +32,22 @@ Asset Pool 3 (C<>USDC) - prices stored as sqrtPriceX96, operations blocked durin
 - **Owner Controls**: Only the auction owner can start, pause, change phases, etc.
 - **Concurrent Auctions**: Multiple auctions can run simultaneously with isolated state
 
-### PoolHook Control Mechanism
-- **Centralized Control**: CPAManager controls the single PoolHook
-- **State Synchronization**: CPAManager calls setAuctionState() on PoolHook
+### CPAHook Control Mechanism
+- **Centralized Control**: CPAManager controls the single CPAHook
+- **State Synchronization**: CPAManager calls setAuctionState() on CPAHook
 - **Pool Allowance**: CPAManager can enable/disable specific pools via setPoolAllowed()
-- **Operation Blocking**: PoolHook blocks all operations when auction is active
+- **Operation Blocking**: CPAHook blocks all operations when auction is active
 
 ### Auction Creation Flow
 1. **Create Auction**: Call CPAManager.createAuction(poolKeys, config, owner)
 2. **Setup Phase**: Auction owner deposits assets and configures auction
-  a. **Deploy Asset Pools**: Create pools A<>USDC, B<>USDC, C<>USDC with PoolHook and initial sqrtPriceX96
+  a. **Deploy Asset Pools**: Create pools A<>USDC, B<>USDC, C<>USDC with CPAHook and initial sqrtPriceX96
 3. **Auction Execution**: Standard clock-proxy auction phases proceed
 4. **Settlement**: Auction completes and pools return to normal operation
 
 ### Key Benefits of New Design
 - **Gas Efficiency**: No need to deploy new hooks for each auction
-- **Reusability**: Single PoolHook serves all asset pools
+- **Reusability**: Single CPAHook serves all asset pools
 - **Scalability**: CPAManager can manage unlimited auctions
 - **Simplicity**: Clear separation between auction logic and pool control
 - **Flexibility**: Different auction owners can run concurrent auctions
@@ -69,7 +69,7 @@ Asset Pool 3 (C<>USDC) - prices stored as sqrtPriceX96, operations blocked durin
 ## Core Implementation
 
 ### Manager-Based Approach
-The Clock-Proxy Auction uses a pure manager contract that interfaces with V4 pools through the PoolHook:
+The Clock-Proxy Auction uses a pure manager contract that interfaces with V4 pools through the CPAHook:
 
 - **Setup phase**: Asset pools created with initial sqrtPriceX96
 - **Clock phase**: Bidding through `submitBid()` with price discovery
@@ -104,9 +104,9 @@ The CPAManager contract manages multiple concurrent auctions. Each auction has:
 - Isolated state storage
 - Phase management
 
-### PoolHook Contract
+### CPAHook Contract
 
-The PoolHook contract controls asset pools during auctions:
+The CPAHook contract controls asset pools during auctions:
 - Blocks trading/liquidity operations when auction is active
 - Allows only CPAManager to execute operations
 - Manages price manipulation via Doppler-style swaps
@@ -118,10 +118,10 @@ The main auction contract that:
 - Manages multiple concurrent auctions with isolated state
 - Handles all auction phases and transitions
 - Manages commit-reveal system and proxy registration
-- Controls the PoolHook during auctions
-- Interfaces with V4 pools through the PoolHook
+- Controls the CPAHook during auctions
+- Interfaces with V4 pools through the CPAHook
 
-### PoolHook Contract
+### CPAHook Contract
 A hook contract that:
 - Blocks trading/liquidity operations during auctions
 - Controlled by CPAManager via `setAuctionState()` and `setPoolAllowed()`
@@ -282,7 +282,7 @@ The system implements the following access control patterns:
 - **CPAManager Owner**: Controls global settings and emergency functions
 - **Bidders**: Can submit bids and claim tokens
 - **Allocators**: Can submit allocations and claim rewards
-- **PoolHook**: Only allows CPAManager to execute operations
+- **CPAHook**: Only allows CPAManager to execute operations
 
 ## Error Handling
 

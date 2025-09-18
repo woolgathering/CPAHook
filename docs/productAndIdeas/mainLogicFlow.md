@@ -6,12 +6,12 @@
 The system uses two main contracts for efficiency and reusability:
 
 1. **CPAManager**: Manager contract that handles auction logic and state management
-2. **PoolHook**: Shared hook that all asset pools attach to, controlled by the CPAManager
+2. **CPAHook**: Shared hook that all asset pools attach to, controlled by the CPAManager
 
 ### Initialization Process
 1. Deploy CPAManager (single contract for all auctions)
-2. Deploy PoolHook with CPAManager address as constructor argument
-3. Create asset pools (A<>USDC, B<>USDC, C<>USDC) with PoolHook attached
+2. Deploy CPAHook with CPAManager address as constructor argument
+3. Create asset pools (A<>USDC, B<>USDC, C<>USDC) with CPAHook attached
 4. Create auction via CPAManager.createAuction() with pool keys and parameters
 
 ### Multi-Auction Support
@@ -20,9 +20,9 @@ The system uses two main contracts for efficiency and reusability:
 - All auction variables are indexed by auctionId
 - Only the auction owner can control their specific auction
 
-### PoolHook Control
-- CPAManager controls the single PoolHook via setAuctionState() and setPoolAllowed()
-- PoolHook blocks all operations when auction is active
+### CPAHook Control
+- CPAManager controls the single CPAHook via setAuctionState() and setPoolAllowed()
+- CPAHook blocks all operations when auction is active
 - Centralized control mechanism for auction state
 
 ## Overview
@@ -54,8 +54,8 @@ This auction design ensures that:
 On-chain
 - **System Deployment**:
   - CPAManager is deployed as a single contract that will manage all auctions
-  - PoolHook is deployed with CPAManager address as constructor argument
-  - PoolHook will be attached to all asset pools for auction control
+  - CPAHook is deployed with CPAManager address as constructor argument
+  - CPAHook will be attached to all asset pools for auction control
 
 - **Auction Creation**:
   - Auctioneer calls `CPAManager.createAuction(poolKeys, config, owner)` to create a new auction
@@ -64,9 +64,9 @@ On-chain
   - Auction configuration includes: bid submission window, proxy registration window, allocation window, settlement window, stake amounts, rate limits
 
 - **Pool Setup**:
-  - Asset pools (A<>commonNumeraire, B<>commonNumeraire, C<>commonNumeraire) are created with PoolHook attached
+  - Asset pools (A<>commonNumeraire, B<>commonNumeraire, C<>commonNumeraire) are created with CPAHook attached
   - Common Numeraire Constraint: All pools must share the same numeraire for consistent pricing
-  - CPAManager controls pool pricing and operations through PoolHook
+  - CPAManager controls pool pricing and operations through CPAHook
 
 - **Auction Configuration**:
   - Any address can be a bidder and must deposit stake to submit bids
@@ -290,7 +290,7 @@ Off-chain:
 - Bundles accepted only from registered proxies
 - Stakes used for token purchases during settlement
 - Common numeraire constraint enforced across all pools
-- PoolHook controls all operations during auction
+- CPAHook controls all operations during auction
 - Item pools blocked except for CPAManager operations
 - Price manipulation at clock phase end
 - **Allocator Reward System**: 1% fee taken from each bid, distributed to winning allocator
@@ -308,9 +308,9 @@ Off-chain:
 - Challenge: Managing isolated state for multiple concurrent auctions
 - Solution: AuctionId-based mappings for all state variables with clear ownership model
 
-### PoolHook Coordination
+### CPAHook Coordination
 - Challenge: Coordinating multiple pools across different auctions
-- Solution: Single PoolHook with auction-aware blocking controlled by CPAManager
+- Solution: Single CPAHook with auction-aware blocking controlled by CPAManager
 
 ### Gas Optimization
 - Challenge: Complex auction logic may be gas-intensive

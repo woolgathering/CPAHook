@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { Test, console2 } from "forge-std/Test.sol";
-import { PoolHook } from "../src/PoolHook.sol";
+import { CPAHook } from "../src/CPAHook.sol";
 import { CPAManager } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
 import { AuctionId } from "../src/types/AuctionId.sol";

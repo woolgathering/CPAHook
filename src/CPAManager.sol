@@ -33,7 +33,7 @@ import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "./types/AuctionTypes.sol";
 import { AuctionId } from "./types/AuctionId.sol";
 import { CommitReveal } from "./utils/CommitReveal.sol";
-import { PoolHook } from "./PoolHook.sol";
+import { CPAHook } from "./CPAHook.sol";
 import { BundleId } from "./types/BundleId.sol";
 
 /**
@@ -122,7 +122,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	function pause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Paused;
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPaused(auctionId, msg.sender);
 	}
 
@@ -131,7 +131,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	function unpause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Active;
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionUnpaused(auctionId, msg.sender);
 	}
 
@@ -140,7 +140,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	function cancelAuction(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		_refundAllStakes(auctionId);
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
@@ -190,12 +190,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		address auctionOwner
 	) external returns (AuctionId) {
 		AuctionId auctionId = CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		return auctionId;
 	}
 
 	/**
-	 * @notice Move deposit from auction owner to a single pool, giving ERC6909 claims to PoolHook
+	 * @notice Move deposit from auction owner to a single pool, giving ERC6909 claims to CPAHook
 	 * @param auctionId The auction ID
 	 * @param poolKey The pool key to deposit to
 	 * @param depositAmount The amount to deposit
@@ -206,7 +206,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		uint256 depositAmount
 	) external onlyAuctionOwner(auctionId) {
 		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 	}
 
 	// ========================================
@@ -223,7 +223,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
-			_updatePoolHookStates(auctionId);
+			_updateCPAHookStates(auctionId);
 		}
 		CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
@@ -572,7 +572,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 */
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
 		auctionInfo[auctionId].currentPhase = newPhase;
-		_updatePoolHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, newPhase);
 	}
 
@@ -600,14 +600,14 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Update pool hook states
 	 * @param auctionId The auction ID
 	 */
-	function _updatePoolHookStates(AuctionId auctionId) internal {
+	function _updateCPAHookStates(AuctionId auctionId) internal {
 		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
 		for (uint256 i = 0; i < poolKeys.length; i++) {
 			// Get the pool hook address from the pool key
-			// address poolHookAddress = address(poolKeys[i].hooks);
+			// address cpaHookAddress = address(poolKeys[i].hooks);
 			
 			// Update the pool hook state
-			PoolHook(cpaAuctionHookAddr).setPoolState(
+			CPAHook(cpaAuctionHookAddr).setPoolState(
 				poolKeys[i],
 				auctionInfo[auctionId].currentPhase
 			);
