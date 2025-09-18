@@ -15,21 +15,20 @@ import { AuctionId } from "../AuctionId.sol";
 import { BundleId } from "../BundleId.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
+import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 library CPASettlementPhase {
     using StateLibrary for IPoolManager;
     using SafeCast for *;
-
-	// function startSettlementPhase(CPAStorage self, AuctionId auctionId) internal {
-	// 	self.setPhase(AuctionTypes.AuctionPhase.Settlement);
-	// }
+    using CurrencySettler for Currency;
 
 	function endSettlementPhase(CPAStorage self, AuctionId auctionId) internal {
-		// self.setPhase(AuctionTypes.AuctionPhase.Settlement);
+		// any leftover stake is forfeited here
 	}
 
     function reveal(
@@ -54,6 +53,39 @@ library CPASettlementPhase {
         revealedMappings[auctionId][computedCommitHash] = bidder;
 
         emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
+    }
+
+    function claimAllTokens(
+        CPAStorage self,
+        address bidder,
+        AuctionId auctionId,
+        bytes32 commitHash,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(bytes32 => address) storage revealedMappings,
+        mapping(address => uint256) storage bidderStake,
+        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
+        mapping(bytes32 => BundleId) storage winningBundleIds
+    ) internal {
+        // Validate bidder authorization
+        {
+            address revealedBidder = revealedMappings[commitHash];
+            if (revealedBidder == address(0)) revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
+            if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
+        }
+
+        BundleId bundleId = winningBundleIds[commitHash];
+        bytes memory data = self.manager().unlock(abi.encode(uint8(7), abi.encode(AuctionTypes.CallbackDataClaimAllTokens({
+			bidder: bidder,
+			numeraire: auctionInfo.commonNumeraire,
+			auctionId: auctionId,
+			poolKeys: auctionInfo.poolKeys,
+			allocatedQuantities: bundles[bundleId].quantities
+		}))));
+
+        (uint256 numerairePaidByManager) = abi.decode(data, (uint256));
+
+        // Update stake balance
+        bidderStake[bidder] -= numerairePaidByManager; // this should always work even if they use their whole stake
     }
 
     function claimToken(
@@ -103,12 +135,6 @@ library CPASettlementPhase {
         {
             bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == auctionInfo.commonNumeraire);
 
-            console.log("currency0", Currency.unwrap(poolKey.currency0));
-            console.log("currency1", Currency.unwrap(poolKey.currency1));
-            console.log("commonNumeraire", auctionInfo.commonNumeraire);
-            console.log("numeraireIsCurrency0", numeraireIsCurrency0);
-            console.log("amountOwed", amountOwed);
-
             SwapParams memory params = SwapParams({
                 zeroForOne: numeraireIsCurrency0,
                 amountSpecified: (amountOwed.toInt256()),
@@ -145,52 +171,13 @@ library CPASettlementPhase {
         return manager.unlock(callbackData);
     }
 
-    // /// @notice Quotes the amount of currencyIn required to receive currencyOutAmount
-    // /// @dev Uses staticcall on PoolManager.swap, so no state changes persist
-    // function _quoteExactOutputSingle(
-    //     CPAStorage self,
-    //     PoolKey memory key,
-    //     bool zeroForOne,
-    //     uint256 amountOutDesired
-    // )
-    //     internal
-    //     returns (uint256 amountIn, uint256 amountOut, SwapParams memory params)
-    // {
-    //     // For exact output, amountSpecified > 0
-    //     int256 amountSpecified = int256(amountOutDesired);
-
-    //     // Build swap params
-    //     params = SwapParams({
-    //         zeroForOne: zeroForOne,
-    //         amountSpecified: amountSpecified,
-    //         sqrtPriceLimitX96: zeroForOne
-    //             ? 4295128739 + 1 // TickMath.MIN_SQRT_PRICE + 1
-    //             : 1461446703485210103287273052203988822378723970342 - 1 // TickMath.MAX_SQRT_PRICE - 1
-    //     });
-
-    //     // // Do a staticcall into the pool manager
-    //     // (bool success, bytes memory data) = address(self.manager()).staticcall(
-    //     //     abi.encodeWithSelector(self.manager().swap.selector, key, params, bytes(""))
-    //     // );
-
-    //     bytes memory data = self.manager().unlock(abi.encode(uint8(5), abi.encode(key, params)));
-    //     (bool success, bytes memory swapDelta) = abi.decode(data, (bool, bytes));
-
-    //     require(success, "QuoterV4: swap simulation failed");
-
-    //     BalanceDelta delta = abi.decode(swapDelta, (BalanceDelta));
-    //     (int128 amount0, int128 amount1) = (delta.amount0(), delta.amount1());
-
-    //     // Decode balance delta
-
-    //     // Normalize into amountIn / amountOut
-    //     if (zeroForOne) {
-    //         amountIn = uint256(int256(amount0));   // token0 in
-    //         amountOut = uint256(-int256(amount1)); // token1 out
-    //     } else {
-    //         amountIn = uint256(int256(amount1));   // token1 in
-    //         amountOut = uint256(-int256(amount0)); // token0 out
-    //     }
-    // }
+    function handleClaimAllocatorReward(
+        CPAStorage self,
+        AuctionTypes.CallbackDataClaimAllocatorReward memory data
+    ) internal {
+        // we are already unlocked here so we just need to transfer tokens from the CPAManager to the allocator
+        Currency.wrap(data.numeraire).take(self.manager(), data.allocator, data.reward, false); // give ERC20 to the allocator
+        self.manager().burn(address(self), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.reward); // burn ERC6909 from the CPAManager
+    }
 
 }
