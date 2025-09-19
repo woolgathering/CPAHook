@@ -81,6 +81,7 @@ Allocation Phase: Competitive allocation determination
 - Allocators submit allocations as sets of bundles maximizing auctioneer revenue: `submitAllocation(allocationData)`
 - On-chain scoring determines winning allocation (would be powerful to move offchain and enable more complex metrics to maximize/minimize)
 - Best allocation submitted by the end of the phase is chosen as the top allocation
+- Asset deposits are made into single-sided liquidity positions at the final prices
 
 Reveal Phase: Identity disclosure
 - Technically part of the settlement phase but must occur after allocation and prior to claiming tokens
