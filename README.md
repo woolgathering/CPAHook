@@ -358,7 +358,7 @@ forge test --match-path test/CPASettlementPhase.t.sol
 
 ## Documentation
 
-Technical documentation is available in the `docs/` directory. It is not technical and is not guarenteed to be up-to-date.:
+High-level documentation is available in the `docs/` directory. It is not technical and is not guarenteed to be up-to-date.:
 
 - Implementation Specification: `docs/productAndIdeas/clockProxyHookImplementation.md`
 - Logic Flow: `docs/productAndIdeas/mainLogicFlow.md`

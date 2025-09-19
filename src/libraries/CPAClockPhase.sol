@@ -24,33 +24,6 @@ library CPAClockPhase {
 	using PriceUtils for IPoolManager;
 
 	/**
-	 * @notice Get current price from pool using tick-based calculation
-	 * @param poolId The pool ID
-	 * @param poolManager The pool manager instance
-	 * @return price The current price in numeraire units (scaled by 10^18)
-	 */
-	function getCurrentPoolPrice(
-		PoolId poolId,
-		IPoolManager poolManager
-	) internal view returns (uint256 price) {
-		// Get the current sqrt price from the pool
-		(uint160 sqrtPriceX96, , , ) = poolManager.getSlot0(poolId);
-		
-		// Convert sqrtPriceX96 to price
-		// price = (sqrtPriceX96 / 2^96)^2
-		// For now, assuming 1:1 scaling with 18 decimals
-		uint256 priceX96 = uint256(sqrtPriceX96) * uint256(sqrtPriceX96);
-		price = priceX96 / (2**192); // Divide by 2^192 to get the actual price
-	}
-
-	function getCurrentPoolSqrtPriceX96(
-		PoolId poolId,
-		IPoolManager poolManager
-	) internal view returns (uint160 sqrtPriceX96) {
-		(sqrtPriceX96, , , ) = poolManager.getSlot0(poolId);
-	}
-
-	/**
 	 * @notice Process a bid as liquidity during clock phase
 	 * @param self The contract instance
 	 * @param auctionId The auction ID
