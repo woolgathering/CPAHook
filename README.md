@@ -376,15 +376,24 @@ No partner integrations - This project focuses on core Uniswap V4 hook functiona
 src/
 ├── CPAManager.sol              # Main auction manager
 ├── CPAHook.sol                # V4 hook for pool control
-├── AuctionTypes.sol            # Type definitions
 ├── base/
 │   └── CPAStorage.sol         # Storage patterns
-└── libraries/
-    ├── CPASetup.sol           # Setup phase logic
-    ├── CPAClockPhase.sol      # Bidding logic
-    ├── CPAProxyPhase.sol      # Bundle submission
-    ├── CPAAllocationPhase.sol # Allocator competition
-    └── CPASettlementPhase.sol # Token claiming
+├── libraries/
+│   ├── CPASetup.sol           # Setup phase logic
+│   ├── CPAClockPhase.sol      # Bidding logic
+│   ├── CPAProxyPhase.sol      # Bundle submission
+│   ├── CPAAllocationPhase.sol # Allocator competition
+│   └── CPASettlementPhase.sol # Token claiming
+├── types/
+│   ├── AllocationId.sol       # Allocation ID type
+│   ├── AuctionId.sol          # Auction ID type
+│   ├── AuctionTypes.sol       # Type definitions
+│   └── BundleId.sol           # Bundle ID type
+└── utils/
+    ├── CommitReveal.sol       # Commit-reveal utilities
+    ├── IErrorsAndEvents.sol   # Interface for errors and events
+    ├── PoolUtils.sol          # Pool management utilities
+    └── PriceUtils.sol         # Price calculation utilities
 ```
 
 ### Key Components
