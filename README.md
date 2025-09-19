@@ -100,8 +100,8 @@ Settlement Phase: Token claiming
 ### Setup
 ```bash
 # Clone repository
-git clone <repository-url>
-cd v4-template
+git clone https://github.com/woolgathering/CPAHook/tree/clock-proxy-auction
+cd clock-proxy-auction
 
 # Install dependencies
 forge install
