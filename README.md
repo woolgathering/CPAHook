@@ -62,35 +62,43 @@ Finished Phase
 Setup Phase: Auction creation with asset pools and configuration
 - Create asset pools (A<>USDC, B<>USDC, C<>USDC) with CPAHook attached
 - Configure auction parameters and numeraire
+- Auctioneer (auction owner) is set
 
 Clock Phase: Price discovery through iterative bidding
-- Bidders submit bids with stake: `submitBid(auctionId, demands, stakeAmount)`
+- Bidders submit bids with deposit: `submitBid(auctionId, demands, maxDepositForThisBid)`
 - Commit-reveal privacy: `registerCommit(commitHash)` before bidding
-- Price discovery through Doppler-style manipulation
-- Off-chain: Bidders share their commit hash with their chosen proxy
+- Price discovery through a traditional clock auction
+- Price tracking in UniSwap V4 pools via price manipulation
+- Off-chain: Bidders share their commit hash with their chosen proxy (critical step)
 
 Proxy Phase: Bundle submission with privacy
 - Proxies submit bundles: `submitBundle(commitHash, bundleData)`
 - Bundle data includes quantities for each asset
-- Privacy maintained through commit hashes
-- Off-chain: Bidders communicate bundle preferences to proxies
+- Bidder ↔ proxy link privacy is maintained through commit hashes
+- Off-chain: Bidders communicate preferences to proxies to be encoded into bundles (often proxies are the same entity as the bidders)
 
 Allocation Phase: Competitive allocation determination
-- Allocators submit allocations: `submitAllocation(allocationData)`
-- On-chain scoring determines winning allocation (would be powerful to move offchain)
-- Winning allocator receives a reward according to the auctioneers' configuration: `claimAllocatorReward(auctionId)`
+- Allocators submit allocations as sets of bundles maximizing auctioneer revenue: `submitAllocation(allocationData)`
+- On-chain scoring determines winning allocation (would be powerful to move offchain and enable more complex metrics to maximize/minimize)
+- Best allocation submitted by the end of the phase is chosen as the top allocation
 
 Reveal Phase: Identity disclosure
 - Technically part of the settlement phase but must occur after allocation and prior to claiming tokens
 - Bidders reveal identity: `reveal(bidderID, saltA, proxyAddress, saltB)`
 - Links bidder ↔ proxy publicly
-- Enables verification of bidder-proxy relationship
+- Enables verification of bidder-proxy relationship and therefore bidder-allocated bundle relationship
 
 Settlement Phase: Token claiming
-- Batch claiming: `claimAllTokens(auctionId, commitHash)`
-- Individual claiming: `claimToken(auctionId, commitHash, poolId)` (owner only)
+- Batch token claiming: `claimAllTokens(auctionId, commitHash)`
+- Individual token claiming: `claimToken(auctionId, commitHash, poolId)` (protocol owner only)
 - Uses deposited stake first, additional numeraire if needed
-- Refunds excess stake (if any)
+- Refunds excess stake to bidders (if any)
+- Winning allocator receives a reward according to the auctioneers' configuration: `claimAllocatorReward(auctionId)`
+
+Finished Stage (not fully implemented)
+- Liquidity positions in the pools are transferred from the CPAManager to the auctioneer
+- Bidders who did not claim in settlement forfeit their allocation
+- Pools are opened to trading and liquidity provisioning by anyone
 
 ## Installation
 
@@ -156,16 +164,19 @@ manager.commitToBidder(auctionId, commitHash2);
 manager.commitToBidder(auctionId, commitHash3);
 
 // Submit bids with stake (called by bidders)
-int256[] memory demands1 = [100, -50, 200]; // exact output, exact input, exact output
-int256[] memory demands2 = [50, 100, -75];  // exact output, exact output, exact input
-int256[] memory demands3 = [-25, -100, 150]; // exact input, exact input, exact output
+int256[] memory demands1 = [100, 50, 200]; // demand quantities for each asset at current prices
+int256[] memory demands2 = [50, 100, 75];  // demand quantities for each asset at current prices
+int256[] memory demands3 = [25, 100, 150]; // demand quantities for each asset at current prices
 
-uint256 stakeAmount = 1000e18;
-manager.submitBid(auctionId, demands1, stakeAmount); // Bidder 1
-manager.submitBid(auctionId, demands2, stakeAmount); // Bidder 2
-manager.submitBid(auctionId, demands3, stakeAmount); // Bidder 3
+uint256 maxDepositThisBid = 1000e18;
+manager.submitBid(auctionId, demands1, maxDepositThisBid); // Bidder 1
+manager.submitBid(auctionId, demands2, maxDepositThisBid); // Bidder 2
+manager.submitBid(auctionId, demands3, maxDepositThisBid); // Bidder 3
+
+// Several rounds go by, more bids are accepted, price rises until there are no over-demanded assets
 
 // End clock round
+// Prices at the end of the clock phase are final
 manager.endClockRound(auctionId);
 ```
 
@@ -299,7 +310,7 @@ AuctionTypes.Allocation memory allocation3 = AuctionTypes.Allocation({
 
 manager.submitAllocation(auctionId, allocation3);
 
-// End allocation phase (winner determined by highest score)
+// End allocation phase (winner determined by highest revenue)
 manager.endAllocationPhase(auctionId);
 ```
 
@@ -311,7 +322,8 @@ manager.reveal(auctionId, proxy1, saltA1, saltB1); // Called by bidder1
 manager.reveal(auctionId, proxy2, saltA2, saltB2); // Called by bidder2
 manager.reveal(auctionId, proxy1, saltA3, saltB3); // Called by bidder3
 
-// Then, each bidder claims their allocated tokens
+// Then, each bidder claims their allocated tokens paying with their stake first, their own wallet second
+// If there is stake left over, it is refunded to the bidder
 manager.claimAllTokens(auctionId, commitHash1); // Called by bidder1
 manager.claimAllTokens(auctionId, commitHash2); // Called by bidder2
 manager.claimAllTokens(auctionId, commitHash3); // Called by bidder3
@@ -385,7 +397,12 @@ src/
 
 ### Known Issues
 
+These issues will be mitigated in future versions. There is nothing in the architecture that precludes solutions.
+
 - The numeraire is currently required to be in 18 decimal precision. Future versions will eliminate this requirement.
+- Bidder dropout is not yet implemented. If a proxy does not submit a bid on behalf of a bidder or the bidder is not included in the final allocation, their stake is lost.
+- The auction manager must manually progress the auction.
+- Stakes are unrefundable if an auction is cancelled.
 
 ## License
 
