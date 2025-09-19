@@ -383,6 +383,10 @@ src/
 - Batch Operations: Efficient settlement with `claimAllTokens()`
 - Gas Optimization: Library-based architecture for efficiency
 
+### Known Issues
+
+- The numeraire is currently required to be in 18 decimal precision. Future versions will eliminate this requirement.
+
 ## License
 
 This project is licensed under the BUSL-1.1 License - see the LICENSE file for details.
