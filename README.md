@@ -75,15 +75,16 @@ Proxy Phase: Bundle submission with privacy
 - Privacy maintained through commit hashes
 - Off-chain: Bidders communicate bundle preferences to proxies
 
-Reveal Phase: Identity disclosure
-- Bidders reveal identity: `reveal(bidderID, saltA, proxyAddress, saltB)`
-- Links bidder ↔ proxy publicly
-- Enables verification of bidder-proxy relationship
-
 Allocation Phase: Competitive allocation determination
 - Allocators submit allocations: `submitAllocation(allocationData)`
 - On-chain scoring determines winning allocation (would be powerful to move offchain)
 - Winning allocator receives a reward according to the auctioneers' configuration: `claimAllocatorReward(auctionId)`
+
+Reveal Phase: Identity disclosure
+- Technically part of the settlement phase but must occur after allocation and prior to claiming tokens
+- Bidders reveal identity: `reveal(bidderID, saltA, proxyAddress, saltB)`
+- Links bidder ↔ proxy publicly
+- Enables verification of bidder-proxy relationship
 
 Settlement Phase: Token claiming
 - Batch claiming: `claimAllTokens(auctionId, commitHash)`
