@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { console } from "forge-std/console.sol";
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { AuctionTypes } from "../types/AuctionTypes.sol";
-import { CPAStorage } from "../base/CPAStorage.sol";
-import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
-import { CommitReveal } from "../utils/CommitReveal.sol";
-import { AuctionId } from "../types/AuctionId.sol";
-import { BundleId } from "../types/BundleId.sol";
-import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
+import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+
+import { CPAStorage } from "../base/CPAStorage.sol";
+import { CommitReveal } from "../utils/CommitReveal.sol";
+import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
+import { BundleId } from "../types/BundleId.sol";
 
 library CPASettlementPhase {
     using StateLibrary for IPoolManager;

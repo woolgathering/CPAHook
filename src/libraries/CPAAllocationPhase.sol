@@ -1,30 +1,29 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { console } from "forge-std/console.sol";
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { BundleId } from "../types/BundleId.sol";
-import { AuctionTypes } from "../types/AuctionTypes.sol";
-import { CPAStorage } from "../base/CPAStorage.sol";
-import { AuctionId } from "../types/AuctionId.sol";
-import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import { LiquidityAmounts } from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
+import { Position } from "@uniswap/v4-core/src/libraries/Position.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
-import { Position } from "@uniswap/v4-core/src/libraries/Position.sol";
 
+import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+
+import { CPAStorage } from "../base/CPAStorage.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
-import { console } from "forge-std/console.sol";
+import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
+import { BundleId } from "../types/BundleId.sol";
 
 library CPAAllocationPhase {
 	using PriceUtils for IPoolManager;

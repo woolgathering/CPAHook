@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+
+import { CPAStorage } from "../base/CPAStorage.sol";
+import { CommitReveal } from "../utils/CommitReveal.sol";
+import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
+import { PriceUtils } from "../utils/PriceUtils.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
-import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-import { CommitReveal } from "../utils/CommitReveal.sol";
-import { CPAStorage } from "../base/CPAStorage.sol";
-import { PriceUtils } from "../utils/PriceUtils.sol";
 
 library CPAClockPhase {
 	using StateLibrary for IPoolManager;

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { BaseHook } from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { AuctionTypes } from "../types/AuctionTypes.sol";
+
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId, BundleIdLibrary } from "../types/BundleId.sol";
 

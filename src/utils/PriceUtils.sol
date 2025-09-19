@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { console } from "forge-std/console.sol";
-
-import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { FullMath } from "@uniswap/v4-core/src/libraries/FullMath.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
+import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 
     // for use on a pool manager instance
 library PriceUtils {
