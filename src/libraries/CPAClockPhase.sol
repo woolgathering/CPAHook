@@ -205,29 +205,25 @@ library CPAClockPhase {
 		// to move the price by the specified tick increment
 		
 		// Get current tick from pool
-		( , int24 currentTick, , ) = poolManager.getSlot0(poolId);
+		( , int24 tick, , ) = poolManager.getSlot0(poolId);
 		
 		// Calculate new tick based on which currency is the asset
-		int24 newTick;
 		bool zeroForOne = Currency.unwrap(poolKey.currency0) == commonNumeraire;
 		if (zeroForOne) {
-			// Asset is currency0, numeraire is currency1
-			// To increase price (move tick down), we need to swap currency0 for currency1
-			newTick = currentTick - priceIncrement;
+			// Numeraire is currency0, asset is currency1
+			// To increase price of the asset (move tick down), decrease the tick
+			tick -= priceIncrement;
 		} else {
-			// Asset is currency1, numeraire is currency0  
-			// To increase price (move tick up), we need to swap currency1 for currency0
-			newTick = currentTick + priceIncrement;
+			// Numeraire is currency1, asset is currency0  
+			// To increase price of the asset (move tick up), increase the tick
+			tick += priceIncrement;
 		} 
-		
-		// Convert new tick to sqrtPriceX96
-		uint160 newSqrtPriceX96 = TickMath.getSqrtPriceAtTick(newTick);
 		
 		// Create swap parameters for minimal swap
 		SwapParams memory swapParams = SwapParams({
 			zeroForOne: zeroForOne,
 			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: newSqrtPriceX96 // target price
+			sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tick) // target price
 		});
 		
 		// Perform the swap to update the price using callback approach
