@@ -15,57 +15,80 @@ import { AllocationId } from "../types/AllocationId.sol";
  */
 interface IErrorsAndEvents {
 
-
 	/// @notice Events
+	
+	// Auction Lifecycle Events
 	event AuctionCreated(AuctionId auctionId, address auctionOwner);
 	event AuctionPhaseChanged(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase);
-	event BidSubmitted(AuctionId auctionId, address bidder, uint256 stakeAmount, uint256 round);
-	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, BundleId bundleId, uint256[] quantities, uint256 value);
-	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 score);
-	event RevealProcessed(AuctionId auctionId, address bidder, address proxy, bytes32 commitHash);
 	event AuctionPaused(AuctionId auctionId, address by);
 	event AuctionUnpaused(AuctionId auctionId, address by);
 	event AuctionCancelled(AuctionId auctionId, address by);
+	
+	// Bidding Events
+	event BidSubmitted(AuctionId auctionId, address bidder, uint256 stakeAmount, uint256 round);
+	event ClockRoundOpened(AuctionId auctionId, uint256 round);
+	event ClockRoundClosed(AuctionId auctionId, uint256 round, uint256 totalBids);
+	
+	// Bundle and Allocation Events
+	event BundleSubmitted(AuctionId auctionId, bytes32 commitHash, BundleId bundleId, uint256[] quantities, uint256 value);
+	event AllocationSubmitted(AuctionId auctionId, address allocator, uint256 score);
+	event AllocatorRewardClaimed(AuctionId auctionId, address allocator, uint256 reward);
+	
+	// Privacy and Settlement Events
+	event RevealProcessed(AuctionId auctionId, address bidder, address proxy, bytes32 commitHash);
+	
+	// Stake and Asset Events
 	event StakeAdded(AuctionId auctionId, address bidder, uint256 amount);
 	event StakeRefunded(AuctionId auctionId, address bidder, uint256 amount);
 	event PenaltyApplied(AuctionId auctionId, address bidder, uint256 amount);
 	event AssetsDeposited(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 	event AssetsWithdrawn(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
-	event ClockRoundOpened(AuctionId auctionId, uint256 round);
-	event ClockRoundClosed(AuctionId auctionId, uint256 round, uint256 totalBids);
-	event AllocatorRewardClaimed(AuctionId auctionId, address allocator, uint256 reward);
 
 	/// @notice Shared errors
+	
+	// Authorization Errors
 	error OnlyOwner();
+	error Unauthorized();
+	
+	// Auction State Errors
 	error InvalidPhase(AuctionTypes.AuctionPhase expected, AuctionTypes.AuctionPhase actual);
 	error AuctionNotActive(AuctionId auctionId, AuctionTypes.AuctionStatus status);
 	error AuctionNotCancelled(AuctionId auctionId);
-	error ClockNotOpen();
-	error InvalidCommitHash();
-	error InsufficientBidPoints();
-	error MaxStakeTooLow(AuctionId auctionId);
-	error InvalidStakeAmount();
-	error DuplicateBundle();
-	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
-	error InvalidQuantities(AuctionId auctionId, uint256 quantities);
-	error DuplicateAllocation(AuctionId auctionId, bytes32 commitHash);
-	error NoSuchCommitHash(AuctionId auctionId, bytes32 commitHash);
-	error DuplicateReveal(AuctionId auctionId, bytes32 commitHash);
-	error CommitHashNotYetRevealed(AuctionId auctionId, bytes32 commitHash);
-	error Unauthorized();
-	error SetupNotComplete();
-	error InvalidNumeraire();
-	error NumeraireAlreadySet();
-	error PoolAlreadyExists();
-	error MismatchedNumeraires();
-	error InvalidHook();
 	error AuctionAlreadyExists();
 	error AuctionNotFound();
 	error AuctionNotSetup();
 	error AuctionNotStarted();
 	error AuctionNotEnded();
+	error SetupNotComplete();
+	
+	// Clock Phase Errors
+	error ClockNotOpen();
 	error ClockAlreadyOpen();
+	
+	// Bidding Errors
+	error InsufficientBidPoints();
 	error InvalidBidsLength();
+	error MaxStakeTooLow(AuctionId auctionId);
+	error InvalidStakeAmount();
+	
+	// Bundle and Allocation Errors
+	error DuplicateBundle();
+	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
+	error InvalidQuantities(AuctionId auctionId, uint256 quantities);
+	error DuplicateAllocation(AuctionId auctionId, bytes32 commitHash);
+	
+	// Privacy and Commit-Reveal Errors
+	error InvalidCommitHash();
+	error NoSuchCommitHash(AuctionId auctionId, bytes32 commitHash);
+	error DuplicateReveal(AuctionId auctionId, bytes32 commitHash);
+	error CommitHashNotYetRevealed(AuctionId auctionId, bytes32 commitHash);
+	
+	// Pool and Asset Errors
+	error InvalidNumeraire();
+	error NumeraireAlreadySet();
+	error PoolAlreadyExists();
+	error MismatchedNumeraires();
+	error InvalidHook();
 	error PoolPriceUpdateFailed();
 	error PoolNotFound(AuctionId auctionId, PoolId poolId);
 }

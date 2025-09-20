@@ -207,26 +207,17 @@ library CPAClockPhase {
 		// Get current tick from pool
 		( , int24 currentTick, , ) = poolManager.getSlot0(poolId);
 		
-		// Determine which currency is the asset vs numeraire
-		bool assetIsCurrency0 = Currency.unwrap(poolKey.currency0) != commonNumeraire;
-		
 		// Calculate new tick based on which currency is the asset
 		int24 newTick;
-		bool zeroForOne;
-		if (assetIsCurrency0) {
+		bool zeroForOne = Currency.unwrap(poolKey.currency0) == commonNumeraire;
+		if (zeroForOne) {
 			// Asset is currency0, numeraire is currency1
-			// Price = currency1/currency0, so to increase price, move tick down (subtract)
-			newTick = currentTick + priceIncrement;
 			// To increase price (move tick down), we need to swap currency0 for currency1
-			// zeroForOne = false means swap currency1 for currency0
-			zeroForOne = false;
+			newTick = currentTick - priceIncrement;
 		} else {
 			// Asset is currency1, numeraire is currency0  
-			// Price = currency0/currency1, so to increase price, move tick up (add)
-			newTick = currentTick - priceIncrement;
 			// To increase price (move tick up), we need to swap currency1 for currency0
-			// zeroForOne = true means swap currency0 for currency1
-			zeroForOne = true;
+			newTick = currentTick + priceIncrement;
 		} 
 		
 		// Convert new tick to sqrtPriceX96
