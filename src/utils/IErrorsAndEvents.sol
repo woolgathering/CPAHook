@@ -70,6 +70,7 @@ interface IErrorsAndEvents {
 	error InvalidBidsLength();
 	error MaxStakeTooLow(AuctionId auctionId);
 	error InvalidStakeAmount();
+	error ActivityRuleViolation();
 	
 	// Bundle and Allocation Errors
 	error DuplicateBundle();

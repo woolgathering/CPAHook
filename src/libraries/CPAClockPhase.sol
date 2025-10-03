@@ -39,10 +39,28 @@ library CPAClockPhase {
 		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy
+		mapping(address => uint256[]) storage bids // pre-read mapping
 	) internal {
 		if (auctionInfo[auctionId].clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
 		if (demands.length != auctionInfo[auctionId].poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
+
+		// before storing the new demands, we need to validate the activity rule
+		// Get the bidder's previous demands
+		uint256[] memory previousDemands = bids[msg.sender];
+		
+		// If bidder has previous demands, validate the activity rule
+		if (previousDemands.length > 0) {
+			bool[] memory changedPrices = auctionInfo[auctionId].changedPrices;
+			// Ensure arrays have the same length
+			require(changedPrices.length == demands.length && changedPrices.length == previousDemands.length, "Array length mismatch");
+			
+			for(uint256 i = 0; i < changedPrices.length; i++) {
+				// If price increased (changedPrices[i] is true), new demand must be <= previous demand
+				if(changedPrices[i] && demands[i] > previousDemands[i]) {
+					revert IErrorsAndEvents.ActivityRuleViolation();
+				}
+			}
+		}
 		
 		// Calculate total bid value first
 		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo, poolInfo, self.manager());
@@ -93,17 +111,28 @@ library CPAClockPhase {
 		// Calculate the actual stake amount used for this bid
 		uint256 actualStakeAmount = totalValue > currentBidPoints ? totalValue - currentBidPoints : 0;
 		
-		// Record the bid
-		AuctionTypes.Bid memory bid = AuctionTypes.Bid({
-			bidder: msg.sender,
-			stakeAmount: actualStakeAmount,
-			itemIds: new uint256[](0), // TODO: Add item IDs
-			quantities: demands,
-			round: auctionInfo[auctionId].currentRound,
-			timestamp: block.timestamp
-		});
+		// // Record the bid
+		// AuctionTypes.Bid memory bid = AuctionTypes.Bid({
+		// 	bidder: msg.sender,
+		// 	stakeAmount: actualStakeAmount,
+		// 	itemIds: new uint256[](0), // TODO: Add item IDs
+		// 	quantities: demands,
+		// 	round: auctionInfo[auctionId].currentRound,
+		// 	timestamp: block.timestamp
+		// });
 		
-		auctionInfo[auctionId].roundBids.push(bid);
+		// auctionInfo[auctionId].roundBids.push(bid);
+		// I am going to change the above line and logic to instead just a mapping of bidder to demand vector.
+		// we need to keep the last bid for each bidder so that we can validate the activity rule
+		// and cross-round constraint validation
+		// however, we will need a list of bidders so that we can iterate over them and update the price for
+		// each pool if there is excess demand
+
+		// Store bidder demands in the mapping
+		bids[msg.sender] = demands;
+		
+		// Note: Active bidders management should be handled by the calling function
+		// since activeBidders is a separate mapping in CPAStorage, not part of AuctionInfo
 		
 		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, actualStakeAmount, auctionInfo[auctionId].currentRound);
 		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
@@ -158,25 +187,34 @@ library CPAClockPhase {
 	 * @param auctionId The auction ID
 	 * @param auctionInfo Mapping for auction info
 	 * @param poolInfo Mapping for pool info
+	 * @param bids Mapping for bidder demands
+	 * @param activeBidders Mapping for active bidders
 	 */
 	function processClockRound(
 		CPAStorage self,
 		AuctionId auctionId,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		mapping(AuctionId => mapping(address => uint256[])) storage bids,
+		mapping(AuctionId => address[]) storage activeBidders
 	) internal {
 		// Calculate excess demand for each item and update pool prices accordingly
 		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
 		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
+
+		// Note: changedPrices array is already initialized in openClockRound
+
+		// Iterate over pools and calculate excess demand
 		for (uint256 i = 0; i < pools.length; i++) {
 			PoolId poolId = pools[i];
 			uint256 totalDemand = 0;
 			
-			// Sum up all demand for this item across all bids
-			for (uint256 j = 0; j < auction.roundBids.length; j++) {
-				AuctionTypes.Bid memory bid = auction.roundBids[j];
-				if (bid.quantities.length > i) {
-					totalDemand += bid.quantities[i];
+			// Sum up all demand for this item across all active bidders
+			for (uint256 j = 0; j < activeBidders[auctionId].length; j++) {
+				address bidder = activeBidders[auctionId][j];
+				uint256[] memory bidderDemands = bids[auctionId][bidder];
+				if (bidderDemands.length > i) {
+					totalDemand += bidderDemands[i];
 				}
 			}
 			
@@ -187,11 +225,12 @@ library CPAClockPhase {
 			// If there is excess demand, increase the price by tick increment
 			if (pool.excessDemand > 0) {
 				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auction.commonNumeraire);
+				auction.changedPrices[i] = true; // Mark this price as changed
 			}
 		}
 		
-		// Clear round bids after processing
-		delete auction.roundBids;
+		// Note: We don't clear bids here anymore since we want to keep them for activity rule validation
+		// The bids mapping persists across rounds until explicitly cleared
 	}
 
 	function _updatePoolPrice(
@@ -303,18 +342,14 @@ library CPAClockPhase {
 	/**
 	 * @notice Get total bidders
 	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
+	 * @param activeBidders Mapping for active bidders
 	 * @return totalBidders Total number of bidders
 	 */
 	function getTotalBidders(
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+		mapping(AuctionId => address[]) storage activeBidders
 	) internal view returns (uint256 totalBidders) {
-		// TODO: Implement bidder counting
-		// This should count unique bidders, not just round bids
-		
-		// Placeholder: return round bids length
-		return auctionInfo[auctionId].roundBids.length;
+		return activeBidders[auctionId].length;
 	}
 
 	/**
@@ -346,17 +381,17 @@ library CPAClockPhase {
 	}
 
 	/**
-	 * @notice Add a bid to round bids in AuctionInfo
+	 * @notice Add a bidder to active bidders list
 	 * @param auctionId The auction ID
-	 * @param bid The bid to add
-	 * @param auctionInfo Mapping for auction info
+	 * @param bidder The bidder address
+	 * @param activeBidders Mapping for active bidders
 	 */
-	function addRoundBid(
+	function addActiveBidder(
 		AuctionId auctionId, 
-		AuctionTypes.Bid memory bid,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+		address bidder,
+		mapping(AuctionId => address[]) storage activeBidders
 	) internal {
-		auctionInfo[auctionId].roundBids.push(bid);
+		activeBidders[auctionId].push(bidder);
 	}
 
 	/**
@@ -393,31 +428,55 @@ library CPAClockPhase {
 	}
 
 	/**
-	 * @notice Get number of round bids from AuctionInfo
+	 * @notice Get bidder demands
 	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
-	 * @return Number of round bids
+	 * @param bidder The bidder address
+	 * @param bids Mapping for bidder demands
+	 * @return The bidder's demand array
 	 */
-	function getRoundBidsLength(
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal view returns (uint256) {
-		return auctionInfo[auctionId].roundBids.length;
+	function getBidderDemands(
+		AuctionId auctionId, 
+		address bidder,
+		mapping(AuctionId => mapping(address => uint256[])) storage bids
+	) internal view returns (uint256[] memory) {
+		return bids[auctionId][bidder];
 	}
 
 	/**
-	 * @notice Get a round bid by index from AuctionInfo
+	 * @notice Set bidder demands
 	 * @param auctionId The auction ID
-	 * @param index The index of the bid
-	 * @param auctionInfo Mapping for auction info
-	 * @return The bid struct
+	 * @param bidder The bidder address
+	 * @param demands The demand array
+	 * @param bids Mapping for bidder demands
 	 */
-	function getRoundBid(
+	function setBidderDemands(
 		AuctionId auctionId, 
-		uint256 index,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal view returns (AuctionTypes.Bid memory) {
-		return auctionInfo[auctionId].roundBids[index];
+		address bidder,
+		uint256[] memory demands,
+		mapping(AuctionId => mapping(address => uint256[])) storage bids
+	) internal {
+		bids[auctionId][bidder] = demands;
+	}
+
+	/**
+	 * @notice Clear all bids for an auction
+	 * @param auctionId The auction ID
+	 * @param activeBidders Mapping for active bidders
+	 * @param bids Mapping for bidder demands
+	 */
+	function clearAllBids(
+		AuctionId auctionId,
+		mapping(AuctionId => address[]) storage activeBidders,
+		mapping(AuctionId => mapping(address => uint256[])) storage bids
+	) internal {
+		// Clear all bidder demands
+		for (uint256 i = 0; i < activeBidders[auctionId].length; i++) {
+			address bidder = activeBidders[auctionId][i];
+			delete bids[auctionId][bidder];
+		}
+		
+		// Clear active bidders list
+		delete activeBidders[auctionId];
 	}
 
 	/**
@@ -473,7 +532,10 @@ library CPAClockPhase {
 			info.currentRound++;
 		}
 		
-		// 5. Emit event with cached round number
+		// 5. Initialize changedPrices array for this round
+		info.changedPrices = new bool[](info.poolKeys.length);
+		
+		// 6. Emit event with cached round number
 		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
 	}
 }

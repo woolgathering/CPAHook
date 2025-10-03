@@ -103,6 +103,12 @@ abstract contract CPAStorage {
 	/// @notice Number of bidders in an auction
 	// mapping(AuctionId => uint256) public numBidders;
 
+	/// @notice Bidder demand vector mapping
+	mapping(AuctionId => mapping(address => uint256[])) public bids;
+
+	/// @notice Active bidders mapping
+	mapping(AuctionId => address[]) public activeBidders;
+
     ////////
     // PROXY PHASE
     ////////

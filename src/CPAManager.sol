@@ -233,10 +233,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
-		CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo);
+		CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
 		
 		// Emit event for round closure
-		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
+		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 		
 		// Note: Clock remains closed after ending a round
 		// The auctioneer must manually call startClockRound to begin the next round
@@ -252,10 +252,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 			
 			// Process round results (calculate excess demand and update prices)
-			CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo);
+			CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
 			
 			// Emit event for round closure
-			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, auctionInfo[auctionId].roundBids.length);
+			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 		}
 		
 		// Transition to proxy phase
@@ -282,7 +282,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			bidderStake,
 			bidderBidPoints,
 			poolInfo,
-			commitProxy
+			bids[auctionId]
 		);
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
@@ -545,6 +545,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// ========================================
 	// UTILITY FUNCTIONS
 	// ========================================
+
+	/**
+	 * @notice Get the current bidder demands for an auction
+	 * @param auctionId The auction ID
+	 * @param bidder The bidder address
+	 * @return The bidder's demand array
+	 */
+	function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory) {
+		return bids[auctionId][bidder];
+	}
 
 	/**
 	 * @notice Register a commit hash (called by proxies)

@@ -102,10 +102,11 @@ library CPASetup {
 			currentPhase: AuctionTypes.AuctionPhase.Setup,
 			currentStatus: AuctionTypes.AuctionStatus.Active,
 			clockOpen: 1,
-			roundBids: new AuctionTypes.Bid[](0),
+			// roundBids: new AuctionTypes.Bid[](0),
 			currentRound: 0,
 			poolKeys: config.poolKeys,
-			allocatorReward: 0
+			allocatorReward: 0,
+			changedPrices: new bool[](config.poolKeys.length)
 		});
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
