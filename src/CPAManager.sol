@@ -209,11 +209,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// CLOCK PHASE
 	// ========================================
 
+
+	function startClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
+		_startClockRound(auctionId);
+	}
+
 	/**
 	 * @notice Start the clock phase
 	 * @param auctionId The auction ID
 	 */
-	 function startClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
+	 function _startClockRound(AuctionId auctionId) internal {
 		// Handle first-time transition from Setup to Clock phase
 		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Setup) {
 			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
@@ -229,30 +234,33 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @param auctionId The auction ID
 	 */
 	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		// Close the current clock round
+		// Set the clock to closed
 		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
-		CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
+		uint256[] memory totalDemands = CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
 		
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
-		
+
+		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo[auctionId], poolInfo, totalDemands, manager)) {
+			_endClockPhase(auctionId);
+		} else {
+			_startClockRound(auctionId);
+		}
+
 		// Note: Clock remains closed after ending a round
 		// The auctioneer must manually call startClockRound to begin the next round
 	}
 
 	/**
-	 * @notice Manually end the clock phase and transition to proxy phase
+	 * @notice End the clock phase and transition to proxy phase
 	 * @param auctionId The auction ID
 	 */
-	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	function _endClockPhase(AuctionId auctionId) internal {
 		// Close the current clock round if it's still open
 		if (auctionInfo[auctionId].clockOpen == 2) {
 			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
-			
-			// Process round results (calculate excess demand and update prices)
-			CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
 			
 			// Emit event for round closure
 			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
@@ -260,6 +268,14 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		
 		// Transition to proxy phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
+	}
+
+	/**
+	 * @notice End the clock phase and transition to proxy phase
+	 * @param auctionId The auction ID
+	 */
+	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+		_endClockPhase(auctionId);
 	}
 
 	/**
@@ -282,7 +298,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			bidderStake,
 			bidderBidPoints,
 			poolInfo,
-			bids[auctionId]
+			bids[auctionId],
+			activeBidders[auctionId]
 		);
 	}
 	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
