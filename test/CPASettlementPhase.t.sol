@@ -98,7 +98,7 @@ contract CPASettlementPhaseTest is CPATestBase {
 
         // Start clock round
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Submit bids
         uint256[] memory demands1 = new uint256[](2);

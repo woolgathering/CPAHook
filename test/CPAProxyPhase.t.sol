@@ -62,7 +62,7 @@ contract CPAProxyPhaseTest is CPATestBase {
 
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
         
         // End clock phase to move to proxy phase
         vm.prank(auctioneer);

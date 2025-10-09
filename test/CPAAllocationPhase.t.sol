@@ -75,7 +75,7 @@ contract CPAAllocationPhaseTest is CPATestBase {
 
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
         
         // Submit bids in clock phase
         uint256[] memory demands1 = new uint256[](2);

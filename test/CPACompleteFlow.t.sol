@@ -62,6 +62,7 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // Create auction with standard configuration
         AuctionTypes.AuctionConfig memory config = createStandardAuctionConfig();
+        // config.maxRounds = 3; // no need for this since at round 3 below we have no excess demand
         auctionId = createAuction(config, auctioneer);
 
         mintTokensToAuctioneer(1000000 * 10**18);
@@ -138,7 +139,7 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
         
         // Submit bids for round 1 - create excess demand on BOTH assets
         uint256[] memory demands1 = new uint256[](2);
@@ -188,9 +189,9 @@ contract CPACompleteFlowTest is CPATestBase {
         // CLOCK PHASE - ROUND 2
         // ========================================
         
-        // Start round 2
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        // Start round 2 (automatic now)
+        // vm.prank(auctioneer);
+        // cpaManager.startClockPhase(auctionId);
         
         // Submit bids for round 2 - only asset1 has excess demand
         uint256[] memory demands1_2 = new uint256[](2);
@@ -243,8 +244,8 @@ contract CPACompleteFlowTest is CPATestBase {
         // ========================================
         
         // Start round 3
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        // vm.prank(auctioneer);
+        // cpaManager.startClockPhase(auctionId);
         
         // Submit final bids - no excess demand on either asset
         uint256[] memory demands1_3 = new uint256[](2);
@@ -293,8 +294,13 @@ contract CPACompleteFlowTest is CPATestBase {
         // ========================================
         
         // End clock phase to move to proxy phase
-        vm.prank(auctioneer);
-        cpaManager.endClockPhase(auctionId);
+        // vm.prank(auctioneer);
+        // cpaManager.endClockPhase(auctionId);
+
+        // Verify that clock phase is ended
+        AuctionTypes.AuctionInfo memory endClockInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(endClockInfo.clockOpen, 1, "Clock should be closed");
+        assertEq(endClockInfo.currentRound, 3, "Round should be 3");
         
         // ========================================
         // VERIFY CLOCK PHASE RESULTS
