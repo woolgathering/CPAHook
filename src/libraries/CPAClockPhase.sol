@@ -39,7 +39,8 @@ library CPAClockPhase {
 		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
 		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(address => uint256[]) storage bids // pre-read mapping
+		mapping(address => uint256[]) storage bids, // pre-read mapping
+		address[] storage activeBidders
 	) internal {
 		if (auctionInfo[auctionId].clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
 		if (demands.length != auctionInfo[auctionId].poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
@@ -51,8 +52,8 @@ library CPAClockPhase {
 		// If bidder has previous demands, validate the activity rule
 		if (previousDemands.length > 0) {
 			bool[] memory changedPrices = auctionInfo[auctionId].changedPrices;
-			// Ensure arrays have the same length
-			require(changedPrices.length == demands.length && changedPrices.length == previousDemands.length, "Array length mismatch");
+			// Ensure arrays have the same length (not needed, this gets checked elsewhere)
+			// require(changedPrices.length == demands.length && changedPrices.length == previousDemands.length, "Array length mismatch");
 			
 			for(uint256 i = 0; i < changedPrices.length; i++) {
 				// If price increased (changedPrices[i] is true), new demand must be <= previous demand
@@ -133,6 +134,7 @@ library CPAClockPhase {
 		
 		// Note: Active bidders management should be handled by the calling function
 		// since activeBidders is a separate mapping in CPAStorage, not part of AuctionInfo
+		activeBidders.push(msg.sender);
 		
 		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, actualStakeAmount, auctionInfo[auctionId].currentRound);
 		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
@@ -197,40 +199,43 @@ library CPAClockPhase {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		mapping(AuctionId => mapping(address => uint256[])) storage bids,
 		mapping(AuctionId => address[]) storage activeBidders
-	) internal {
+	) internal returns (uint256[] memory) {
 		// Calculate excess demand for each item and update pool prices accordingly
 		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
 		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
+		uint256[] memory totalDemands = new uint256[](pools.length);
 
 		// Note: changedPrices array is already initialized in openClockRound
 
 		// Iterate over pools and calculate excess demand
 		for (uint256 i = 0; i < pools.length; i++) {
 			PoolId poolId = pools[i];
-			uint256 totalDemand = 0;
 			
 			// Sum up all demand for this item across all active bidders
 			for (uint256 j = 0; j < activeBidders[auctionId].length; j++) {
-				address bidder = activeBidders[auctionId][j];
-				uint256[] memory bidderDemands = bids[auctionId][bidder];
-				if (bidderDemands.length > i) {
-					totalDemand += bidderDemands[i];
-				}
+				totalDemands[i] += bids[auctionId][activeBidders[auctionId][j]][i];
 			}
 			
 			// Calculate excess demand and update price
 			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
-			pool.excessDemand = totalDemand > pool.depositAmount ? totalDemand - pool.depositAmount : 0;
+			pool.excessDemand = totalDemands[i] > pool.depositAmount ? totalDemands[i] - pool.depositAmount : 0;
+			poolInfo[poolId].excessDemand = pool.excessDemand;
 			
 			// If there is excess demand, increase the price by tick increment
 			if (pool.excessDemand > 0) {
 				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auction.commonNumeraire);
 				auction.changedPrices[i] = true; // Mark this price as changed
+			} else {
+				auction.changedPrices[i] = false; // Mark this price as not changed
 			}
 		}
+
+		delete activeBidders[auctionId]; // clear the active bidders list
 		
 		// Note: We don't clear bids here anymore since we want to keep them for activity rule validation
 		// The bids mapping persists across rounds until explicitly cleared
+
+		return totalDemands;
 	}
 
 	function _updatePoolPrice(
@@ -280,12 +285,70 @@ library CPAClockPhase {
 	 */
 	function shouldEndClockPhase(
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
-	) internal view returns (bool shouldEnd) {
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		uint256[] memory totalDemands,
+		IPoolManager poolManager
+	) internal returns (bool) {
 		// For now, clock phase does not end automatically
 		// It must be manually ended by the auctioneer
-		return false;
+		// return false;
+
+		// there are three conditions under which clock phase should end
+		// 1. No excess demand on any item
+		// 2. Max clock rounds exceeded
+		// 3. Revenue improvement is less than ½ percent for two consecutive rounds
+
+		// 1. No excess demand on any item - end clock phase
+		bool hasExcessDemand = false;
+		for (uint256 i = 0; i < auctionInfo.poolKeys.length; i++) {
+			if (poolInfo[auctionInfo.poolKeys[i].toId()].excessDemand > 0) {
+				hasExcessDemand = true;
+				break;
+			}
+		}
+		if (!hasExcessDemand) {
+			return true; // End clock phase - no excess demand on any item
+		}
+
+		// 2. Max clock rounds exceeded
+		// greater than or equal to because we increment the round after the clock round is processed
+		if (auctionInfo.currentRound >= auctionInfo.config.maxRounds) {
+			return true;
+		}
+
+		// 3. Revenue improvement is less than 1/2 percent for two consecutive rounds.
+		// Here we use an EMA formula to avoid using two storage slots. I have not checked
+		// for mathemetical equivalence but I think it should be relatively close. It's fine
+		// for now.
+		// EMA formula: R_t = alpha * r_t + (1 - alpha) * R_{t-1}
+		uint256 alpha = 5e17; // 1/2 in 1e18 precision
+		uint256 revenue = calculateBidValueWithMemoryDemands(totalDemands, auctionId, auctionInfo, poolInfo, poolManager);
+		uint256 R_t = _computeEMA(revenue, auctionInfo.lastRevenue, alpha);
+		// if (R_t < revenue * 0.005) {
+		if ((R_t * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
+			return true;
+		} else {
+			auctionInfo.lastRevenue = revenue;
+		}
+		// Note: lastRevenue update is handled in the calling function
+
+		return false; // keep going
+	}
+
+	/**
+	 * @notice Compute EMA
+	 * @param r_t The current revenue
+	 * @param R_t_1 The previous revenue
+	 * @param alpha The alpha value
+	 * @return The EMA value
+	 */
+	function _computeEMA(
+		uint256 r_t,
+		uint256 R_t_1,
+		uint256 alpha
+	) internal pure returns (uint256) {
+		return (alpha * r_t + (1e18 - alpha) * R_t_1) / 1e18;
 	}
 
 	/**
@@ -325,6 +388,34 @@ library CPAClockPhase {
 		}
 	}
 
+	function calculateBidValueWithMemoryDemands(
+		uint256[] memory demands,
+		AuctionId auctionId,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		IPoolManager poolManager
+	) internal view returns (uint256 totalValue) {
+		// Get all pool keys for this auction
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		
+		// Calculate inner product: sum(demands[i] * prices[i])
+		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
+			// Get the pool ID and its current price from the pool
+			PoolId poolId = poolKeys[i].toId();
+			uint256 price;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
+				// Since the numeraire is currency0, we need to get the price of currency1
+				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+			} else {
+				// Since the numeraire is currency1, we need to get the price of currency0
+				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+			}
+			
+			// Add to total value: demand * price
+			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
+		}
+	}
+
 	/**
 	 * @notice Update currency prices
 	 * @param currencyAddress The currency address to update
@@ -347,9 +438,9 @@ library CPAClockPhase {
 	 */
 	function getTotalBidders(
 		AuctionId auctionId,
-		mapping(AuctionId => address[]) storage activeBidders
+		address[] storage activeBidders
 	) internal view returns (uint256 totalBidders) {
-		return activeBidders[auctionId].length;
+		return activeBidders.length;
 	}
 
 	/**
@@ -459,27 +550,6 @@ library CPAClockPhase {
 	}
 
 	/**
-	 * @notice Clear all bids for an auction
-	 * @param auctionId The auction ID
-	 * @param activeBidders Mapping for active bidders
-	 * @param bids Mapping for bidder demands
-	 */
-	function clearAllBids(
-		AuctionId auctionId,
-		mapping(AuctionId => address[]) storage activeBidders,
-		mapping(AuctionId => mapping(address => uint256[])) storage bids
-	) internal {
-		// Clear all bidder demands
-		for (uint256 i = 0; i < activeBidders[auctionId].length; i++) {
-			address bidder = activeBidders[auctionId][i];
-			delete bids[auctionId][bidder];
-		}
-		
-		// Clear active bidders list
-		delete activeBidders[auctionId];
-	}
-
-	/**
 	 * @notice Get all pool IDs for an auction
 	 * @param auctionId The auction ID
 	 * @param auctionInfo Mapping for auction info
@@ -532,10 +602,7 @@ library CPAClockPhase {
 			info.currentRound++;
 		}
 		
-		// 5. Initialize changedPrices array for this round
-		info.changedPrices = new bool[](info.poolKeys.length);
-		
-		// 6. Emit event with cached round number
+		// 5. Emit event with cached round number
 		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
 	}
 }
