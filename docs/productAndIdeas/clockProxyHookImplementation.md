@@ -1,5 +1,28 @@
 # Clock-Proxy Auction Implementation Specification
 
+## TODO: Implementation Requirements
+
+### Spending Validation and Penalty System
+- `minSpendRatio` validation in auction config
+- Spending ratio calculation and enforcement
+- Spending violation detection and penalty application
+- Escalating penalty system for repeated violations
+
+### Dropout Penalty System
+- Active dropout penalty enforcement
+- Stake slashing on dropout
+- Penalty distribution mechanism
+
+### Maximum Rounds Enforcement
+- Round limit checking in `startClockRound()`
+- Automatic termination at max rounds
+- Graceful auction conclusion
+
+### Phase Duration Enforcement
+- Phase duration tracking
+- Automatic phase transitions
+- Time-based auction progression
+
 ## Architecture
 
 The Clock-Proxy Auction system uses two contracts:
