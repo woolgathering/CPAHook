@@ -106,7 +106,8 @@ library CPASetup {
 			currentRound: 0,
 			poolKeys: config.poolKeys,
 			allocatorReward: 0,
-			changedPrices: new bool[](config.poolKeys.length)
+			changedPrices: new bool[](config.poolKeys.length),
+			lastRevenue: 0
 		});
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);

@@ -103,12 +103,11 @@ library AuctionTypes {
 		AuctionPhase currentPhase;
 		AuctionStatus currentStatus;
 		uint256 clockOpen;
-		// AuctionTypes.Bid[] roundBids;
-		// address[] activeBidders;
 		uint256 currentRound;
 		PoolKey[] poolKeys;         // Array of pool keys for this auction
 		uint256 allocatorReward;
 		bool[] changedPrices;       // Array tracking which prices changed in current round
+		uint256 lastRevenue;        // Last revenue for EMA calculation
 	}
 	
 	/// @notice Callback data structure for bid as liquidity operations
