@@ -50,7 +50,7 @@ contract CPAClockPhaseTest is CPATestBase {
         moveDeposit(auctionId, asset2PoolKey, depositAmount2);
     }
 
-    function test_StartClockRound_Success() public {
+    function test_StartClockPhase_Success() public {
         // Verify initial state
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
 
@@ -63,39 +63,39 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(auctionInfo.currentRound, 0, "Initial round should be 0");
         assertEq(auctionInfo.poolKeys.length, 2, "Should have 2 asset pools");
 
-        // Open clock round
+        // Start clock phase (this automatically opens the first round)
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
-        // Verify state after opening clock round
+        // Verify state after starting clock phase
         AuctionTypes.AuctionInfo memory auctionInfoAfterStart = cpaManager.getAuctionInfo(auctionId);
 
         assertEq(uint256(auctionInfoAfterStart.currentPhase), uint256(AuctionTypes.AuctionPhase.Clock), "Phase should be Clock");
         assertEq(uint256(auctionInfoAfterStart.currentStatus), uint256(AuctionTypes.AuctionStatus.Active), "Status should still be Active");
-        assertEq(auctionInfoAfterStart.clockOpen, 2, "Clock should be open after opening clock round");
+        assertEq(auctionInfoAfterStart.clockOpen, 2, "Clock should be open after starting clock phase");
         // Note: Using mapping-based storage now - no roundBids field
         assertEq(auctionInfoAfterStart.currentRound, 1, "Round should be incremented to 1");
         assertEq(auctionInfoAfterStart.poolKeys.length, 2, "Should still have 2 asset pools");
     }
 
-    function test_StartClockRound_InvalidAuctionId() public {
+    function test_StartClockPhase_InvalidAuctionId() public {
         // Create invalid auction ID
         AuctionId invalidAuctionId = AuctionId.wrap(keccak256("invalid"));
 
         // Should revert with AuctionNotFound
         vm.prank(auctioneer);
         vm.expectRevert(IErrorsAndEvents.AuctionNotFound.selector);
-        cpaManager.startClockRound(invalidAuctionId);
+        cpaManager.startClockPhase(invalidAuctionId);
     }
 
-    function test_StartClockRound_UnauthorizedCaller() public {
-        // Non-auctioneer should not be able to open clock round
+    function test_StartClockPhase_UnauthorizedCaller() public {
+        // Non-auctioneer should not be able to start clock phase
         vm.prank(bidder1);
-        vm.expectRevert(IErrorsAndEvents.Unauthorized.selector);
-        cpaManager.startClockRound(auctionId);
+        vm.expectRevert(IErrorsAndEvents.Unauthorized.selector);    
+        cpaManager.startClockPhase(auctionId);
     }
 
-    function test_StartClockRound_SetupNotComplete() public {
+    function test_StartClockPhase_SetupNotComplete() public {
         // Create a new auction with different pool keys but without deposits
         AuctionTypes.AuctionConfig memory config = createNewAuctionConfig();
         AuctionId newAuctionId = createAuction(config, auctioneer);
@@ -104,486 +104,97 @@ contract CPAClockPhaseTest is CPATestBase {
         // Try to start clock phase without deposits - should revert
         vm.prank(auctioneer);
         vm.expectRevert(IErrorsAndEvents.SetupNotComplete.selector);
-        cpaManager.startClockRound(newAuctionId);
+        cpaManager.startClockPhase(newAuctionId);
     }
 
-    function test_StartClockRound_AlreadyInClockPhase() public {
-        // Start clock phase first time
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
 
-        // Try to start again - should revert with ClockAlreadyOpen
-        vm.prank(auctioneer);
-        vm.expectRevert(IErrorsAndEvents.ClockAlreadyOpen.selector);
-        cpaManager.startClockRound(auctionId);
-    }
-
-    function test_StartClockRound_EventEmission() public {
+    function test_StartClockPhase_EventEmission() public {
         // Expect ClockRoundOpened event
         vm.expectEmit(true, true, true, true);
         emit IErrorsAndEvents.ClockRoundOpened(auctionId, 1);
 
-        // Open clock round
+        // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
     }
 
-    function test_StartClockRound_RoundIncrement() public {
+    function test_AutomaticRoundProgression() public {
         // Start clock phase (opens first round)
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Verify first round
         AuctionTypes.AuctionInfo memory auctionInfo1 = cpaManager.getAuctionInfo(auctionId);
         assertEq(auctionInfo1.currentRound, 1, "First round should be 1");
+        assertEq(auctionInfo1.clockOpen, 2, "Clock should be open");
 
-        // End first round (no bids required)
+        // Create bidders and submit bids with excess demand to keep clock phase going
+        address testBidder1 = makeAddr("testBidder1");
+        address testBidder2 = makeAddr("testBidder2");
+        createBidder(testBidder1, 100000 * 10**18);
+        createBidder(testBidder2, 100000 * 10**18);
+        approveNumeraireForBidder(testBidder1, type(uint256).max);
+        approveNumeraireForBidder(testBidder2, type(uint256).max);
+
+        // Submit bids that create excess demand to keep clock phase going
+        // Asset1: supply = 100, demand = 60 + 50 = 110 (excess = 10)
+        // Asset2: supply = 150, demand = 80 + 70 = 150 (no excess)
+        uint256[] memory bidder1Demands = new uint256[](2);
+        bidder1Demands[0] = 60 * 10**asset1Token.decimals();
+        bidder1Demands[1] = 80 * 10**asset2Token.decimals();
+        
+        uint256[] memory bidder2Demands = new uint256[](2);
+        bidder2Demands[0] = 50 * 10**asset1Token.decimals();
+        bidder2Demands[1] = 70 * 10**asset2Token.decimals();
+        
+        vm.startPrank(testBidder1);
+        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        vm.stopPrank();
+        
+        vm.startPrank(testBidder2);
+        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        vm.stopPrank();
+
+        // End first round - this should automatically start the second round (due to excess demand)
         vm.prank(auctioneer);
         cpaManager.endClockRound(auctionId);
 
-        // Start second round
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
-
-        // Verify second round
+        // Verify second round started automatically
         AuctionTypes.AuctionInfo memory auctionInfo2 = cpaManager.getAuctionInfo(auctionId);
         assertEq(auctionInfo2.currentRound, 2, "Second round should be 2");
+        assertEq(auctionInfo2.clockOpen, 2, "Clock should be open for second round");
 
-        // End second round
+        // Submit new bids for second round with reduced demands (still some excess)
+        uint256[] memory bidder1Demands2 = new uint256[](2);
+        bidder1Demands2[0] = 55 * 10**asset1Token.decimals(); // Still some excess for asset1
+        bidder1Demands2[1] = 70 * 10**asset2Token.decimals(); // Reduced from 80
+        
+        uint256[] memory bidder2Demands2 = new uint256[](2);
+        bidder2Demands2[0] = 50 * 10**asset1Token.decimals(); // Still some excess for asset1
+        bidder2Demands2[1] = 60 * 10**asset2Token.decimals(); // Reduced from 70
+        
+        vm.startPrank(testBidder1);
+        cpaManager.submitBid(auctionId, bidder1Demands2, calculateBidValue(bidder1Demands2));
+        vm.stopPrank();
+        
+        vm.startPrank(testBidder2);
+        cpaManager.submitBid(auctionId, bidder2Demands2, calculateBidValue(bidder2Demands2));
+        vm.stopPrank();
+
+        // End second round - this should automatically start the third round
         vm.prank(auctioneer);
         cpaManager.endClockRound(auctionId);
 
-        // Start third round
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
-
-        // Verify third round
+        // Verify third round started automatically
         AuctionTypes.AuctionInfo memory auctionInfo3 = cpaManager.getAuctionInfo(auctionId);
         assertEq(auctionInfo3.currentRound, 3, "Third round should be 3");
+        assertEq(auctionInfo3.clockOpen, 2, "Clock should be open for third round");
     }
 
-    function test_CompleteBidFlow_WithProxyCommit() public {
-        // Check pool info right after auction creation (before clock phase)
-        (PoolKey memory initialAsset1PoolKeyCheck, int24 initialAsset1StartingTick, int24 initialAsset1PriceIncrement, uint256 initialAsset1DepositAmount, uint256 initialAsset1ExcessDemand, , bytes32 initialAsset1PositionId) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (PoolKey memory initialAsset2PoolKeyCheck, int24 initialAsset2StartingTick, int24 initialAsset2PriceIncrement, uint256 initialAsset2DepositAmount, uint256 initialAsset2ExcessDemand, , bytes32 initialAsset2PositionId) = cpaManager.getPoolInfo(asset2PoolKey.toId());
-        
-        // Verify pool keys match
-        assertEq(Currency.unwrap(initialAsset1PoolKeyCheck.currency0), Currency.unwrap(asset1PoolKey.currency0), "Asset1 pool key currency0 should match");
-        assertEq(Currency.unwrap(initialAsset1PoolKeyCheck.currency1), Currency.unwrap(asset1PoolKey.currency1), "Asset1 pool key currency1 should match");
-        assertEq(Currency.unwrap(initialAsset2PoolKeyCheck.currency0), Currency.unwrap(asset2PoolKey.currency0), "Asset2 pool key currency0 should match");
-        assertEq(Currency.unwrap(initialAsset2PoolKeyCheck.currency1), Currency.unwrap(asset2PoolKey.currency1), "Asset2 pool key currency1 should match");
-        
-        // Verify starting ticks are correct
-        assertEq(initialAsset1StartingTick, 0, "Asset1 starting tick should be 0 for price = 1");
-        assertEq(initialAsset2StartingTick, 6931, "Asset2 starting tick should be 6931 for price = 2");
-        
-        // Verify price increments are correct
-        assertEq(initialAsset1PriceIncrement, asset1PoolKey.tickSpacing * 10, "Asset1 price increment should be 100 ticks");
-        assertEq(initialAsset2PriceIncrement, asset2PoolKey.tickSpacing * 5, "Asset2 price increment should be 300 ticks");
-        
-        // Verify initial deposit amounts and excess demand are 0
-        assertEq(initialAsset1DepositAmount, depositAmount1, "Asset1 deposit amount should be 0 initially"); // this will probably fail since we have already moved the deposit
-        assertEq(initialAsset1ExcessDemand, 0, "Asset1 excess demand should be 0 initially");
-        assertEq(initialAsset2DepositAmount, depositAmount2, "Asset2 deposit amount should be 0 initially"); // this will probably fail since we have already moved the deposit
-        assertEq(initialAsset2ExcessDemand, 0, "Asset2 excess demand should be 0 initially");
-
-        ////////////////////////////////////////
-        ///// CREATE BIDDERS AND PROXIES
-        ////////////////////////////////////////
-
-        ///// CREATE BIDDER1 AND PROXY1
-        // Create a proxy and bidder
-        proxy1 = makeAddr("proxy1");
-        bidder1 = makeAddr("bidder1");
-
-        // Create bidder with numeraire tokens
-        createBidder(bidder1, 250000 * 10**18);
-        uint256 bidder1OriginalBalance = IERC20(address(numeraireToken)).balanceOf(bidder1);
-
-        // Generate commit hash using CommitReveal library (one-time per bidder-proxy pair)
-        bytes32 saltA = keccak256("saltA"); // known only to the bidder
-        bytes32 saltB = keccak256("saltB"); // known only to the bidder and the proxy
-        bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA, saltB); // shared with the proxy
-
-
-        ///// CREATE BIDDER2 AND PROXY2
-        // Create a proxy and bidder
-        bidder2 = makeAddr("bidder2");
-        proxy2 = makeAddr("proxy2");
-
-        // Create bidder with numeraire tokens
-        createBidder(bidder2, 300000 * 10**18);
-        uint256 bidder2OriginalBalance = IERC20(address(numeraireToken)).balanceOf(bidder2);
-
-        // Generate commit hash using CommitReveal library (one-time per bidder-proxy pair)
-        bytes32 saltA2 = keccak256("saltA2");
-        bytes32 saltB2 = keccak256("saltB2");
-        bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
-
-        // Start clock phase
-        ////////////////////////////////////////
-        // ROUND ONE
-        ////////////////////////////////////////
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
-
-        // Capture initial sqrtPriceX96 values for inter-round bidding checks
-        (uint160 asset1InitialSqrtPriceX96, , , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        (uint160 asset2InitialSqrtPriceX96, , , ) = poolManager.getSlot0(asset2PoolKey.toId());
-
-        // Proxy commits to the bidder1 (one-time registration)
-        vm.prank(proxy1);
-        cpaManager.commitToBidder(auctionId, commitHash);
-        assertEq(cpaManager.commitProxy(auctionId, commitHash), proxy1, "Proxy1 should be recorded for commit hash");
-
-        vm.prank(proxy2);
-        cpaManager.commitToBidder(auctionId, commitHash2);
-        assertEq(cpaManager.commitProxy(auctionId, commitHash2), proxy2, "Proxy2 should be recorded for commit hash2");
-
-        ////////////////
-        // BIDDER1 SUBMITS BID 1
-        ////////////////
-
-        // Bidder creates a bid: demands [100, 50] for assets [asset1, asset2]
-        uint256[] memory demands = new uint256[](2);
-        demands[0] = 100 * 10**asset1Token.decimals(); // 100 units of asset1
-        demands[1] = 50 * 10**asset2Token.decimals();  // 50 units of asset2
-        
-        // Calculate expected bid value using current pool prices
-        uint256 expectedBidValue = calculateBidValue(demands);
-        uint256 maxStakeAmount = expectedBidValue; // Set max to exactly what's needed
-        uint256 expectedAllocatorRewardFromBidder1_round1 = (expectedBidValue * allocatorRewardPct) / 10000;
-        console.log("expectedBidValue", expectedBidValue);
-        console.log("expectedAllocatorRewardFromBidder1_round1", expectedAllocatorRewardFromBidder1_round1);
-
-        // Approve numeraire tokens for the auction contract
-        approveNumeraireForBidder(bidder1, type(uint256).max);
-
-        // Submit bid
-        vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands, maxStakeAmount);
-
-        // Verify bid was recorded using mapping-based storage
-        AuctionTypes.AuctionInfo memory auctionInfoBid1 = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoBid1.clockOpen, 2, "Clock should be open after first bid");
-        assertEq(auctionInfoBid1.currentRound, 1, "Current round should be 1");
-        
-        // Verify bidder demands are stored in mapping
-        uint256[] memory bidder1Demands = cpaManager.getBidderDemands(auctionId, bidder1);
-        assertEq(bidder1Demands.length, 2, "Bidder1 should have 2 demand quantities");
-        assertEq(bidder1Demands[0], 100 * 10**asset1Token.decimals(), "Bidder1 asset1 demand should be 100");
-        assertEq(bidder1Demands[1], 50 * 10**asset2Token.decimals(), "Bidder1 asset2 demand should be 50");
-
-        // Verify bidder stake and bid points were updated
-        assertEq(cpaManager.bidderStake(auctionId, bidder1), expectedBidValue, "Bidder1 stake should match expected bid value");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), expectedBidValue, "Bidder1 bid points should match expected bid value (1:1 ratio)");
-
-        // Verify numeraire tokens were transferred
-        uint256 expectedBidderBalance = bidder1OriginalBalance - (expectedBidValue + expectedAllocatorRewardFromBidder1_round1);
-        uint256 actualBidderBalance = numeraireToken.balanceOf(bidder1);
-        // Allow for small allocator reward difference (tolerance of 5 tokens)
-        assertTrue(actualBidderBalance >= expectedBidderBalance - 5 && actualBidderBalance <= expectedBidderBalance + 5, 
-            string(abi.encodePacked("Bidder1 balance should be within tolerance: expected ~", vm.toString(expectedBidderBalance), ", got ", vm.toString(actualBidderBalance))));
-        assertEq(numeraireToken.balanceOf(address(poolManager)), expectedBidValue + expectedAllocatorRewardFromBidder1_round1, "Pool manager should have received expected bid value");
-        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), expectedBidValue + expectedAllocatorRewardFromBidder1_round1, "CPAManager should have ERC6909 claims for expected bid value");
-
-        // Verify that the sqrtPriceX96 of either pool has not moved during inter-round bidding
-        (uint160 asset1SqrtPriceX96AfterFirstBid, , , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        (uint160 asset2SqrtPriceX96AfterFirstBid, , , ) = poolManager.getSlot0(asset2PoolKey.toId());
-        assertEq(asset1SqrtPriceX96AfterFirstBid, asset1InitialSqrtPriceX96, "Asset1 sqrtPriceX96 should not have moved after first bid");
-        assertEq(asset2SqrtPriceX96AfterFirstBid, asset2InitialSqrtPriceX96, "Asset2 sqrtPriceX96 should not have moved after first bid");
-
-
-        ////////////////
-        // BIDDER2 SUBMITS BID 1
-        ///////////////
-
-        // Bidder2 submits different bid: demands [75, 25] for assets [asset1, asset2]
-        uint256[] memory demands2 = new uint256[](2);
-        demands2[0] = 75 * 10**asset1Token.decimals(); // 75 units of asset1
-        demands2[1] = 25 * 10**asset2Token.decimals(); // 25 units of asset2
-        
-        uint256 expectedBidValue2 = calculateBidValue(demands2);
-        uint256 expectedAllocatorReward2 = (expectedBidValue2 * allocatorRewardPct) / 10000;
-        uint256 stakeAmount2 = expectedBidValue2;
-
-        // Approve numeraire tokens
-        approveNumeraireForBidder(bidder2, type(uint256).max);
-
-        // Submit second bid using partial commit (preserves anonymity)
-        vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2, stakeAmount2);
-
-        ///////////////
-        // VERIFICATION OF BOTH BIDS IN ROUND 1
-        ///////////////
-
-        // Verify both bids were recorded using mapping-based storage
-        AuctionTypes.AuctionInfo memory auctionInfoBids = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoBids.clockOpen, 2, "Clock should still be open after second bid");
-        assertEq(auctionInfoBids.currentRound, 1, "Current round should still be 1");
-        
-        // Verify first bidder's demands
-        uint256[] memory bidder1DemandsCheck = cpaManager.getBidderDemands(auctionId, bidder1);
-        assertEq(bidder1DemandsCheck.length, 2, "Bidder1 should have 2 demand quantities");
-        assertEq(bidder1DemandsCheck[0], 100 * 10**asset1Token.decimals(), "Bidder1 asset1 demand should be 100");
-        assertEq(bidder1DemandsCheck[1], 50 * 10**asset2Token.decimals(), "Bidder1 asset2 demand should be 50");
-        
-        // Verify second bidder's demands
-        uint256[] memory bidder2DemandsCheck = cpaManager.getBidderDemands(auctionId, bidder2);
-        assertEq(bidder2DemandsCheck.length, 2, "Bidder2 should have 2 demand quantities");
-        assertEq(bidder2DemandsCheck[0], 75 * 10**asset1Token.decimals(), "Bidder2 asset1 demand should be 75");
-        assertEq(bidder2DemandsCheck[1], 25 * 10**asset2Token.decimals(), "Bidder2 asset2 demand should be 25");
-
-        // Verify both bidders' stakes and bid points
-        assertEq(cpaManager.bidderStake(auctionId, bidder1), expectedBidValue, "Bidder1 stake should match expected bid value");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), expectedBidValue, "Bidder1 bid points should match expected bid value");
-        assertEq(cpaManager.bidderStake(auctionId, bidder2), expectedBidValue2, "Bidder2 stake should match expected bid value2");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder2), expectedBidValue2, "Bidder2 bid points should match expected bid value2");
-
-        // Verify token balances
-        uint256 expectedBidder1Balance = bidder1OriginalBalance - (expectedBidValue + expectedAllocatorRewardFromBidder1_round1);
-        uint256 actualBidder1Balance = numeraireToken.balanceOf(bidder1);
-        assertTrue(actualBidder1Balance >= expectedBidder1Balance - 5 && actualBidder1Balance <= expectedBidder1Balance + 5, 
-            string(abi.encodePacked("Bidder1 balance should be within tolerance: expected ~", vm.toString(expectedBidder1Balance), ", got ", vm.toString(actualBidder1Balance))));
-        
-        uint256 expectedBidder2Balance = bidder2OriginalBalance - (expectedBidValue2 + expectedAllocatorReward2);
-        uint256 actualBidder2Balance = numeraireToken.balanceOf(bidder2);
-        assertTrue(actualBidder2Balance >= expectedBidder2Balance - 5 && actualBidder2Balance <= expectedBidder2Balance + 5, 
-            string(abi.encodePacked("Bidder2 balance should be within tolerance: expected ~", vm.toString(expectedBidder2Balance), ", got ", vm.toString(actualBidder2Balance))));
-        uint256 expectedPoolManagerBalance = (expectedBidValue + expectedAllocatorRewardFromBidder1_round1) + (expectedBidValue2 + expectedAllocatorReward2);
-        uint256 actualPoolManagerBalance = numeraireToken.balanceOf(address(poolManager));
-        // Allow for small allocator reward differences (tolerance of 10 tokens)
-        assertTrue(actualPoolManagerBalance >= expectedPoolManagerBalance - 10 && actualPoolManagerBalance <= expectedPoolManagerBalance + 10, 
-            string(abi.encodePacked("Pool manager balance should be within tolerance: expected ~", vm.toString(expectedPoolManagerBalance), ", got ", vm.toString(actualPoolManagerBalance))));
-        assertEq(IERC6909Claims(poolManager).balanceOf(address(cpaManager), numeraireCurrencyId), actualPoolManagerBalance, "CPAManager should have ERC6909 claims for actual pool manager balance");
-
-        // Verify that sqrtPriceX96 still has not moved after second bid (inter-round bidding)
-        (uint160 asset1SqrtPriceX96AfterSecondBid, , , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        (uint160 asset2SqrtPriceX96AfterSecondBid, , , ) = poolManager.getSlot0(asset2PoolKey.toId());
-        assertEq(asset1SqrtPriceX96AfterSecondBid, asset1InitialSqrtPriceX96, "Asset1 sqrtPriceX96 should not have moved after second bid");
-        assertEq(asset2SqrtPriceX96AfterSecondBid, asset2InitialSqrtPriceX96, "Asset2 sqrtPriceX96 should not have moved after second bid");
-
-        ///////////////
-        // END FIRST CLOCK ROUND
-        ///////////////
-
-        // End the first clock round
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
-
-        // Verify clock is closed after first round
-        AuctionTypes.AuctionInfo memory auctionInfoAfterEnd1 = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoAfterEnd1.clockOpen, 1,"Clock should be closed after ending first round");
-        assertEq(auctionInfoAfterEnd1.currentRound, 1, "Current round should still be 1 after ending first round");
-        // Note: Using mapping-based storage - bids persist across rounds for activity rule validation
-
-        ///////////////
-        // VERIFICATION OF PRICE INCREMENT FUNCTIONALITY
-        ///////////////
-
-        // Verify price increment functionality
-        // Asset1: demand = 100 + 75 = 175, supply = 100, excess = 75
-        // Asset2: demand = 50 + 25 = 75, supply = 150, excess = 0
-        // Price increment = 100 ticks for asset1, 300 ticks for asset2
-        // Asset1 price should increase by 100 ticks due to excess demand
-        // Asset2 price should remain the same (no excess demand)
-        
-        // Get asset pool info (getPoolInfo returns startingTick, not currentTick)
-        (,int24 asset1StartingTick,int24 asset1PriceIncrement,,uint256 asset1ExcessDemand,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,int24 asset2StartingTick,int24 asset2PriceIncrement,,uint256 asset2ExcessDemand,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
-        
-        // Get the current (actual) tick and sqrtPriceX96 for both assets
-        (uint160 actualAsset1SqrtPriceX96, int24 actualAsset1CurrentTick, , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        (uint160 actualAsset2SqrtPriceX96, int24 actualAsset2CurrentTick, , ) = poolManager.getSlot0(asset2PoolKey.toId());
-
-        // Verify excess demand was calculated correctly
-        assertEq(asset1ExcessDemand, 75 * 10**asset1Token.decimals(), "Asset1 should have excess demand of 75");
-        assertEq(asset2ExcessDemand, 0, "Asset2 should have no excess demand");
-        
-        // Verify price increments are still stored correctly
-        assertEq(asset1PriceIncrement, asset1PoolKey.tickSpacing * 10, "Asset1 price increment should be tickSpacing * 10 ticks");
-        assertEq(asset2PriceIncrement, asset2PoolKey.tickSpacing * 5, "Asset2 price increment should be tickSpacing * 5 ticks");
-
-        // Verify that Asset1 price increased due to excess demand in both tick-space and sqrtPriceX96-space
-        // Asset1 should have moved from starting tick (0) to starting tick + priceIncrement (100)
-        assertEq(actualAsset1CurrentTick, asset1StartingTick + asset1PriceIncrement, "Asset1 current tick should be startingTick + priceIncrement");
-        assertEq(actualAsset1SqrtPriceX96, TickMath.getSqrtPriceAtTick(asset1StartingTick + asset1PriceIncrement), "Asset1 sqrtPriceX96 should be startingTick + priceIncrement");
-        
-        // Verify that Asset2 price did not change due to no excess demand in tick-space and sqrtPriceX96-space
-        // Asset2 should remain at starting tick (6931 for price = 2)
-        assertEq(actualAsset2CurrentTick, asset2StartingTick, "Asset2 current tick should remain at startingTick (no excess demand)");
-        assertEq(actualAsset2SqrtPriceX96, asset2InitialSqrtPriceX96, "Asset2 sqrtPriceX96 should remain at initial value");
-
-        ////////////////////////////////////////
-        // ROUND TWO
-        ////////////////////////////////////////
-
-        // Start second clock round
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
-
-        // Verify second round is open
-        AuctionTypes.AuctionInfo memory auctionInfoRound2 = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoRound2.clockOpen, 2, "Clock should be open for second round");
-        assertEq(auctionInfoRound2.currentRound, 2, "Current round should be 2");
-        // Note: Using mapping-based storage - previous bids persist for activity rule validation
-
-        // Existing bidders submit new bids in round 2 with smaller demands
-        // This should result in no excess demand due to higher prices from round 1
-
-        // Bidder1 submits smaller bid: demands [30, 20] for assets [asset1, asset2]
-        uint256[] memory demands1_round2 = new uint256[](2);
-        demands1_round2[0] = 30 * 10**asset1Token.decimals(); // 30 units of asset1
-        demands1_round2[1] = 20 * 10**asset2Token.decimals(); // 20 units of asset2
-        
-        // Calculate bid value with current pool prices
-        uint256 expectedBidValue1_round2 = calculateBidValue(demands1_round2);
-        
-        // Check current bid points for bidder1
-        uint256 currentBidPoints1 = cpaManager.bidderBidPoints(auctionId, bidder1);
-        uint256 additionalStake1 = expectedBidValue1_round2 > currentBidPoints1 ? expectedBidValue1_round2 - currentBidPoints1 : 0;
-        
-        // Only approve additional tokens if needed
-        if (additionalStake1 > 0) {
-            approveNumeraireForBidder(bidder1, type(uint256).max);
-        }
-
-        // Submit bidder1's second round bid using same partial commit
-        vm.prank(bidder1);
-        cpaManager.submitBid(auctionId, demands1_round2, additionalStake1);
-
-        // Bidder2 submits smaller bid: demands [25, 15] for assets [asset1, asset2]
-        uint256[] memory demands2_round2 = new uint256[](2);
-        demands2_round2[0] = 25 * 10**asset1Token.decimals(); // 25 units of asset1
-        demands2_round2[1] = 15 * 10**asset2Token.decimals(); // 15 units of asset2
-        
-        uint256 expectedBidValue2_round2 = calculateBidValue(demands2_round2);
-        
-        // Check current bid points for bidder2
-        uint256 currentBidPoints2 = cpaManager.bidderBidPoints(auctionId, bidder2);
-        uint256 additionalStake2 = expectedBidValue2_round2 > currentBidPoints2 ? expectedBidValue2_round2 - currentBidPoints2 : 0;
-        
-        // Only approve additional tokens if needed
-        if (additionalStake2 > 0) {
-            approveNumeraireForBidder(bidder2, type(uint256).max);
-        }
-
-        // Submit bidder2's second round bid using same partial commit
-        vm.prank(bidder2);
-        cpaManager.submitBid(auctionId, demands2_round2, additionalStake2);
-
-        // Verify both bids were recorded in round 2 using mapping-based storage
-        AuctionTypes.AuctionInfo memory auctionInfoRound2Bids = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoRound2Bids.clockOpen, 2, "Clock should still be open after second round bids");
-        assertEq(auctionInfoRound2Bids.currentRound, 2, "Current round should still be 2");
-        
-        // Verify bidder1's updated demands in round 2
-        uint256[] memory bidder1DemandsRound2 = cpaManager.getBidderDemands(auctionId, bidder1);
-        assertEq(bidder1DemandsRound2.length, 2, "Bidder1 should have 2 demand quantities in round 2");
-        assertEq(bidder1DemandsRound2[0], 30 * 10**asset1Token.decimals(), "Bidder1 asset1 demand should be 30 in round 2");
-        assertEq(bidder1DemandsRound2[1], 20 * 10**asset2Token.decimals(), "Bidder1 asset2 demand should be 20 in round 2");
-        
-        // Verify bidder2's updated demands in round 2
-        uint256[] memory bidder2DemandsRound2 = cpaManager.getBidderDemands(auctionId, bidder2);
-        assertEq(bidder2DemandsRound2.length, 2, "Bidder2 should have 2 demand quantities in round 2");
-        assertEq(bidder2DemandsRound2[0], 25 * 10**asset1Token.decimals(), "Bidder2 asset1 demand should be 25 in round 2");
-        assertEq(bidder2DemandsRound2[1], 15 * 10**asset2Token.decimals(), "Bidder2 asset2 demand should be 15 in round 2");
-
-        // Verify bid points have been updated correctly (should be max of previous + additional)
-        uint256 expectedBidPoints1_round2 = currentBidPoints1 + additionalStake1;
-        uint256 expectedBidPoints2_round2 = currentBidPoints2 + additionalStake2;
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder1), expectedBidPoints1_round2, "Bidder1 bid points should be updated correctly");
-        assertEq(cpaManager.bidderBidPoints(auctionId, bidder2), expectedBidPoints2_round2, "Bidder2 bid points should be updated correctly");
-
-        // Manually end the clock phase (transition to proxy phase)
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
-
-        //// END SECOND CLOCK ROUND
-
-        // Verify clock is closed after second round
-        AuctionTypes.AuctionInfo memory auctionInfoAfterEnd2 = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoAfterEnd2.clockOpen, 1, "Clock should be closed after ending second round");
-        assertEq(auctionInfoAfterEnd2.currentRound, 2, "Current round should still be 2 after ending second round");
-        // Note: Using mapping-based storage - bids persist for activity rule validation
-
-        ///////////////
-        // VERIFICATION OF PRICE INCREMENT FUNCTIONALITY
-        ///////////////
-
-        // Verify price increment functionality
-        // Asset1: demand is less than supply, so no excess demand. price remains the same as round 1
-        // Asset2: demand is less than supply, so no excess demand. price remains the same as round 1
-        // Price increment = 100 ticks for asset1, 300 ticks for asset2
-        // Asset1 price should remain the same as the end of round 1
-        // Asset2 price should remain the same as the end of round 1
-        
-        // Get asset pool info (getPoolInfo returns startingTick, not currentTick)
-        // we only need to redefine the excess demand since it was calculated in round 2 and everything else is the same
-        (,,,,uint256 asset1ExcessDemandRound2,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,,,,uint256 asset2ExcessDemandRound2,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
-        
-        // Get the current (actual) tick and sqrtPriceX96 for both assets
-        (uint160 actualAsset1SqrtPriceX96Round2, int24 actualAsset1CurrentTickRound2, , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        (uint160 actualAsset2SqrtPriceX96Round2, int24 actualAsset2CurrentTickRound2, , ) = poolManager.getSlot0(asset2PoolKey.toId());
-
-        // Verify excess demand was calculated correctly
-        assertEq(asset1ExcessDemandRound2, 0, "Asset1 should have no excess demand");
-        assertEq(asset2ExcessDemandRound2, 0, "Asset2 should have no excess demand");
-        
-        // Verify price increments are still stored correctly
-        // assertEq(asset1PriceIncrementRound2, asset1PoolKey.tickSpacing * 10, "Asset1 price increment should be tickSpacing * 10 ticks");
-        // assertEq(asset2PriceIncrementRound2, asset2PoolKey.tickSpacing * 5, "Asset2 price increment should be tickSpacing * 5 ticks");
-
-        // Verify that Asset1 price remained the same as the end of round 1 in both tick-space and sqrtPriceX96-space
-        // Asset1 should remain at the same price as the end of round 1
-        assertEq(actualAsset1CurrentTickRound2, asset1StartingTick + asset1PriceIncrement, "Asset1 current tick should be startingTick + priceIncrement");
-        assertEq(actualAsset1SqrtPriceX96Round2, TickMath.getSqrtPriceAtTick(asset1StartingTick + asset1PriceIncrement), "Asset1 sqrtPriceX96 should be startingTick + priceIncrement");
-        
-        // Verify that Asset2 price did not change due to no excess demand in tick-space and sqrtPriceX96-space
-        // Asset2 should remain at starting tick (6931 for price = 2)
-        assertEq(actualAsset2CurrentTickRound2, asset2StartingTick, "Asset2 current tick should remain at startingTick (no excess demand)");
-        assertEq(actualAsset2SqrtPriceX96Round2, asset2InitialSqrtPriceX96, "Asset2 sqrtPriceX96 should remain at initial value");
-
-        ///////////////
-        // END CLOCK PHASE
-        ///////////////
-
-        // No excess demand so stop the auction here
-        vm.prank(auctioneer);
-        cpaManager.endClockPhase(auctionId);
-
-        // Verify clock is closed and phase changed to Proxy
-        AuctionTypes.AuctionInfo memory auctionInfoAfterClock = cpaManager.getAuctionInfo(auctionId);
-        assertEq(auctionInfoAfterClock.clockOpen, 1, "Clock should be closed after ending clock phase");
-        assertEq(uint256(auctionInfoAfterClock.currentPhase), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy after ending clock phase");
-
-        // Verify no excess demand in second round (prices should not increase)
-        (,int24 asset1StartingTick2,int24 asset1PriceIncrement2,,uint256 asset1ExcessDemand2,,) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,int24 asset2StartingTick2,int24 asset2PriceIncrement2,,uint256 asset2ExcessDemand2,,) = cpaManager.getPoolInfo(asset2PoolKey.toId());
-        
-        // Asset1: demand = 30 + 25 = 55, supply = 100, excess = 0 (no excess demand)
-        // Asset2: demand = 20 + 15 = 35, supply = 150, excess = 0 (no excess demand)
-        assertEq(asset1ExcessDemand2, 0, "Asset1 should have no excess demand in second round");
-        assertEq(asset2ExcessDemand2, 0, "Asset2 should have no excess demand in second round");
-        
-        // Verify that prices did not change in second round (no excess demand)
-        // Asset1 should remain at tick 100 (from first round)
-        (uint160 asset1SqrtPriceX96Final, int24 asset1CurrentTick2Real, , ) = poolManager.getSlot0(asset1PoolKey.toId());
-        assertEq(asset1CurrentTick2Real, asset1StartingTick + asset1PriceIncrement, "Asset1 current tick should remain at startingTick + priceIncrement (no excess demand in round 2)");
-        assertEq(asset1SqrtPriceX96Final, TickMath.getSqrtPriceAtTick(asset1StartingTick + asset1PriceIncrement), "Asset1 sqrtPriceX96 should remain at startingTick + priceIncrement");
-        
-        // Asset2 should remain at tick 6931 (from initial setup)
-        (uint160 asset2SqrtPriceX96Final, int24 asset2CurrentTick2Real, , ) = poolManager.getSlot0(asset2PoolKey.toId());
-        assertEq(asset2CurrentTick2Real, asset2StartingTick, "Asset2 current tick should remain at startingTick (no excess demand in round 2)");
-        assertEq(asset2SqrtPriceX96Final, asset2InitialSqrtPriceX96, "Asset2 sqrtPriceX96 should remain at initial value");
-    }
-
-    function test_StartClockRound_MappingStorage() public {
+    function test_StartClockPhase_MappingStorage() public {
         // Start clock phase (opens first round)
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Verify mapping-based storage is ready
         AuctionTypes.AuctionInfo memory auctionInfoCleared = cpaManager.getAuctionInfo(auctionId);
@@ -597,7 +208,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_SubmitBid_ValidBidAmounts_ZeroDemands() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create bidder and proxy
         address testBidder = makeAddr("testBidder");
@@ -634,7 +245,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_SubmitBid_ValidBidAmounts_LargeDemands() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create bidder and proxy
         address testBidder = makeAddr("testBidder");
@@ -672,7 +283,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_SubmitBid_BidderWithoutProxyCommitment() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create bidder
         address testBidder = makeAddr("testBidder");
@@ -699,7 +310,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_CommitToBidder_ProxyCommitsToMultipleBidders() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create multiple bidders
         address bidder1 = makeAddr("bidder1");
@@ -759,7 +370,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_SubmitBid_InsufficientMaxStake() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create bidder with sufficient funds but low max stake
         address testBidder = makeAddr("testBidder");
@@ -823,7 +434,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_SubmitBid_InvalidAuctionId() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create bidder and proxy
         address testBidder = makeAddr("testBidder");
@@ -859,7 +470,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_ActivityRule_ViolationOnPriceIncrease() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create two bidders to create excess demand
         address testBidder1 = makeAddr("testBidder1");
@@ -892,9 +503,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.prank(auctioneer);
         cpaManager.endClockRound(auctionId);
 
-        // Start new round
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        // New round should start automatically
 
         // Try to submit bid with increased demands when prices have increased
         // This should violate the activity rule for asset1 (price increased)
@@ -904,14 +513,14 @@ contract CPAClockPhaseTest is CPATestBase {
         
         vm.startPrank(testBidder1);
         vm.expectRevert(IErrorsAndEvents.ActivityRuleViolation.selector);
-        cpaManager.submitBid(auctionId, increasedDemands, calculateBidValue(increasedDemands));
+        cpaManager.submitBid(auctionId, increasedDemands, type(uint256).max);
         vm.stopPrank();
     }
 
     function test_ActivityRule_ValidDemandReduction() public {
         // Start clock phase
         vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        cpaManager.startClockPhase(auctionId);
 
         // Create two bidders to create excess demand
         address testBidder1 = makeAddr("testBidder1");
@@ -944,9 +553,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.prank(auctioneer);
         cpaManager.endClockRound(auctionId);
 
-        // Start new round
-        vm.prank(auctioneer);
-        cpaManager.startClockRound(auctionId);
+        // New round should start automatically
 
         // Submit bid with reduced demands - this should be valid
         uint256[] memory reducedDemands = new uint256[](2);
@@ -961,5 +568,69 @@ contract CPAClockPhaseTest is CPATestBase {
         uint256[] memory storedDemands = cpaManager.getBidderDemands(auctionId, testBidder1);
         assertEq(storedDemands[0], 40 * 10**asset1Token.decimals(), "Demand should be reduced to 40");
         assertEq(storedDemands[1], 25 * 10**asset2Token.decimals(), "Demand should be reduced to 25");
+    }
+
+    // ============ AUTOMATIC CLOCK PHASE ENDING TESTS ============
+
+    function test_AutomaticClockPhaseEnding_NoExcessDemand() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidders with demands that don't exceed supply
+        address testBidder1 = makeAddr("testBidder1");
+        address testBidder2 = makeAddr("testBidder2");
+        createBidder(testBidder1, 100000 * 10**18);
+        createBidder(testBidder2, 100000 * 10**18);
+        approveNumeraireForBidder(testBidder1, type(uint256).max);
+        approveNumeraireForBidder(testBidder2, type(uint256).max);
+
+        // Submit bids that don't create excess demand
+        // Asset1: supply = 100, demand = 30 + 40 = 70 (no excess)
+        // Asset2: supply = 150, demand = 20 + 30 = 50 (no excess)
+        uint256[] memory bidder1Demands = new uint256[](2);
+        bidder1Demands[0] = 30 * 10**asset1Token.decimals();
+        bidder1Demands[1] = 20 * 10**asset2Token.decimals();
+        
+        uint256[] memory bidder2Demands = new uint256[](2);
+        bidder2Demands[0] = 40 * 10**asset1Token.decimals();
+        bidder2Demands[1] = 30 * 10**asset2Token.decimals();
+        
+        vm.startPrank(testBidder1);
+        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        vm.stopPrank();
+        
+        vm.startPrank(testBidder2);
+        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        vm.stopPrank();
+
+        // End round - should automatically end clock phase due to no excess demand
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Verify clock phase ended and transitioned to proxy phase
+        AuctionTypes.AuctionInfo memory auctionInfoAfterEnd = cpaManager.getAuctionInfo(auctionId);
+        assertEq(auctionInfoAfterEnd.clockOpen, 1, "Clock should be closed");
+        assertEq(uint256(auctionInfoAfterEnd.currentPhase), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy");
+    }
+
+    function test_ManualClockPhaseEnding() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Verify we're in clock phase
+        AuctionTypes.AuctionInfo memory auctionInfoBefore = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint256(auctionInfoBefore.currentPhase), uint256(AuctionTypes.AuctionPhase.Clock), "Should be in Clock phase");
+        assertEq(auctionInfoBefore.clockOpen, 2, "Clock should be open");
+
+        // Manually end clock phase
+        vm.prank(auctioneer);
+        cpaManager.endClockPhase(auctionId);
+
+        // Verify clock phase ended and transitioned to proxy phase
+        AuctionTypes.AuctionInfo memory auctionInfoAfter = cpaManager.getAuctionInfo(auctionId);
+        assertEq(auctionInfoAfter.clockOpen, 1, "Clock should be closed");
+        assertEq(uint256(auctionInfoAfter.currentPhase), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy");
     }
 }
