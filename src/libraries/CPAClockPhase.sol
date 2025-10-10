@@ -216,13 +216,17 @@ library CPAClockPhase {
 				totalDemands[i] += bids[auctionId][activeBidders[auctionId][j]][i];
 			}
 			
-			// Calculate excess demand and update price
+			// Calculate excess demand (can be negative for undersell)
 			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
-			pool.excessDemand = totalDemands[i] > pool.depositAmount ? totalDemands[i] - pool.depositAmount : 0;
+			pool.excessDemand = int256(totalDemands[i]) - int256(pool.depositAmount);
 			poolInfo[poolId].excessDemand = pool.excessDemand;
 			
-			// If there is excess demand, increase the price by tick increment
+			// If there is excess demand (oversell), increase the price by tick increment
 			if (pool.excessDemand > 0) {
+				// Track last oversold tick BEFORE updating price
+				(, int24 currentTick, , ) = StateLibrary.getSlot0(self.manager(), poolId);
+				poolInfo[poolId].lastOversoldTick = currentTick;
+				
 				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auction.commonNumeraire);
 				auction.changedPrices[i] = true; // Mark this price as changed
 			} else {
@@ -604,5 +608,72 @@ library CPAClockPhase {
 		
 		// 5. Emit event with cached round number
 		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
+	}
+
+	/**
+	 * @notice Revert prices to last oversold ticks for any items currently undersold
+	 * @param self The contract instance
+	 * @param auctionId The auction ID
+	 * @param auctionInfo Storage reference to auction info
+	 * @param poolInfo Storage reference to pool info
+	 * @param poolManager The pool manager instance
+	 */
+	function revertUndersoldPrices(
+		CPAStorage self,
+		AuctionId auctionId,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		IPoolManager poolManager
+	) internal {
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		
+		for (uint256 i = 0; i < poolKeys.length; i++) {
+			PoolId poolId = poolKeys[i].toId();
+			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
+			
+			// Check if this item is undersold (excessDemand < 0)
+			if (pool.excessDemand < 0 && pool.lastOversoldTick != 0) {
+				// Revert to last oversold tick
+				(, int24 currentTick, , ) = StateLibrary.getSlot0(poolManager, poolId);
+				// int24 tickDelta = pool.lastOversoldTick - currentTick;
+				
+				if (pool.lastOversoldTick != currentTick) {
+					// Use existing price update logic with negative tick delta for price decrease
+					_updatePoolPriceByTick(pool.key, pool.lastOversoldTick, poolManager, auctionInfo.commonNumeraire);
+				}
+			}
+		}
+	}
+
+	/**
+	 * @notice Update pool price by tick delta (can be negative to decrease price)
+	 * @param poolKey The pool key
+	 * @param tickTarget The tick change (positive or negative)
+	 * @param poolManager The pool manager instance
+	 * @param commonNumeraire The common numeraire address
+	 */
+	function _updatePoolPriceByTick(
+		PoolKey memory poolKey,
+		int24 tickTarget,
+		IPoolManager poolManager,
+		address commonNumeraire
+	) internal {
+		// Calculate new sqrt price from tick
+		// uint160 newSqrtPriceX96 = TickMath.getSqrtPriceAtTick(tickTarget);
+		
+		// Determine swap direction based on numeraire position
+		// bool zeroForOne = Currency.unwrap(poolKey.currency0) != commonNumeraire;
+		
+		// Create swap parameters for minimal swap
+		SwapParams memory swapParams = SwapParams({
+			zeroForOne: Currency.unwrap(poolKey.currency0) != commonNumeraire,
+			amountSpecified: 1, // minimal amount
+			sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tickTarget) // target price
+		});
+		
+		// Perform the swap to update the price using callback approach
+		// Encode the operation type (2) and the swap parameters
+		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
+		poolManager.unlock(callbackData);
 	}
 }
