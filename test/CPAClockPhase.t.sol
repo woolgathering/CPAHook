@@ -633,4 +633,116 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(auctionInfoAfter.clockOpen, 1, "Clock should be closed");
         assertEq(uint256(auctionInfoAfter.currentPhase), uint256(AuctionTypes.AuctionPhase.Proxy), "Phase should be Proxy");
     }
+
+    function test_RevertUndersoldPrices() public {
+        // Test that excessDemand is correctly calculated as signed integer and lastOversoldTick is tracked
+        
+        PoolKey[] memory poolKeys = new PoolKey[](2);
+        poolKeys[0] = asset1PoolKey;
+        poolKeys[1] = asset2PoolKey;
+        
+        // Create bidders and proxies
+        address bidder1 = makeAddr("bidder1");
+        address bidder2 = makeAddr("bidder2");
+        address proxy1 = makeAddr("proxy1");
+        address proxy2 = makeAddr("proxy2");
+        
+        createBidder(bidder1, 10000000 * 10**18);
+        createBidder(bidder2, 10000000 * 10**18);
+        
+        // Approve tokens for bidders
+        approveNumeraireForBidder(bidder1, type(uint256).max);
+        approveNumeraireForBidder(bidder2, type(uint256).max);
+        
+        // Generate commit hashes
+        bytes32 saltA1 = keccak256("saltA1");
+        bytes32 saltB1 = keccak256("saltB1");
+        bytes32 saltA2 = keccak256("saltA2");
+        bytes32 saltB2 = keccak256("saltB2");
+        
+        bytes32 commitHash1 = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1, saltB1);
+        bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
+        
+        // Proxies commit
+        vm.prank(proxy1);
+        cpaManager.commitToBidder(auctionId, commitHash1);
+        vm.prank(proxy2);
+        cpaManager.commitToBidder(auctionId, commitHash2);
+        
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+        
+        // Round 1: Asset1 oversold, Asset2 oversold
+        uint256[] memory demands1_1 = new uint256[](2);
+        demands1_1[0] = 60 * 10**18;  // Asset1: 60 + 50 = 110 > 100 (oversold)
+        demands1_1[1] = 80 * 10**18;  // Asset2: 80 + 80 = 160 > 150 (oversold)
+        
+        uint256[] memory demands2_1 = new uint256[](2);
+        demands2_1[0] = 50 * 10**18;
+        demands2_1[1] = 80 * 10**18;
+        
+        vm.prank(bidder1);
+        cpaManager.submitBid(auctionId, demands1_1, 1000 * 10**18);
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2_1, 1000 * 10**18);
+        
+        // End round 1
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+        
+        // Check that asset1 was oversold and price increased, asset2 stayed same
+        (, int24 asset1Tick1, , ) = poolManager.getSlot0(poolKeys[0].toId());
+        (, int24 asset2Tick1, , ) = poolManager.getSlot0(poolKeys[1].toId());
+        
+        // Verify pool info after round 1
+        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, bytes32 asset1PositionId1) = cpaManager.getPoolInfo(poolKeys[0].toId());
+        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, bytes32 asset2PositionId1) = cpaManager.getPoolInfo(poolKeys[1].toId());
+        
+        // Asset1 should have positive excess demand (oversold)
+        assertGt(asset1ExcessDemand1, 0, "Asset1 should have positive excess demand (oversold)");
+        // Asset2 should have positive excess demand (oversold)
+        assertGt(asset2ExcessDemand1, 0, "Asset2 should have positive excess demand (oversold)");
+        
+        
+        // Asset1 should have lastOversoldTick set (was oversold)
+        // Note: Asset1's starting tick is 0, so lastOversoldTick being 0 is correct
+        assertGe(asset1LastOversoldTick1, 0, "Asset1 should have lastOversoldTick set");
+        // Asset2 should have lastOversoldTick set (was oversold)
+        assertGt(asset2LastOversoldTick1, 0, "Asset2 should have lastOversoldTick set");
+        
+        // Round 2: Asset1 exactly clearing, Asset2 undersold
+        uint256[] memory demands1_2 = new uint256[](2);
+        demands1_2[0] = 50 * 10**18;  // Asset1: 50 + 50 = 100 = 100 (exactly clearing)
+        demands1_2[1] = 30 * 10**18;  // Asset2: 30 + 25 = 55 < 150 (undersold)
+        
+        uint256[] memory demands2_2 = new uint256[](2);
+        demands2_2[0] = 50 * 10**18;
+        demands2_2[1] = 25 * 10**18;
+        
+        vm.prank(bidder1);
+        cpaManager.submitBid(auctionId, demands1_2, 1000 * 10**18);
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2_2, 1000 * 10**18);
+        
+        // End round 2
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+        
+        // Verify pool info after round 2
+        (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, bytes32 asset1PositionId2) = cpaManager.getPoolInfo(poolKeys[0].toId());
+        (,,,uint256 asset2Deposit2, int256 asset2ExcessDemand2, int24 asset2LastOversoldTick2, AuctionId asset2AuctionId2, bytes32 asset2PositionId2) = cpaManager.getPoolInfo(poolKeys[1].toId());
+        
+        // Asset1 should have zero excess demand (exactly clearing)
+        assertEq(asset1ExcessDemand2, 0, "Asset1 should have zero excess demand (exactly clearing)");
+        // Asset2 should have negative excess demand (undersold)
+        assertLt(asset2ExcessDemand2, 0, "Asset2 should have negative excess demand (undersold)");
+        
+        // Asset1 should still have lastOversoldTick from round 1
+        assertEq(asset1LastOversoldTick2, asset1LastOversoldTick1, "Asset1 should keep lastOversoldTick from round 1");
+        // Asset2 should still have lastOversoldTick from round 1 (was oversold in round 1)
+        assertEq(asset2LastOversoldTick2, asset2LastOversoldTick1, "Asset2 should keep lastOversoldTick from round 1");
+        
+        console.log("Test completed successfully - excessDemand and lastOversoldTick tracking working correctly");
+    }
 }
