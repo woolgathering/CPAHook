@@ -170,8 +170,8 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.endClockRound(auctionId);
         
         // Verify round 1 results
-        (,,,uint256 asset1Deposit1, uint256 asset1ExcessDemand1,,bytes32 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,,,uint256 asset2Deposit1, uint256 asset2ExcessDemand1,,bytes32 asset2PositionId1) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, bytes32 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, bytes32 asset2PositionId1) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         (, int24 asset1Tick1, , ) = poolManager.getSlot0(asset1PoolKey.toId());
         (, int24 asset2Tick1, , ) = poolManager.getSlot0(asset2PoolKey.toId());
         
@@ -221,20 +221,20 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.endClockRound(auctionId);
         
         // Verify round 2 results
-        (,,,uint256 asset1Deposit2, uint256 asset1ExcessDemand2,,bytes32 asset1PositionId2) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,,,uint256 asset2Deposit2, uint256 asset2ExcessDemand2,,bytes32 asset2PositionId2) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, bytes32 asset1PositionId2) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,,,uint256 asset2Deposit2, int256 asset2ExcessDemand2, int24 asset2LastOversoldTick2, AuctionId asset2AuctionId2, bytes32 asset2PositionId2) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         (, int24 asset1Tick2, , ) = poolManager.getSlot0(asset1PoolKey.toId());
         (, int24 asset2Tick2, , ) = poolManager.getSlot0(asset2PoolKey.toId());
         
-        // Round 2: Only asset1 has excess demand (105 > 100, 105 < 150)
+        // Round 2: Only asset1 has excess demand (105 > 100), asset2 has undersell (105 < 150)
         assertGt(asset1ExcessDemand2, 0, "Asset1 should still have excess demand after round 2");
-        assertEq(asset2ExcessDemand2, 0, "Asset2 should have no excess demand after round 2");
+        assertLt(asset2ExcessDemand2, 0, "Asset2 should have undersell after round 2");
         // Excess demand should be reduced compared to round 1
         assertLt(asset1ExcessDemand2, asset1ExcessDemand1, "Asset1 excess demand should be reduced in round 2");
         assertLt(asset2ExcessDemand2, asset2ExcessDemand1, "Asset2 excess demand should be reduced in round 2");
-        // Only asset1 price should increase (has excess demand), asset2 price should stay same (no excess demand)
+        // Only asset1 price should increase (has excess demand), asset2 price should stay same (has undersell)
         assertGt(asset1Tick2, asset1Tick1, "Asset1 price should continue increasing in round 2");
-        assertEq(asset2Tick2, asset2Tick1, "Asset2 price should remain the same in round 2 (no excess demand)");
+        assertEq(asset2Tick2, asset2Tick1, "Asset2 price should remain the same in round 2 (has undersell)");
         
         // console.log("Round 2 - Asset1 excess demand:", asset1ExcessDemand2, "tick:", asset1Tick2);
         // console.log("Round 2 - Asset2 excess demand:", asset2ExcessDemand2, "tick:", asset2Tick2);
@@ -274,20 +274,21 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.endClockRound(auctionId);
         
         // Verify round 3 results
-        (,,,uint256 asset1Deposit3, uint256 asset1ExcessDemand3,,bytes32 asset1PositionId3) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (,,,uint256 asset2Deposit3, uint256 asset2ExcessDemand3,,bytes32 asset2PositionId3) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (,,,uint256 asset1Deposit3, int256 asset1ExcessDemand3, int24 asset1LastOversoldTick3, AuctionId asset1AuctionId3, bytes32 asset1PositionId3) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (,,,uint256 asset2Deposit3, int256 asset2ExcessDemand3, int24 asset2LastOversoldTick3, AuctionId asset2AuctionId3, bytes32 asset2PositionId3) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         (, int24 asset1Tick3, , ) = poolManager.getSlot0(asset1PoolKey.toId());
         (, int24 asset2Tick3, , ) = poolManager.getSlot0(asset2PoolKey.toId());
         
-        // Round 3: No excess demand on either asset (90 < 100, 105 < 150)
-        assertEq(asset1ExcessDemand3, 0, "Asset1 should have no excess demand after round 3");
-        assertEq(asset2ExcessDemand3, 0, "Asset2 should have no excess demand after round 3");
-        // Prices should continue to increase
-        assertEq(asset1Tick3, asset1Tick2, "Asset1 price should be equal after round 3");
-        assertEq(asset2Tick3, asset2Tick2, "Asset2 price should be equal after round 3");
+        // Round 3: Both assets have undersell (90 < 100, 105 < 150)
+        assertLt(asset1ExcessDemand3, 0, "Asset1 should have undersell after round 3");
+        assertLt(asset2ExcessDemand3, 0, "Asset2 should have undersell after round 3");
+
+        // since both assets have undersell, the endClockRound() function automatically ends the auction
+        // so the prices REVERT since _endClockPhase is called inside
+        // assertEq(asset1Tick3, asset1Tick2, "Asset1 price should be equal after round 3");
+        // assertEq(asset2Tick3, asset2Tick2, "Asset2 price should be equal after round 3");
         
-        // console.log("Round 3 - Asset1 excess demand:", asset1ExcessDemand3, "tick:", asset1Tick3);
-        // console.log("Round 3 - Asset2 excess demand:", asset2ExcessDemand3, "tick:", asset2Tick3);
+        
         
         // ========================================
         // END CLOCK PHASE
@@ -302,6 +303,15 @@ contract CPACompleteFlowTest is CPATestBase {
         assertEq(endClockInfo.clockOpen, 1, "Clock should be closed");
         assertEq(endClockInfo.currentRound, 3, "Round should be 3");
         
+        // check that we are now in the proxy phase
+        assertEq(uint8(endClockInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Proxy), "Auction should be in proxy phase");
+
+        // Verify that prices are reverted to last oversold ticks
+        (, int24 asset1TickFinal, , ) = poolManager.getSlot0(asset1PoolKey.toId());
+        (, int24 asset2TickFinal, , ) = poolManager.getSlot0(asset2PoolKey.toId());
+        assertEq(asset1TickFinal, asset1LastOversoldTick3, "Asset1 price should be reverted to last oversold tick");
+        assertEq(asset2TickFinal, asset2LastOversoldTick3, "Asset2 price should be reverted to last oversold tick");
+        
         // ========================================
         // VERIFY CLOCK PHASE RESULTS
         // ========================================
@@ -311,8 +321,8 @@ contract CPACompleteFlowTest is CPATestBase {
         assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Proxy), "Auction should be in proxy phase");
         
         // Verify final pool states
-        (, int24 asset1StartingTick, , uint256 asset1FinalDeposit, uint256 asset1FinalExcessDemand,,bytes32 asset1FinalPositionId) = cpaManager.getPoolInfo(asset1PoolKey.toId());
-        (, int24 asset2StartingTick, , uint256 asset2FinalDeposit, uint256 asset2FinalExcessDemand,,bytes32 asset2FinalPositionId) = cpaManager.getPoolInfo(asset2PoolKey.toId());
+        (, int24 asset1StartingTick, , uint256 asset1FinalDeposit, int256 asset1FinalExcessDemand, int24 asset1FinalLastOversoldTick, AuctionId asset1FinalAuctionId, bytes32 asset1FinalPositionId) = cpaManager.getPoolInfo(asset1PoolKey.toId());
+        (, int24 asset2StartingTick, , uint256 asset2FinalDeposit, int256 asset2FinalExcessDemand, int24 asset2FinalLastOversoldTick, AuctionId asset2FinalAuctionId, bytes32 asset2FinalPositionId) = cpaManager.getPoolInfo(asset2PoolKey.toId());
         
         // Get current prices from pool manager Slot0
         (, int24 asset1FinalTick, , ) = poolManager.getSlot0(asset1PoolKey.toId());
@@ -320,7 +330,7 @@ contract CPACompleteFlowTest is CPATestBase {
         
         // Prices should have increased from starting prices due to excess demand
         assertGt(asset1FinalTick, asset1StartingTick, "Asset1 price should have increased from starting price");
-        assertGt(asset2FinalTick, asset2StartingTick, "Asset2 price should have increased from starting price");
+        assertEq(asset2FinalTick, asset2StartingTick, "Asset2 price should have remained the same since the start since there was never excess demand except in round 1");
         
         // Final excess demand should be reduced (but may not be zero)
         assertLt(asset1FinalExcessDemand, 100 * 10**18, "Asset1 excess demand should be reduced");
@@ -702,7 +712,7 @@ contract CPACompleteFlowTest is CPATestBase {
         for (uint256 i = 0; i < poolKeys.length; i++) {
             PoolId poolId = poolKeys[i].toId();
             uint128 liquidityAfter = poolManager.getLiquidity(poolId);
-            (,,,,,,bytes32 positionId) = cpaManager.poolInfo(poolId);
+            (,,,,,,AuctionId auctionId, bytes32 positionId) = cpaManager.poolInfo(poolId);
             console.log("Pool", i, "- Liquidity AFTER allocation phase ends:", liquidityAfter);
             console.log("Pool", i, "- Position id:", uint256(positionId));
             logLiquidity(poolManager, poolKeys[i], positionId);
