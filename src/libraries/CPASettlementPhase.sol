@@ -82,10 +82,18 @@ library CPASettlementPhase {
 			allocatedQuantities: bundles[bundleId].quantities
 		}))));
 
-        (uint256 numerairePaidByManager) = abi.decode(data, (uint256));
+        (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
 
         // Update stake balance
-        bidderStake[bidder] -= numerairePaidByManager; // this should always work even if they use their whole stake
+        uint256 minSpendAmount = auctionInfo.config.minSpendRatio * bidderStake[bidder] / 10000;
+        if (minSpendAmount > numerairePaidFromStake) {
+            // they didn't spend the minimum amount, so we reduce their stake to match the min spend amount
+            // this effectively credits the CPAManager the difference
+            bidderStake[bidder] -= minSpendAmount;
+        } else {
+            // they spent the minimum amount, so we can just subtract the amount they spent from their stake
+            bidderStake[bidder] -= numerairePaidFromStake; // this should always work even if they use their whole stake
+        }
     }
 
     function claimToken(

@@ -91,7 +91,8 @@ library AuctionTypes {
 		int24 startingTick;         // Starting tick for the pool
 		int24 priceIncrement;       // Price increment in ticks, added to the current tick at the end of the clock phase if there is excess demand
 		uint256 depositAmount;      // Amount deposited for auction
-		uint256 excessDemand;       // Current excess demand
+		int256 excessDemand;        // Current excess demand (can be negative for undersell)
+		int24 lastOversoldTick;     // Last tick where demand > supply for this item
 		AuctionId auctionId;        // ID of the auction for this pool
 		bytes32 positionId;         // ID of the position for this pool when we deposit liquidity
 	}
@@ -147,6 +148,7 @@ library AuctionTypes {
 
 	struct CallbackDataRefundStake {
 		address numeraire;
+		address recipient;
 		uint256 amount;
 	}	
 

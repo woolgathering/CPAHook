@@ -266,6 +266,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 		}
 		
+		// Handle undersell by reverting to last oversold prices
+		CPAClockPhase.revertUndersoldPrices(this, auctionId, auctionInfo[auctionId], poolInfo, manager);
+		
 		// Transition to proxy phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
 	}
@@ -326,7 +329,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup && auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Clock) revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
 		
 		uint256 stake = bidderStake[auctionId][msg.sender];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
+		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // this also covers the case where the bidder is not in the auction
 		
 		uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
 		uint256 refund = stake - penalty;
@@ -338,13 +341,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// Set dropped bidder status
 		droppedBidders[auctionId][msg.sender] = true;
 		
-		// Transfer refund to bidder (simplified)
-		// In practice, this would use SafeERC20
+		// Transfer refund to bidder
+		AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
+			numeraire: auctionInfo[auctionId].commonNumeraire,
+			recipient: msg.sender,
+			amount: refund
+		});
+		manager.unlock(abi.encode(uint8(5), abi.encode(data)));
 		
 		emit IErrorsAndEvents.PenaltyApplied(auctionId, msg.sender, penalty);
 		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, refund);
-
-		// revert("Not yet implemented");
 	}
 
 	// ========================================

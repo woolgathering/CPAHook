@@ -82,6 +82,7 @@ library CPASetup {
 					priceIncrement: config.priceIncrements[i],
 					depositAmount: 0, // Will be set during moveDeposit
 					excessDemand: 0,
+					lastOversoldTick: 0,
 					auctionId: auctionId,
 					positionId: bytes32(0)
 				});

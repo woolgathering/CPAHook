@@ -78,7 +78,8 @@ contract CPASetupPhaseTest is CPATestBase {
 			int24 pool1StartingTick,
 			int24 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
-			uint256 pool1ExcessDemand,
+			int256 pool1ExcessDemand,
+			int24 pool1LastOversoldTick,
 			AuctionId pool1AuctionId,
 			bytes32 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
@@ -88,7 +89,8 @@ contract CPASetupPhaseTest is CPATestBase {
 			int24 pool2StartingTick,
 			int24 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
-			uint256 pool2ExcessDemand,
+			int256 pool2ExcessDemand,
+			int24 pool2LastOversoldTick,
 			AuctionId pool2AuctionId,
 			bytes32 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
@@ -203,7 +205,8 @@ contract CPASetupPhaseTest is CPATestBase {
 			int24 pool1StartingTick,
 			int24 pool1PriceIncrement,
 			uint256 pool1DepositAmount,
-			uint256 pool1ExcessDemand,
+			int256 pool1ExcessDemand,
+			int24 pool1LastOversoldTick,
 			AuctionId pool1AuctionId,
 			bytes32 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
@@ -213,7 +216,8 @@ contract CPASetupPhaseTest is CPATestBase {
 			int24 pool2StartingTick,
 			int24 pool2PriceIncrement,
 			uint256 pool2DepositAmount,
-			uint256 pool2ExcessDemand,
+			int256 pool2ExcessDemand,
+			int24 pool2LastOversoldTick,
 			AuctionId pool2AuctionId,
 			bytes32 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
@@ -324,6 +328,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			,
 			uint256 pool1DepositAmountInPoolInfo,
 			,
+			,
 			AuctionId pool1AuctionIdInPoolInfo,
 			
 		) = cpaManager.poolInfo(pool1Id);
@@ -346,6 +351,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			,
 			,
 			uint256 pool2DepositAmountInPoolInfo,
+			,
 			,
 			AuctionId pool2AuctionIdInPoolInfo,
 			
