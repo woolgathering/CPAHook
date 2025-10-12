@@ -77,6 +77,8 @@ interface IErrorsAndEvents {
 	error InvalidBundle(AuctionId auctionId, BundleId bundleId);
 	error InvalidQuantities(AuctionId auctionId, uint256 quantities);
 	error DuplicateAllocation(AuctionId auctionId, bytes32 commitHash);
+	error SenderIsNotProxy(AuctionId auctionId, bytes32 commitHash);
+	error InvalidBundleQuantities(AuctionId auctionId, bytes32 commitHash);
 	
 	// Privacy and Commit-Reveal Errors
 	error InvalidCommitHash();
