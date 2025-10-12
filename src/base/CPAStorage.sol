@@ -70,15 +70,6 @@ abstract contract CPAStorage {
 	// SETUP PHASE
 	///////
 
-	/**
-	 * @notice Update deposit amount for a pool
-	 * @param auctionId The auction ID
-	 * @param poolId The pool ID
-	 * @param depositAmount The deposit amount to set
-	 */
-	function _updatePoolDepositAmount(AuctionId auctionId, PoolId poolId, uint256 depositAmount) internal {
-		poolInfo[poolId].depositAmount = depositAmount;
-	}
 
 	function getNumItems(AuctionId auctionId) external view returns (uint256) {
 		return auctionInfo[auctionId].poolKeys.length;
@@ -161,15 +152,6 @@ abstract contract CPAStorage {
     /// @notice Revealed mappings. AuctionId -> CommitHash -> Bidder Address
 	mapping(AuctionId => mapping(bytes32 => address)) public revealedMappings;
 
-	/**
-	 * @notice Set revealed mapping
-	 * @param auctionId The auction ID
-	 * @param commitHash The commit hash
-	 * @param bidder The bidder address
-	 */
-	function _setRevealedMapping(AuctionId auctionId, bytes32 commitHash, address bidder) internal {
-		revealedMappings[auctionId][commitHash] = bidder;
-	}
 
 	/**
 	 * @notice Constructor

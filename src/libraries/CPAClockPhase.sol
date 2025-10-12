@@ -420,19 +420,6 @@ library CPAClockPhase {
 		}
 	}
 
-	/**
-	 * @notice Update currency prices
-	 * @param currencyAddress The currency address to update
-	 * @param newPrice The new price in numeraire units
-	 * @param currentPrices Mapping for currency prices
-	 */
-	function updateCurrencyPrice(
-		address currencyAddress,
-		uint256 newPrice,
-		mapping(address => uint256) storage currentPrices
-	) internal {
-		currentPrices[currencyAddress] = newPrice;
-	}
 
 	/**
 	 * @notice Get total bidders

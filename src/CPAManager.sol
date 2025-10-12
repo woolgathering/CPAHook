@@ -605,25 +605,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, newPhase);
 	}
 
-	/**
-	 * @notice Process financial settlement
-	 * @param bidder The bidder address
-	 * @param finalPurchaseAmount Final purchase amount
-	 */
-	function _processFinancialSettlement(address bidder, uint256 finalPurchaseAmount) internal {
-		// TODO: Uncomment when CPARevealPhase is implemented
-		// CPARevealPhase.processFinancialSettlement(this, bidder, finalPurchaseAmount);
-		revert("Not yet implemented");
-	}
 
-	/**
-	 * @notice Finalize settlement
-	 */
-	function _finalizeSettlement(AuctionId auctionId) internal {
-		// TODO: Uncomment when CPARevealPhase is implemented
-		// CPARevealPhase.finalizeSettlement(this);
-		revert("Not yet implemented");
-	}
 
 	/**
 	 * @notice Update pool hook states

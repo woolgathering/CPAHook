@@ -155,7 +155,7 @@ library CPAAllocationPhase {
 		bytes32 commitHash,
 		bytes32[] memory existingCommitHashes,
 		uint256 index
-	) internal view returns (bool) {
+	) internal pure returns (bool) {
 		for (uint256 i = 0; i < index; i++) {
 			if (existingCommitHashes[i] == commitHash) return true;
 		}
@@ -248,7 +248,7 @@ library CPAAllocationPhase {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey,
 		uint256 index
-	) internal returns (bytes memory) {
+	) internal view returns (bytes memory) {
 		PoolId poolId = poolKey.toId();
 		AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
 		
@@ -379,28 +379,7 @@ library CPAAllocationPhase {
 		return abi.encode(callerDelta, feesAccrued);
 	}
 
-	function claimReward(
-		CPAStorage self,
-		AuctionId auctionId,
-		AuctionTypes.TopAllocation memory topAllocation,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal {
-		// claim the reward
-		// check in the encapsulating function that the window has passed and that the caller is the winner
-	}
 
-	function _rewardAllocator(
-		CPAStorage self,
-		AuctionId auctionId,
-		AuctionTypes.TopAllocation memory topAllocation,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal {
-		// reward the allocator
-		// uint256 reward = topAllocation.allocation.totalValue * auctionInfo[auctionId].config.rewardPercentage;
-		
-		// the CPAManager has ERC6909 numeraireclaim tokens, held by the PoolManager, that need to be redeemed for ERC20 and 
-		// transferred to the allocator.
-	}
 
     /**
      * @notice Aligns a given tick with the tickSpacing of the pool
@@ -408,7 +387,7 @@ library CPAAllocationPhase {
      * @param tick The tick to align
      * @param tickSpacing The tick spacing of the pool
      */
-    function _alignComputedTickWithTickSpacing(bool isToken0, int24 tick, int24 tickSpacing) internal view returns (int24) {
+    function _alignComputedTickWithTickSpacing(bool isToken0, int24 tick, int24 tickSpacing) internal pure returns (int24) {
         if (isToken0) {
             // Round down if isToken0
             if (tick < 0) {
