@@ -13,12 +13,6 @@ import { BundleId, BundleIdLibrary } from "../types/BundleId.sol";
 
 library CPAProxyPhase {
 
-	error SenderIsNotProxy(AuctionId auctionId, bytes32 commitHash);
-	error InvalidBundle(AuctionId auctionId, bytes32 commitHash);
-	error DuplicateBundle(AuctionId auctionId, bytes32 commitHash);
-	error InvalidBundleId(AuctionId auctionId, bytes32 commitHash);
-	error InvalidBundleQuantities(AuctionId auctionId, bytes32 commitHash);
-	error InvalidBundleTimestamp(AuctionId auctionId, bytes32 commitHash);
 	
 
 	function startProxyPhase(CPAStorage self, mapping(AuctionId => uint256) storage proxyPhaseStartTime, AuctionId auctionId) internal {
@@ -28,7 +22,7 @@ library CPAProxyPhase {
 		proxyPhaseStartTime[auctionId] = block.timestamp;
 	}
 
-	function endProxyPhase(CPAStorage self, AuctionId auctionId) internal {
+	function endProxyPhase(CPAStorage self, AuctionId auctionId) internal view {
 		// we need to check here that bundles were submitted
 		// I think, perhaps we don't need to do anything
 		if (_shouldProxyPhaseEnd(self, auctionId)) {
@@ -36,7 +30,7 @@ library CPAProxyPhase {
 		}
 	}
 
-	function _shouldProxyPhaseEnd(CPAStorage self, AuctionId auctionId) internal view returns (bool) {
+	function _shouldProxyPhaseEnd(CPAStorage self, AuctionId auctionId) internal pure returns (bool) {
 		// check if our time for the proxy phase has ended
 		// the limit should be defined in the auction config
 		// uint256 (address, uint256, uint256, uint256, uint256, uint256, uint256, PoolKey[] memory, uint160[] memory, int24[] memory) = self.getAuctionConfig(auctionId);
@@ -84,17 +78,17 @@ library CPAProxyPhase {
 		AuctionTypes.Bundle calldata bundleData
 	) internal view returns (bytes memory) {
 		// check that the msg.sender is the proxy for the commit hash
-		if (commitProxy[bundleData.auctionId][bundleData.commitHash] != sender) return abi.encodeWithSelector(SenderIsNotProxy.selector, bundleData.auctionId, bundleData.commitHash);
+		if (commitProxy[bundleData.auctionId][bundleData.commitHash] != sender) return abi.encodeWithSelector(IErrorsAndEvents.SenderIsNotProxy.selector, bundleData.auctionId, bundleData.commitHash);
 
 		// check that the length of the allocation in the bundle is equal to the length of the items in the auction
-		if (bundleData.quantities.length != self.getNumItems(bundleData.auctionId)) return abi.encodeWithSelector(InvalidBundleQuantities.selector, bundleData.auctionId, bundleData.commitHash);
+		if (bundleData.quantities.length != self.getNumItems(bundleData.auctionId)) return abi.encodeWithSelector(IErrorsAndEvents.InvalidBundleQuantities.selector, bundleData.auctionId, bundleData.commitHash);
 
 		// check that the bundle id is valid. bundle id is keccak256(commitHash, bundleContentsHash)
 		// if(bundleData.bundleId != BundleIdLibrary.createId(bundleData.commitHash, keccak256(abi.encode(bundleData.quantities)))) return abi.encodeWithSelector(InvalidBundleId.selector, bundleData.auctionId, bundleData.commitHash);
 
 		// check that the bundle is not already submitted
 		// if bundles[auctionId][bundleId] has a non-zero commitHash, it exists
-		if (bundles[bundleData.auctionId][bundleId].commitHash != bytes32(0)) return abi.encodeWithSelector(DuplicateBundle.selector, bundleData.auctionId, bundleData.commitHash);
+		if (bundles[bundleData.auctionId][bundleId].commitHash != bytes32(0)) return abi.encodeWithSelector(IErrorsAndEvents.DuplicateBundle.selector, bundleData.auctionId, bundleData.commitHash);
 
 		return "";
 	}
