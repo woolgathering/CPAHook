@@ -12,13 +12,11 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
-import { PoolUtils } from "../utils/PoolUtils.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId, AuctionIdLibrary } from "../types/AuctionId.sol";
 
 library CPASetup {
-	using PoolUtils for IPoolManager;
 	using CurrencySettler for Currency;
 
 	/**
