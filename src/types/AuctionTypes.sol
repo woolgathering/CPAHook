@@ -114,11 +114,9 @@ library AuctionTypes {
 	/// @notice Callback data structure for bid as liquidity operations
 	struct CallbackDataBid {
 		address sender;
-		address token0;
-		address token1;
-		int128 amount0;  
-		int128 amount1;  
-		uint256 deadline; // deadline for the operation
+		address numeraire;  // The numeraire token address
+		int128 stake;      // The stake amount in numeraire
+		uint256 deadline;   // deadline for the operation
 	}
 
 	struct CallbackDataMintPosition {
