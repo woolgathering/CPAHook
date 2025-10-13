@@ -93,10 +93,8 @@ library CPAClockPhase {
 
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
 					sender: msg.sender,
-					token0: address(0), // unused, we need to remove this
-					token1: auctionInfo[auctionId].commonNumeraire,
-					amount0: int128(int256(0)), // unused, we need to remove this
-					amount1: int128(int256(requiredAdditionalStake)), // numeraire amount (positive for add)
+					numeraire: auctionInfo[auctionId].commonNumeraire,
+					stake: int128(int256(requiredAdditionalStake)), // stake amount in numeraire
 					deadline: block.timestamp + 60
 				});
 				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
