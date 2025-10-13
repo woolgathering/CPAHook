@@ -691,20 +691,21 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// Decode the callback data
 		(AuctionTypes.CallbackDataBid memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataBid));
 		address sender = data.sender;
-		address token0 = data.token0;
-		address token1 = data.token1;
-		int128 amount0 = data.amount0;
-		int128 amount1 = data.amount1;
+		address numeraire = data.numeraire;
+		int128 stake = data.stake;
+		
+		// Validate deadline
+		require(block.timestamp <= data.deadline, "Bid deadline expired");
 		
 		// Transfer numeraire from bidder to pool manager
-		Currency.wrap(token1).settle(manager, sender, uint256(int256(amount1)), false);
+		Currency.wrap(numeraire).settle(manager, sender, uint256(int256(stake)), false);
 		
 		// Mint ERC6909 claims to this hook (bypassing V3 curve)
-		Currency.wrap(token1).take(manager, address(this), uint256(int256(amount1)), true);
+		Currency.wrap(numeraire).take(manager, address(this), uint256(int256(stake)), true);
 		
 		// Return the balance deltas
 		return abi.encode(
-			toBalanceDelta(0, -amount1), // callerDelta
+			toBalanceDelta(0, -stake), // callerDelta
 			BalanceDeltaLibrary.ZERO_DELTA // feesAccrued
 		);
 	}
@@ -729,8 +730,32 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @return returnData The encoded balance deltas
 	 */
 	function _handleMintPosition(bytes memory operationData) internal returns (bytes memory returnData) {
-		return CPAAllocationPhase.handleMintPosition(this, operationData);
-		// revert("Not yet implemented");
+		// decode the operation data
+		(AuctionTypes.CallbackDataMintPosition memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataMintPosition));
+
+		(BalanceDelta callerDelta, BalanceDelta feesAccrued) = manager.modifyLiquidity(
+			data.poolKey,
+			ModifyLiquidityParams({
+				tickLower: data.tickLower,
+				tickUpper: data.tickUpper,
+				liquidityDelta: data.liquidity.toInt128(),
+				salt: AuctionId.unwrap(data.auctionId)
+			}),
+			data.hookData
+		);
+
+		// handle the deltas
+		if (callerDelta.amount0() < 0) {
+			// If amount0 is negative, send tokens from the sender to the pool
+			data.poolKey.currency0.settle(manager, address(this), uint256(int256(-callerDelta.amount0())), true);
+		}
+
+		if (callerDelta.amount1() < 0) {
+			// If amount1 is negative, send tokens from the sender to the pool
+			data.poolKey.currency1.settle(manager, address(this), uint256(int256(-callerDelta.amount1())), true);
+		}
+
+		return abi.encode(callerDelta, feesAccrued);
 	}
 
 	/**
@@ -876,7 +901,11 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	function _handleClaimAllocatorReward(bytes memory operationData) internal returns (bytes memory returnData) {
 		// Decode the operation data
 		(AuctionTypes.CallbackDataClaimAllocatorReward memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataClaimAllocatorReward));
-		CPASettlementPhase.handleClaimAllocatorReward(this, data);
+		
+		// we are already unlocked here so we just need to transfer tokens from the CPAManager to the allocator
+		Currency.wrap(data.numeraire).take(manager, data.allocator, data.reward, false); // give ERC20 to the allocator
+		manager.burn(address(this), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.reward); // burn ERC6909 from the CPAManager
+		
 		return abi.encode(data.reward);
 	}
 
