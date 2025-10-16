@@ -12,18 +12,6 @@ import { BundleId } from "../types/BundleId.sol";
 
 abstract contract CPAStorage {
 
-	/// @notice Current auction phase
-	// mapping(AuctionId => AuctionTypes.AuctionPhase) public auctionPhase;
-	
-	/// @notice Auction configuration
-	// mapping(AuctionId => AuctionTypes.AuctionConfig) public auctionConfig;
-	
-	/// @notice Whether auction is paused
-	// mapping(AuctionId => bool) public paused;
-	
-	/// @notice Whether auction is cancelled
-	// mapping(AuctionId => bool) public cancelled;
-
 	/// @notice Commit hash to proxy mapping
 	// AuctionId -> CommitHash -> Proxy Address
 	mapping(AuctionId => mapping(bytes32 => address)) public commitProxy;
@@ -45,7 +33,13 @@ abstract contract CPAStorage {
 	// this is the hook that all auction item pools share
 	address public cpaAuctionHookAddr;
 
+	/// @notice Pool manager
 	IPoolManager public manager;
+	
+	/// @notice Protocol wallet address for penalty collection
+	address public immutable protocolWallet;
+
+	uint256 public constant FORFEITURE_REWARD_RATE = 100; // 1% reward (basis points)
 
 	//// getters
 	function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory) {
@@ -110,6 +104,21 @@ abstract contract CPAStorage {
 	/// @notice Proxy phase start time
 	mapping(AuctionId => uint256) public proxyPhaseStartTime;
 
+	/// @notice Allocation phase start time
+	mapping(AuctionId => uint256) public allocationPhaseStartTime;
+
+	/// @notice Settlement phase start time
+	mapping(AuctionId => uint256) public settlementPhaseStartTime;
+
+	/// @notice Track if at least one bundle was submitted
+	mapping(AuctionId => bool) public hasBundles;
+
+	/// @notice Track if at least one allocation was submitted
+	mapping(AuctionId => bool) public hasAllocations;
+	
+	/// @notice Accumulated penalties per auction (for protocol collection)
+	mapping(AuctionId => uint256) public protocolPenalties;
+
 	function getBundle(AuctionId auctionId, BundleId bundleId) external view returns (AuctionId, bytes32, BundleId, uint256[] memory, uint256, uint256) {
 		return (
 			auctionId,
@@ -120,6 +129,7 @@ abstract contract CPAStorage {
 			bundles[auctionId][bundleId].timestamp
 		);
 	}
+
 
     ////////
     // ALLOCATION PHASE
