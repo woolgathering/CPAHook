@@ -216,6 +216,28 @@ interface ICPAManager {
     function claimAllocatorReward(AuctionId auctionId) external;
     
     // ========================================
+    // PERMISSIONLESS PHASE TRANSITIONS
+    // ========================================
+    
+    /**
+     * @notice Transition from Proxy to Allocation phase (callable by anyone)
+     * @param auctionId The auction ID
+     */
+    function transitionToAllocation(AuctionId auctionId) external;
+    
+    /**
+     * @notice Transition from Allocation to Settlement phase (callable by anyone)
+     * @param auctionId The auction ID
+     */
+    function transitionToSettlement(AuctionId auctionId) external;
+    
+    /**
+     * @notice Transition from Settlement to Finished phase (callable by anyone)
+     * @param auctionId The auction ID
+     */
+    function transitionToFinished(AuctionId auctionId) external;
+    
+    // ========================================
     // VIEW FUNCTIONS
     // ========================================
     
@@ -254,4 +276,11 @@ interface ICPAManager {
      * @return The revealed bidder address
      */
     function revealedMappings(AuctionId auctionId, bytes32 commitHash) external view returns (address);
+    
+    /**
+     * @notice Forfeit bidder who didn't claim in time
+     * @param auctionId The auction ID
+     * @param bidder The bidder address to forfeit
+     */
+    function forfeit(AuctionId auctionId, address bidder) external;
 }
