@@ -64,7 +64,8 @@ library CPASettlementPhase {
         mapping(bytes32 => address) storage revealedMappings,
         mapping(address => uint256) storage bidderStake,
         mapping(BundleId => AuctionTypes.Bundle) storage bundles,
-        mapping(bytes32 => BundleId) storage winningBundleIds
+        mapping(bytes32 => BundleId) storage winningBundleIds,
+        mapping(AuctionId => uint256) storage protocolPenalties
     ) internal {
         // Validate bidder authorization
         {
@@ -73,6 +74,8 @@ library CPASettlementPhase {
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
         }
 
+        // In a future version, we should combine both calls
+        // to the PoolManager into a single call to save gas.
         BundleId bundleId = winningBundleIds[commitHash];
         bytes memory data = self.manager().unlock(abi.encode(uint8(7), abi.encode(AuctionTypes.CallbackDataClaimAllTokens({
 			bidder: bidder,
@@ -84,15 +87,30 @@ library CPASettlementPhase {
 
         (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
 
-        // Update stake balance
-        uint256 minSpendAmount = auctionInfo.config.minSpendRatio * bidderStake[bidder] / 10000;
+        // Update stake balance and handle min spend penalties
+        uint256 currentStake = bidderStake[bidder];
+        uint256 minSpendAmount = auctionInfo.config.minSpendRatio * currentStake / 10000;
+        
         if (minSpendAmount > numerairePaidFromStake) {
-            // they didn't spend the minimum amount, so we reduce their stake to match the min spend amount
-            // this effectively credits the CPAManager the difference
+            // Didn't meet minimum spend - penalty applies
+            protocolPenalties[auctionId] += minSpendAmount - numerairePaidFromStake;
             bidderStake[bidder] -= minSpendAmount;
         } else {
-            // they spent the minimum amount, so we can just subtract the amount they spent from their stake
-            bidderStake[bidder] -= numerairePaidFromStake; // this should always work even if they use their whole stake
+            // Met minimum spend - no penalty
+            bidderStake[bidder] -= numerairePaidFromStake;
+        }
+        
+        // Transfer any remaining stake directly to bidder
+        if (bidderStake[bidder] > 0) {
+            AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
+                numeraire: auctionInfo.commonNumeraire,
+                recipient: bidder,
+                amount: bidderStake[bidder]
+            });
+            self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
+            
+            // Zero out bidder stake
+            bidderStake[bidder] = 0;
         }
     }
 
@@ -179,13 +197,24 @@ library CPASettlementPhase {
         return manager.unlock(callbackData);
     }
 
-    function handleClaimAllocatorReward(
-        CPAStorage self,
-        AuctionTypes.CallbackDataClaimAllocatorReward memory data
-    ) internal {
-        // we are already unlocked here so we just need to transfer tokens from the CPAManager to the allocator
-        Currency.wrap(data.numeraire).take(self.manager(), data.allocator, data.reward, false); // give ERC20 to the allocator
-        self.manager().burn(address(self), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.reward); // burn ERC6909 from the CPAManager
-    }
+	/**
+	 * @notice Check if settlement phase should end based on duration
+	 * @param self The contract instance
+	 * @param auctionId The auction ID
+	 * @param auctionInfo The auction info mapping
+	 * @return true if settlement phase duration has expired
+	 */
+	function shouldSettlementPhaseEnd(
+		CPAStorage self, 
+		AuctionId auctionId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+	) internal view returns (bool) {
+		// Check if settlement phase duration has expired
+		uint256 startTime = self.settlementPhaseStartTime(auctionId);
+		if (startTime == 0) return false; // Phase not started yet
+		
+		// Get phase duration from auction config
+		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[2];
+	}
 
 }

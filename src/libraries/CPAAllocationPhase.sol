@@ -55,6 +55,9 @@ library CPAAllocationPhase {
 			topAllocation[auctionId].totalValue = totalValue; // in this case, the total value is the same as the score
 		}
 
+		// mark that allocations have been submitted for this auction
+		self.hasAllocations(allocationData.auctionId) = true;
+
 		// emit a allocation submitted event
 		emit IErrorsAndEvents.AllocationSubmitted(allocationData.auctionId, allocationData.allocator, score);
 	}
@@ -200,24 +203,8 @@ library CPAAllocationPhase {
 	) internal {
 		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
 		PoolKey[] memory poolKeys = auction.poolKeys;
-		
-		// Create dynamic actions array - 2 actions per pool (mint + settle)
-		// bytes memory actions = new bytes(poolKeys.length * 2);
-		// bytes[] memory params = new bytes[](poolKeys.length * 2);
 
-		bytes[] memory params = new bytes[](poolKeys.length);
-		
 		for (uint256 i = 0; i < poolKeys.length; i++) {
-			// params[i] = _processPoolForLiquidity(
-			// 	self, 
-			// 	auctionId, 
-			// 	auctionInfo, 
-			// 	poolInfo, 
-			// 	positionManager, 
-			// 	poolKeys[i], 
-			// 	i
-			// );
-
 			// lets try it with an unlock without the position manager
 			(int24 tickLower, int24 tickUpper, uint128 liquidity) = _calculateLiquidityParams(self, auctionId, auctionInfo, poolInfo, poolKeys[i]);
 			bytes memory callbackData = abi.encode(
@@ -237,76 +224,6 @@ library CPAAllocationPhase {
 			// we need to keep track of the position id manually
 			poolInfo[poolKeys[i].toId()].positionId = Position.calculatePositionKey(address(self), tickLower, tickUpper, AuctionId.unwrap(auctionId));
 		}
-
-		// positionManager.multicall(params);
-	}
-	
-	function _processPoolForLiquidity(
-		CPAStorage self,
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		PoolKey memory poolKey,
-		uint256 index
-	) internal view returns (bytes memory) {
-		PoolId poolId = poolKey.toId();
-		AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
-		
-		// Get the final price from the pool (set during clock phase)
-		(uint160 sqrtPriceX96, , , ) = self.manager().getSlot0(poolId);
-		int24 tick = TickMath.getTickAtSqrtPrice(sqrtPriceX96);
-		
-		// Determine currency order and calculate parameters
-		bool assetIsCurrency0 = auctionInfo[auctionId].commonNumeraire != address(Currency.unwrap(poolKey.currency0));
-		
-		int24 tickLower;
-		int24 tickUpper;
-		uint128 amount0Max;
-		uint128 amount1Max;
-		uint128 liquidity;
-		address assetAddress;
-		
-		if (assetIsCurrency0) {
-			// Asset is currency0
-			tickLower = _alignComputedTickWithTickSpacing(true, tick, poolKey.tickSpacing);
-			tickUpper = tickLower + poolKey.tickSpacing;
-			amount0Max = uint128(pool.depositAmount);
-			amount1Max = 0;
-			liquidity = LiquidityAmounts.getLiquidityForAmount0(
-				TickMath.getSqrtPriceAtTick(tickLower), 
-				TickMath.getSqrtPriceAtTick(tickUpper), 
-				pool.depositAmount
-			);
-			assetAddress = address(Currency.unwrap(poolKey.currency0));
-		} else {
-			// Asset is currency1
-			tickUpper = _alignComputedTickWithTickSpacing(false, tick, poolKey.tickSpacing);
-			tickLower = tickUpper - poolKey.tickSpacing;
-			amount0Max = 0;
-			amount1Max = uint128(pool.depositAmount);
-			liquidity = LiquidityAmounts.getLiquidityForAmount1(
-				TickMath.getSqrtPriceAtTick(tickLower), 
-				TickMath.getSqrtPriceAtTick(tickUpper), 
-				pool.depositAmount
-			);
-			assetAddress = address(Currency.unwrap(poolKey.currency1));
-		}
-		
-		// Redeem ERC6909 claims to get actual tokens
-		// this is ugly and we can avoid doing this by just doing the settling directly
-		
-		// Note: No longer using PositionManager or Permit2 - calling PoolManager directly
-		
-		// Encode parameters
-		bytes memory actions = abi.encodePacked(
-			uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR)
-		);
-		bytes[] memory mintParams = new bytes[](2);
-		mintParams[0] = abi.encode(poolKey, tickLower, tickUpper, liquidity, amount0Max, amount1Max, address(self), "");
-		mintParams[1] = abi.encode(poolKey.currency0, poolKey.currency1);
-
-		// Note: This function is no longer used since we call PoolManager directly
-		return "";
 	}
 
 	function _calculateLiquidityParams(
@@ -347,37 +264,6 @@ library CPAAllocationPhase {
 		}
 	}
 
-	function handleMintPosition(
-		CPAStorage self,
-		bytes memory operationData
-	) internal returns (bytes memory) {
-		// decode the operation data
-		(AuctionTypes.CallbackDataMintPosition memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataMintPosition));
-
-		 (BalanceDelta callerDelta, BalanceDelta feesAccrued) = IPoolManager(self.manager()).modifyLiquidity(
-            data.poolKey,
-            ModifyLiquidityParams({
-                tickLower: data.tickLower,
-                tickUpper: data.tickUpper,
-                liquidityDelta: data.liquidity.toInt128(),
-                salt: AuctionId.unwrap(data.auctionId)
-            }),
-            data.hookData
-        );
-
-		// handle the deltas
-		if (callerDelta.amount0() < 0) {
-			// If amount0 is negative, send tokens from the sender to the pool
-			data.poolKey.currency0.settle(self.manager(), address(self), uint256(int256(-callerDelta.amount0())), true);
-		}
-
-		if (callerDelta.amount1() < 0) {
-			// If amount1 is negative, send tokens from the sender to the pool
-			data.poolKey.currency1.settle(self.manager(), address(self), uint256(int256(-callerDelta.amount1())), true);
-		}
-
-		return abi.encode(callerDelta, feesAccrued);
-	}
 
 
 
@@ -408,5 +294,25 @@ library CPAAllocationPhase {
             }
         }
     }
+
+	/**
+	 * @notice Check if allocation phase should end based on duration
+	 * @param self The contract instance
+	 * @param auctionId The auction ID
+	 * @param auctionInfo The auction info mapping
+	 * @return true if allocation phase duration has expired
+	 */
+	function shouldAllocationPhaseEnd(
+		CPAStorage self, 
+		AuctionId auctionId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+	) internal view returns (bool) {
+		// Check if allocation phase duration has expired
+		uint256 startTime = self.allocationPhaseStartTime(auctionId);
+		if (startTime == 0) return false; // Phase not started yet
+		
+		// Get phase duration from auction config
+		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[1];
+	}
 
 }

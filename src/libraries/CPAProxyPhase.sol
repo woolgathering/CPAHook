@@ -30,12 +30,17 @@ library CPAProxyPhase {
 		}
 	}
 
-	function _shouldProxyPhaseEnd(CPAStorage self, AuctionId auctionId) internal pure returns (bool) {
-		// check if our time for the proxy phase has ended
-		// the limit should be defined in the auction config
-		// uint256 (address, uint256, uint256, uint256, uint256, uint256, uint256, PoolKey[] memory, uint160[] memory, int24[] memory) = self.getAuctionConfig(auctionId);
-		// return block.timestamp - self.proxyPhaseStartTime[auctionId] > proxyPhaseDuration;
-		return false;
+	function _shouldProxyPhaseEnd(
+		CPAStorage self, 
+		AuctionId auctionId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+	) internal view returns (bool) {
+		// Check if proxy phase duration has expired
+		uint256 startTime = self.proxyPhaseStartTime(auctionId);
+		if (startTime == 0) return false; // Phase not started yet
+		
+		// Get phase duration from auction config
+		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[0];
 	}
 
     /**
@@ -63,6 +68,9 @@ library CPAProxyPhase {
 
 		// add the bundle to the bundles mapping
 		bundles[bundleData.auctionId][bundleId] = bundleData;
+
+		// mark that bundles have been submitted for this auction
+		self.hasBundles(bundleData.auctionId) = true;
 
 		// emit a bundle submitted event
 		emit IErrorsAndEvents.BundleSubmitted(bundleData.auctionId, bundleData.commitHash, bundleId, bundleData.quantities, bundleData.value);
@@ -103,5 +111,6 @@ library CPAProxyPhase {
 	function bundleExists(mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles, AuctionId auctionId, BundleId bundleId) internal view returns (bool exists) {
 		return bundles[auctionId][bundleId].commitHash != bytes32(0);
 	}
+
 
 }
