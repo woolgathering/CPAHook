@@ -41,6 +41,9 @@ interface IErrorsAndEvents {
 	event StakeAdded(AuctionId auctionId, address bidder, uint256 amount);
 	event StakeRefunded(AuctionId auctionId, address bidder, uint256 amount);
 	event PenaltyApplied(AuctionId auctionId, address bidder, uint256 amount);
+	event ForfeitureReward(AuctionId auctionId, address caller, uint256 amount);
+	event ForfeitureRewardTransferred(AuctionId auctionId, address caller, uint256 amount);
+	event BundleForfeited(AuctionId auctionId, address bidder, uint256 penalty);
 	event AssetsDeposited(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 	event AssetsWithdrawn(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 
@@ -94,4 +97,10 @@ interface IErrorsAndEvents {
 	error InvalidHook();
 	error PoolPriceUpdateFailed();
 	error PoolNotFound(AuctionId auctionId, PoolId poolId);
+	
+	// Auction cancellation and phase transition errors
+	error CannotCancelInThisPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
+	error PhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
+	error NoSubmissionsReceived(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
+	error AuctionAlreadyFinished(AuctionId auctionId);
 }
