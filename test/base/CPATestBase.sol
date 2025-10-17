@@ -88,6 +88,11 @@ abstract contract CPATestBase is Deployers {
         asset1Token = new MockERC20("Asset 1 Token", "AST1", 18);
         asset2Token = new MockERC20("Asset 2 Token", "AST2", 18);
         
+        // Label tokens for easier tracking in test output
+        vm.label(address(numeraireToken), "NUMERAIRE");
+        vm.label(address(asset1Token), "ASSET1");
+        vm.label(address(asset2Token), "ASSET2");
+        
         numeraireCurrencyId = uint256(uint160(address(numeraireToken)));
         
         // Set reference prices (actual prices come from pools)
@@ -119,7 +124,7 @@ abstract contract CPATestBase is Deployers {
         cpaHook = deployCPAHook(poolManager);
         
         // Deploy CPAManager (no longer a hook, simple deployment)
-        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook));
+        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), address(this));
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));

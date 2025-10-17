@@ -19,7 +19,7 @@ contract DeployCPA is Script {
         address deployer = vm.addr(vm.envUint("PRIVATE_KEY"));
         address poolManagerAddress = vm.envAddress("POOL_MANAGER_ADDRESS");
         address protocolOwner = vm.envOr("PROTOCOL_OWNER", deployer);
-        
+
         console.log("Deploying from address:", deployer);
         console.log("PoolManager address:", poolManagerAddress);
         console.log("Protocol owner:", protocolOwner);
@@ -38,7 +38,8 @@ contract DeployCPA is Script {
         CPAManager cpaManager = new CPAManager(
             IPoolManager(poolManagerAddress),
             protocolOwner,
-            address(cpaHook)
+            address(cpaHook),
+            protocolOwner
         );
         console.log("CPAManager deployed at:", address(cpaManager));
 
