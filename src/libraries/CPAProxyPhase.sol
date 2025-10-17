@@ -22,25 +22,21 @@ library CPAProxyPhase {
 		proxyPhaseStartTime[auctionId] = block.timestamp;
 	}
 
-	function endProxyPhase(CPAStorage self, AuctionId auctionId) internal view {
-		// we need to check here that bundles were submitted
-		// I think, perhaps we don't need to do anything
-		if (_shouldProxyPhaseEnd(self, auctionId)) {
-			// self.setPhase(AuctionTypes.AuctionPhase.Proxy);
-		}
-	}
-
-	function _shouldProxyPhaseEnd(
+	function shouldProxyPhaseEnd(
 		CPAStorage self, 
 		AuctionId auctionId,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
 	) internal view returns (bool) {
 		// Check if proxy phase duration has expired
 		uint256 startTime = self.proxyPhaseStartTime(auctionId);
-		if (startTime == 0) return false; // Phase not started yet
-		
+		if (startTime == 0) return true; // Phase not started yet
+
+	if (self.hasBundles(auctionId)) {
 		// Get phase duration from auction config
-		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[0];
+		return block.timestamp < (startTime + auctionInfo[auctionId].config.phaseDurations[0]);
+	} else {
+		return true;
+	}
 	}
 
     /**
@@ -54,7 +50,8 @@ library CPAProxyPhase {
 		bytes32 commitHash,
 		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
 		mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy,
-		AuctionTypes.Bundle calldata bundleData
+		AuctionTypes.Bundle calldata bundleData,
+		mapping(AuctionId => bool) storage hasBundles
 	) internal returns (BundleId bundleId) {
 		bundleId = BundleIdLibrary.createId(bundleData.commitHash, keccak256(abi.encode(bundleData.quantities)));
 
@@ -70,7 +67,7 @@ library CPAProxyPhase {
 		bundles[bundleData.auctionId][bundleId] = bundleData;
 
 		// mark that bundles have been submitted for this auction
-		self.hasBundles(bundleData.auctionId) = true;
+		hasBundles[bundleData.auctionId] = true;
 
 		// emit a bundle submitted event
 		emit IErrorsAndEvents.BundleSubmitted(bundleData.auctionId, bundleData.commitHash, bundleId, bundleData.quantities, bundleData.value);

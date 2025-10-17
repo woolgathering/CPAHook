@@ -42,7 +42,8 @@ library CPAAllocationPhase {
 		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles
+		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
+		mapping(AuctionId => bool) storage hasAllocations
 	) external {
 		AuctionId auctionId = allocationData.auctionId;
 
@@ -56,7 +57,7 @@ library CPAAllocationPhase {
 		}
 
 		// mark that allocations have been submitted for this auction
-		self.hasAllocations(allocationData.auctionId) = true;
+		hasAllocations[allocationData.auctionId] = true;
 
 		// emit a allocation submitted event
 		emit IErrorsAndEvents.AllocationSubmitted(allocationData.auctionId, allocationData.allocator, score);
@@ -165,7 +166,7 @@ library CPAAllocationPhase {
 		return false;
 	}
 
-	function endAllocationPhase(
+	function selectWinner(
 		CPAStorage self,
 		AuctionId auctionId,
 		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
@@ -177,15 +178,11 @@ library CPAAllocationPhase {
 		// whatever allocation is the top one is the winner
 		// we check if the window has passed in the function that calls this
 		AuctionTypes.Allocation memory winner = topAllocation[auctionId].allocation;
-		// emit IErrorsAndEvents.AllocationWinner(auctionId, winner.allocator);
 
 		// store the winning bundle ids
 		for (uint i = 0; i < winner.bundleIds.length; i++) {
 			winningBundleIds[bundles[auctionId][winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
 		}
-		
-		// Transfer assets to pools at final prices
-		_transferAssetsToPools(self, auctionId, auctionInfo, poolInfo);
 	}
 	
 	/**
@@ -195,7 +192,7 @@ library CPAAllocationPhase {
 	 * @param auctionInfo The auction info mapping
 	 * @param poolInfo The pool info mapping
 	 */
-	function _transferAssetsToPools(
+	function transferAssetsToPools(
 		CPAStorage self,
 		AuctionId auctionId,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
