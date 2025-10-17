@@ -424,8 +424,10 @@ contract CPACompleteFlowTest is CPATestBase {
             cpaManager.submitBundle(auctionId, commitHash2, bundle2);
         }
         
-        vm.prank(auctioneer);
-        cpaManager.endProxyPhase(auctionId);
+        // Warp past the proxy phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[0] + 1);
+        cpaManager.transitionToAllocation(auctionId); // permissionless transition
 
         // ========================================
         // VERIFY PROXY PHASE RESULTS
@@ -647,8 +649,10 @@ contract CPACompleteFlowTest is CPATestBase {
         }
 
         // End allocation phase
-        vm.prank(auctioneer);
-        cpaManager.endAllocationPhase(auctionId);
+        // Warp past the allocation phase duration to allow transition
+        auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
+        cpaManager.transitionToSettlement(auctionId); // permissionless transition
 
         // ========================================
         // CHECK BALANCES AFTER ALLOCATION PHASE ENDS

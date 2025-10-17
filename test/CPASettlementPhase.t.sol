@@ -159,8 +159,10 @@ contract CPASettlementPhaseTest is CPATestBase {
         bundleId2 = cpaManager.submitBundle(auctionId, commitHash2, bundle2);
 
         // End proxy phase
-        vm.prank(auctioneer);
-        cpaManager.endProxyPhase(auctionId);
+        // Warp past the proxy phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[0] + 1);
+        cpaManager.transitionToAllocation(auctionId); // permissionless transition
     }
 
     function setupAllocationPhase() internal {
@@ -182,8 +184,10 @@ contract CPASettlementPhaseTest is CPATestBase {
         cpaManager.submitAllocation(auctionId, allocation);
 
         // End allocation phase
-        vm.prank(auctioneer);
-        cpaManager.endAllocationPhase(auctionId);
+        // Warp past the allocation phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
+        cpaManager.transitionToSettlement(auctionId); // permissionless transition
     }
 
     function test_Reveal_Success() public {
@@ -220,6 +224,19 @@ contract CPASettlementPhaseTest is CPATestBase {
         uint256 initialAsset1Balance = asset1Token.balanceOf(bidder1);
         uint256 initialNumeraireBalance = numeraireToken.balanceOf(bidder1);
         uint256 initialBidderStake = cpaManager.bidderStake(auctionId, bidder1);
+
+        // Get the commit hash and check if it's in the winning bundle ids
+        bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1, saltB1);
+        BundleId bundleId = cpaManager.winningBundleIds(commitHash);
+        // assertEq(bundleId, bundleId1, "Commit hash should be in the winning bundle ids");
+        console.log("Bundle ID:", uint256(BundleId.unwrap(bundleId)));
+        console.log("Commit hash:", uint256(commitHash));
+        console.log("Bidder1:", bidder1);
+        console.log("Proxy1:", proxy1);
+        // console.log("SaltA1:", saltA1);
+        // console.log("SaltB1:", saltB1);
+        console.log("Commit hash1:", uint256(commitHash1));
+        console.log("Bundle ID1:", uint256(BundleId.unwrap(bundleId1)));
 
         // Claim asset1
         vm.prank(bidder1);

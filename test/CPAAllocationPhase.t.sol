@@ -136,8 +136,10 @@ contract CPAAllocationPhaseTest is CPATestBase {
         createOverAllocationBundles(auctionId);
         
         // End proxy phase to move to allocation phase
-        vm.prank(auctioneer);
-        cpaManager.endProxyPhase(auctionId);
+        // Warp past the proxy phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[0] + 1);
+        cpaManager.transitionToAllocation(auctionId); // permissionless transition
     }
     
     function test_SubmitAllocation_ValidAllocation() public {
@@ -297,8 +299,10 @@ contract CPAAllocationPhaseTest is CPATestBase {
         cpaManager.submitAllocation(auctionId, allocationData);
         
         // End allocation phase
-        vm.prank(auctioneer);
-        cpaManager.endAllocationPhase(auctionId);
+        // Warp past the allocation phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
+        cpaManager.transitionToSettlement(auctionId); // permissionless transition
         
         // Verify phase changed to Settlement
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
@@ -475,8 +479,10 @@ contract CPAAllocationPhaseTest is CPATestBase {
         cpaManager.submitAllocation(auctionId, allocationData);
         
         // Move to settlement phase
-        vm.prank(auctioneer);
-        cpaManager.endAllocationPhase(auctionId);
+        // Warp past the allocation phase duration to allow transition
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
+        cpaManager.transitionToSettlement(auctionId); // permissionless transition
         
         // Get auction info to check allocator reward
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
