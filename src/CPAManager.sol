@@ -262,6 +262,23 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	}
 
 	/**
+	 * @notice Deposit to all pools and start clock phase in one transaction
+	 * @param auctionId The auction ID
+	 * @param poolKeys Array of pool keys to deposit to
+	 * @param amounts Array of deposit amounts (must match poolKeys length)
+	 */
+	function depositAllAndStartClock(
+		AuctionId auctionId,
+		PoolKey[] memory poolKeys,
+		uint256[] memory amounts
+	) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
+		CPASetup.depositAllAndStartClock(this, auctionInfo[auctionId], poolInfo, poolKeys, amounts, auctionId);
+
+		// Update CPAHook states for all pools
+		_updateCPAHookStates(auctionId);
+	}
+
+	/**
 	 * @notice Start the clock phase
 	 * @param auctionId The auction ID
 	 */
@@ -755,6 +772,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else if (operationType == 7) {
 			// Claim all tokens
 			return _handleClaimAllTokens(operationData);
+		} else if (operationType == 8) {
+			// Batch deposit transfer
+			return _handleBatchDepositTransfer(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
@@ -769,6 +789,56 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		(, , , AuctionId auctionId, ) = 
 			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
 		return CPASetup.handleDepositTransfer(this, auctionInfo[auctionId], poolInfo, operationData);
+	}
+
+	/**
+	 * @dev Handle batch deposit transfer operation (setup)
+	 * @param operationData The encoded batch deposit data
+	 * @return returnData The encoded balance deltas
+	 */
+	function _handleBatchDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
+		// Decode batch deposit data
+		AuctionTypes.CallbackDataBatchDeposit memory batchData = 
+			abi.decode(operationData, (AuctionTypes.CallbackDataBatchDeposit));
+		
+		// Verify this is a legitimate auction owner
+		require(batchData.originalCaller == auctionInfo[batchData.auctionId].auctionOwner, "Not auction owner");
+		
+		// Process each deposit
+		BalanceDelta[] memory deltas = new BalanceDelta[](batchData.poolKeys.length);
+		
+		for (uint256 i = 0; i < batchData.poolKeys.length; i++) {
+			// Update pool info deposit amount
+			poolInfo[batchData.poolKeys[i].toId()].depositAmount = batchData.depositAmounts[i];
+			
+			// Transfer assets using V4's settle/take mechanism
+			batchData.itemCurrencies[i].settle(manager, batchData.originalCaller, batchData.depositAmounts[i], false);
+			batchData.itemCurrencies[i].take(manager, address(this), batchData.depositAmounts[i], true);
+			
+			// Create balance delta for this pool
+			int128 amount0 = 0;
+			int128 amount1 = 0;
+			
+			if (address(Currency.unwrap(batchData.poolKeys[i].currency0)) == address(Currency.unwrap(batchData.itemCurrencies[i]))) {
+				amount0 = int128(uint128(batchData.depositAmounts[i]));
+			} else {
+				amount1 = int128(uint128(batchData.depositAmounts[i]));
+			}
+			
+			deltas[i] = toBalanceDelta(amount0, amount1);
+			
+			// Emit event for each deposit
+			emit IErrorsAndEvents.AssetsDeposited(
+				batchData.auctionId, 
+				batchData.poolKeys[i].toId(), 
+				address(Currency.unwrap(batchData.itemCurrencies[i])), 
+				batchData.depositAmounts[i], 
+				cpaAuctionHookAddr
+			);
+		}
+		
+		// Return all balance deltas
+		return abi.encode(deltas, BalanceDeltaLibrary.ZERO_DELTA);
 	}
 	
 	/**
