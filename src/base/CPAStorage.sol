@@ -39,7 +39,7 @@ abstract contract CPAStorage {
 	/// @notice Protocol wallet address for penalty collection
 	address public immutable protocolWallet;
 
-	uint256 public constant FORFEITURE_REWARD_RATE = 100; // 1% reward (basis points)
+	uint256 public constant FORFEITURE_REWARD_RATE = 500; // 5% reward (basis points)
 
 	//// getters
 	function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory) {
@@ -80,14 +80,8 @@ abstract contract CPAStorage {
     /// @notice Bidder stake mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderStake;
 
-	/// @notice The amount of stake that is available to be reclaimed by a bidder
-	mapping(AuctionId => mapping(address => uint256)) public availableToReclaim;
-
     /// @notice Bidder bid points mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
-
-	/// @notice Number of bidders in an auction
-	// mapping(AuctionId => uint256) public numBidders;
 
 	/// @notice Bidder demand vector mapping
 	mapping(AuctionId => mapping(address => uint256[])) public bids;
@@ -141,11 +135,6 @@ abstract contract CPAStorage {
 	/// @notice Winning bundle ids storage
 	/// commitHash -> bundleId
 	mapping(bytes32 => BundleId) public winningBundleIds;
-
-	/// @notice Already allocated
-	/// checks if a bundle has been allocated 
-	// mapping(AuctionId => mapping(bytes32 => bool)) public alreadyAllocated;
-	
 
 	/**
 	 * @notice Get top allocation
