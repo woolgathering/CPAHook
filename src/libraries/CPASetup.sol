@@ -237,4 +237,83 @@ library CPASetup {
         
         return true;
     }
+
+	/**
+	 * @notice Deposit to all pools and start clock phase in one transaction
+	 * @param self The contract instance
+	 * @param auctionInfo The auction info storage
+	 * @param poolInfo The pool info storage
+	 * @param poolKeys Array of pool keys to deposit to
+	 * @param amounts Array of deposit amounts
+	 * @param auctionId The auction ID
+	 */
+	function depositAllAndStartClock(
+		CPAStorage self,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		PoolKey[] memory poolKeys,
+		uint256[] memory amounts,
+		AuctionId auctionId
+	) internal {
+		// Validate array lengths match
+		if (poolKeys.length != amounts.length) {
+			revert IErrorsAndEvents.InvalidBidsLength();
+		}
+
+		// Validate all pools are in the auction
+		for (uint256 i = 0; i < poolKeys.length; i++) {
+			// Check that this pool is part of the auction
+			bool found = false;
+			for (uint256 j = 0; j < auctionInfo.poolKeys.length; j++) {
+				if (PoolId.unwrap(poolKeys[i].toId()) == PoolId.unwrap(auctionInfo.poolKeys[j].toId())) {
+					found = true;
+					break;
+				}
+			}
+			if (!found) {
+				revert IErrorsAndEvents.InvalidPool();
+			}
+		}
+
+		// Determine item currencies for each pool
+		address numeraireAddress = auctionInfo.commonNumeraire;
+		Currency[] memory itemCurrencies = new Currency[](poolKeys.length);
+		
+		for (uint256 i = 0; i < poolKeys.length; i++) {
+			if (address(Currency.unwrap(poolKeys[i].currency0)) == numeraireAddress) {
+				itemCurrencies[i] = poolKeys[i].currency1;
+			} else {
+				itemCurrencies[i] = poolKeys[i].currency0;
+			}
+		}
+
+		// Create callback data for batch deposit
+		AuctionTypes.CallbackDataBatchDeposit memory batchData = AuctionTypes.CallbackDataBatchDeposit({
+			poolKeys: poolKeys,
+			itemCurrencies: itemCurrencies,
+			depositAmounts: amounts,
+			auctionId: auctionId,
+			originalCaller: msg.sender
+		});
+
+		bytes memory callbackData = abi.encode(
+			uint8(8), // operationType = 8 for batch deposit transfer
+			abi.encode(batchData)
+		);
+
+		// Call poolManager.unlock() which will trigger unlockCallback
+		self.manager().unlock(callbackData);
+		
+		// After successful batch deposit, start the clock phase
+		// This is done here because we know all deposits succeeded
+		unchecked {
+			auctionInfo.currentPhase = AuctionTypes.AuctionPhase.Clock;
+			auctionInfo.clockOpen = 2; // Clock is now open
+			auctionInfo.currentRound = 1; // Initialize to round 1
+		}
+		
+		// Emit clock phase started event
+		emit IErrorsAndEvents.ClockRoundOpened(auctionId, 1);
+	}
+
 }
