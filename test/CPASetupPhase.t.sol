@@ -644,4 +644,88 @@ contract CPASetupPhaseTest is CPATestBase {
 		assertEq(pool1DepositAmount, amounts[0], "Pool1 deposit amount should be set");
 		assertEq(pool2DepositAmount, amounts[1], "Pool2 deposit amount should be set");
 	}
+
+	// ============ cancelAuction() in Setup Tests ============
+
+	function test_CancelAuction_SuccessInSetup() public {
+		// Create auction (stays in Setup phase)
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Verify initial state
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Should be in Setup phase");
+		assertEq(uint8(auctionInfo.currentStatus), uint8(AuctionTypes.AuctionStatus.Active), "Should be Active");
+		
+		// Cancel auction as auction owner
+		vm.prank(auctioneer);
+		cpaManager.cancelAuction(auctionId);
+		
+		// Verify status changes to Cancelled
+		auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentStatus), uint8(AuctionTypes.AuctionStatus.Cancelled), "Status should be Cancelled");
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Phase should remain Setup");
+		
+		// Verify auction can no longer progress - attempt to start clock phase should fail
+		vm.expectRevert();
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+	}
+
+	function test_CancelAuction_SuccessWithDeposits() public {
+		// Create auction
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens and deposit to all pools
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset2PoolKey, 60000 * 10**18);
+		
+		// Verify deposits were made
+		PoolId pool1Id = asset1PoolKey.toId();
+		PoolId pool2Id = asset2PoolKey.toId();
+		
+		(,,,uint256 pool1DepositAmount,,,,) = cpaManager.poolInfo(pool1Id);
+		(,,,uint256 pool2DepositAmount,,,,) = cpaManager.poolInfo(pool2Id);
+		
+		assertEq(pool1DepositAmount, 50000 * 10**18, "Pool1 deposit should be recorded");
+		assertEq(pool2DepositAmount, 60000 * 10**18, "Pool2 deposit should be recorded");
+		
+		// Cancel auction as auction owner
+		vm.prank(auctioneer);
+		cpaManager.cancelAuction(auctionId);
+		
+		// Verify status changes to Cancelled
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentStatus), uint8(AuctionTypes.AuctionStatus.Cancelled), "Status should be Cancelled");
+		
+		// Verify deposit amounts are still recorded in poolInfo
+		(,,,pool1DepositAmount,,,,) = cpaManager.poolInfo(pool1Id);
+		(,,,pool2DepositAmount,,,,) = cpaManager.poolInfo(pool2Id);
+		
+		assertEq(pool1DepositAmount, 50000 * 10**18, "Pool1 deposit should still be recorded after cancellation");
+		assertEq(pool2DepositAmount, 60000 * 10**18, "Pool2 deposit should still be recorded after cancellation");
+	}
+
+	function test_CancelAuction_RevertNonOwner() public {
+		// Create auction as auctioneer
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Attempt to cancel as bidder1 (non-owner)
+		vm.expectRevert();
+		vm.prank(bidder1);
+		cpaManager.cancelAuction(auctionId);
+	}
 }
