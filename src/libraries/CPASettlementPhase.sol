@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-
+import { console } from "forge-std/console.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -26,10 +26,6 @@ library CPASettlementPhase {
     using StateLibrary for IPoolManager;
     using SafeCast for *;
     using CurrencySettler for Currency;
-
-	function endSettlementPhase(CPAStorage self, AuctionId auctionId) internal {
-		// any leftover stake is forfeited here
-	}
 
     function reveal(
         CPAStorage self,
@@ -74,9 +70,29 @@ library CPASettlementPhase {
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
         }
 
+        BundleId bundleId = winningBundleIds[commitHash];
+
+        // Check if bidder was allocated
+        if (BundleId.unwrap(bundleId) == 0) {
+            // Non-allocated bidder - refund full stake (no penalty)
+            uint256 stake = bidderStake[bidder];
+            if (stake > 0) {
+                AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
+                    numeraire: auctionInfo.commonNumeraire,
+                    recipient: bidder,
+                    amount: stake
+                });
+                self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
+                
+                bidderStake[bidder] = 0;
+                emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake);
+            }
+            return; // Exit early, no allocation to process
+        }
+
+        // If the bidder was allocated, we need to claim the tokens from the pool
         // In a future version, we should combine both calls
         // to the PoolManager into a single call to save gas.
-        BundleId bundleId = winningBundleIds[commitHash];
         bytes memory data = self.manager().unlock(abi.encode(uint8(7), abi.encode(AuctionTypes.CallbackDataClaimAllTokens({
 			bidder: bidder,
 			numeraire: auctionInfo.commonNumeraire,
@@ -87,31 +103,32 @@ library CPASettlementPhase {
 
         (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
 
-        // Update stake balance and handle min spend penalties
-        uint256 currentStake = bidderStake[bidder];
-        uint256 minSpendAmount = auctionInfo.config.minSpendRatio * currentStake / 10000;
+        // // Update stake balance and handle min spend penalties
+        // uint256 minSpendAmount = auctionInfo.config.minSpendRatio * bidderStake[bidder] / 10000;
         
-        if (minSpendAmount > numerairePaidFromStake) {
-            // Didn't meet minimum spend - penalty applies
-            protocolPenalties[auctionId] += minSpendAmount - numerairePaidFromStake;
-            bidderStake[bidder] -= minSpendAmount;
-        } else {
-            // Met minimum spend - no penalty
-            bidderStake[bidder] -= numerairePaidFromStake;
-        }
+        // if (minSpendAmount > numerairePaidFromStake) {
+        //     // Didn't meet minimum spend - penalty applies
+        //     protocolPenalties[auctionId] += minSpendAmount - numerairePaidFromStake;
+        //     bidderStake[bidder] -= minSpendAmount;
+        // } else {
+        //     // Met minimum spend - no penalty
+        //     bidderStake[bidder] -= numerairePaidFromStake;
+        // }
         
-        // Transfer any remaining stake directly to bidder
-        if (bidderStake[bidder] > 0) {
-            AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-                numeraire: auctionInfo.commonNumeraire,
-                recipient: bidder,
-                amount: bidderStake[bidder]
-            });
-            self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
+        // // Transfer any remaining stake directly to bidder
+        // if (bidderStake[bidder] > 0) {
+        //     AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
+        //         numeraire: auctionInfo.commonNumeraire,
+        //         recipient: bidder,
+        //         amount: bidderStake[bidder]
+        //     });
+        //     self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
             
-            // Zero out bidder stake
-            bidderStake[bidder] = 0;
-        }
+        //     // Zero out bidder stake
+        //     bidderStake[bidder] = 0;
+        // }
+
+        bidderStake[bidder] = 0;
     }
 
     function claimToken(
