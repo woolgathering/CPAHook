@@ -103,31 +103,6 @@ library CPASettlementPhase {
 
         (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
 
-        // // Update stake balance and handle min spend penalties
-        // uint256 minSpendAmount = auctionInfo.config.minSpendRatio * bidderStake[bidder] / 10000;
-        
-        // if (minSpendAmount > numerairePaidFromStake) {
-        //     // Didn't meet minimum spend - penalty applies
-        //     protocolPenalties[auctionId] += minSpendAmount - numerairePaidFromStake;
-        //     bidderStake[bidder] -= minSpendAmount;
-        // } else {
-        //     // Met minimum spend - no penalty
-        //     bidderStake[bidder] -= numerairePaidFromStake;
-        // }
-        
-        // // Transfer any remaining stake directly to bidder
-        // if (bidderStake[bidder] > 0) {
-        //     AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-        //         numeraire: auctionInfo.commonNumeraire,
-        //         recipient: bidder,
-        //         amount: bidderStake[bidder]
-        //     });
-        //     self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
-            
-        //     // Zero out bidder stake
-        //     bidderStake[bidder] = 0;
-        // }
-
         bidderStake[bidder] = 0;
     }
 

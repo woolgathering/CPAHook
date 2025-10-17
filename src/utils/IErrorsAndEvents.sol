@@ -63,6 +63,7 @@ interface IErrorsAndEvents {
 	error AuctionNotStarted();
 	error AuctionNotEnded();
 	error SetupNotComplete();
+	error PhaseNotStarted(AuctionId auctionId);
 	
 	// Clock Phase Errors
 	error ClockNotOpen();
