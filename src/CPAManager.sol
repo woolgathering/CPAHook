@@ -98,12 +98,36 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		_;
 	}
 
-
 	/**
 	 * @notice Modifier to ensure auction is in expected phase
 	 */
 	modifier onlyPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		if (auctionInfo[auctionId].currentPhase != phase) revert InvalidPhase(phase, auctionInfo[auctionId].currentPhase);
+		_;
+	}
+
+	/**
+	 * @notice Modifier to ensure phase has expired based on duration
+	 */
+	modifier onlyWhenPhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
+		uint256[] memory durations = auctionInfo[auctionId].config.phaseDurations;
+		uint256 startTime;
+		
+		if (phase == AuctionTypes.AuctionPhase.Proxy) {
+			startTime = proxyPhaseStartTime[auctionId];
+			if (startTime == 0) revert IErrorsAndEvents.PhaseNotStarted(auctionId);
+			if (block.timestamp < startTime + durations[0]) revert IErrorsAndEvents.PhaseNotExpired(auctionId, phase);
+		} else if (phase == AuctionTypes.AuctionPhase.Allocation) {
+			startTime = allocationPhaseStartTime[auctionId];
+			if (startTime == 0) revert IErrorsAndEvents.PhaseNotStarted(auctionId);
+			if (block.timestamp < startTime + durations[1]) revert IErrorsAndEvents.PhaseNotExpired(auctionId, phase);
+		} else if (phase == AuctionTypes.AuctionPhase.Settlement) {
+			startTime = settlementPhaseStartTime[auctionId];
+			if (startTime == 0) revert IErrorsAndEvents.PhaseNotStarted(auctionId);
+			if (block.timestamp < startTime + durations[2]) revert IErrorsAndEvents.PhaseNotExpired(auctionId, phase);
+		} else {
+			revert IErrorsAndEvents.PhaseNotExpired(auctionId, phase); // Clock phase doesn't expire
+		}
 		_;
 	}
 
@@ -148,28 +172,50 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
 
-	function reclaimStake(AuctionId auctionId) external {
-		// Allow reclaiming if auction is cancelled, finished, or bidder has dropped out
-		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Cancelled &&
-			auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Finished &&
-			availableToReclaim[auctionId][msg.sender] == 0) {
-			revert IErrorsAndEvents.AuctionNotActive(auctionId, auctionInfo[auctionId].currentStatus);
+	function reclaimStake(AuctionId auctionId) external whenAuctionActive(auctionId) {
+		uint256 stake = bidderStake[auctionId][msg.sender];
+		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
+		
+		AuctionTypes.AuctionStatus status = auctionInfo[auctionId].currentStatus;
+		
+		// If cancelled: full refund, no penalties
+		if (status == AuctionTypes.AuctionStatus.Cancelled) {
+			bidderStake[auctionId][msg.sender] = 0;
+			bidderBidPoints[auctionId][msg.sender] = 0;
+			
+			AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
+				numeraire: auctionInfo[auctionId].commonNumeraire,
+				recipient: msg.sender,
+				amount: stake
+			});
+			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
+			emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, stake);
+			return;
 		}
 		
-		uint256 refund =_reclaimStake(auctionId, msg.sender);
-
-		// TODO: Implement actual refund transfer
-		// For now, just suppress unused variable warning
-		refund; // This will be fixed in later phases
-	}
-
-	function _reclaimStake(AuctionId auctionId, address bidder) internal returns (uint256 stake) {
-		stake = bidderStake[auctionId][bidder];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
-		bidderStake[auctionId][bidder] = 0;
-		bidderBidPoints[auctionId][bidder] = 0;
-		availableToReclaim[auctionId][bidder] = stake;
-		return stake;
+		// Otherwise: only allow in Finished phase (prevent loophole during Settlement)
+		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Finished) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Finished, auctionInfo[auctionId].currentPhase);
+		}
+		
+		// Apply minSpendRatio penalty for bidders who didn't claim during Settlement OR particpated in the Clock but did not continue
+		uint256 penaltyRate = auctionInfo[auctionId].config.minSpendRatio;
+		protocolPenalties[auctionId] += stake * penaltyRate / 10000;
+		
+		// Clear bidder state
+		bidderStake[auctionId][msg.sender] = 0;
+		bidderBidPoints[auctionId][msg.sender] = 0;
+		
+		// Transfer refund
+		AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
+			numeraire: auctionInfo[auctionId].commonNumeraire,
+			recipient: msg.sender,
+			amount: stake - (stake * penaltyRate / 10000)
+		});
+		manager.unlock(abi.encode(uint8(5), abi.encode(data)));
+		
+		emit IErrorsAndEvents.PenaltyApplied(auctionId, msg.sender, stake * penaltyRate / 10000);
+		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, stake - (stake * penaltyRate / 10000));
 	}
 
 	// ========================================
@@ -319,16 +365,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	}
 
 	/**
-	 * @notice Dropout from auction with penalty
-	 * probably need to rewrite this to accept WHO is dropping out
+	 * @notice Dropout from auction with penalty. Can only be done during the clock phase.
+	 * @param auctionId The auction ID
 	 */
-	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) {
-		// Allow dropout in Setup, Clock, or Proxy phases
-		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Setup && 
-			auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo[auctionId].currentPhase);
-		}
-		
+	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		uint256 stake = bidderStake[auctionId][msg.sender];
 		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // this also covers the case where the bidder is not in the auction
 		
@@ -361,20 +401,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// PROXY PHASE
 	// ========================================
 
-	// function startProxyPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
-	// 	CPAProxyPhase.startProxyPhase(this, proxyPhaseStartTime, auctionId);
-	// }
-
-	/**
-	 * @notice End proxy phase and transition to allocation (auctioneer only)
-	 * @dev Kept for backward compatibility. Use transitionToAllocation() for permissionless transition.
-	 */
-	function endProxyPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
-		CPAProxyPhase.endProxyPhase(this, auctionId);
-
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
-	}
-
 	/**
 	 * @notice Submit bundle during proxy phase
 	 * @param auctionId The auction ID
@@ -387,7 +413,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		bytes32 commitHash,
 		AuctionTypes.Bundle calldata bundleData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
-		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData);
+		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData, hasBundles);
 	}
 
 	// ========================================
@@ -404,105 +430,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionId auctionId,
 		AuctionTypes.Allocation calldata allocationData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
-		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized();
-		// TODO: Uncomment when CPAAllocationPhase is implemented
-		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo, poolInfo, bundles);
-		// revert("Not yet implemented");
-	}
-
-	/**
-	 * @notice End allocation phase and select winner (auctioneer only)
-	 * @dev Kept for backward compatibility. Use transitionToSettlement() for permissionless transition.
-	 */
-	function endAllocationPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
-		// TODO: Uncomment when CPAProxyPhase and CPAClockPhase are implemented
-		/*
-		if (allocations[auctionId].length == 0) revert InvalidPhase(AuctionTypes.AuctionPhase.Allocation, auctionPhase[auctionId]);
-		
-		// Get bundles and bidders for allocation scoring
-		AuctionTypes.Bundle[] memory allBundles = CPAProxyPhase.getAllBundles(this);
-		// uint256 totalBidders = CPAClockPhase.getTotalBidders(this);
-		
-		// Select winning allocation
-		uint256 winningIndex = AllocationScoring.selectWinningAllocation(
-			allocations[auctionId],
-			allBundles,
-			totalBidders
-		);
-		
-		finalAllocation[auctionId] = allocations[auctionId][winningIndex];
-		winningAllocator[auctionId] = finalAllocation[auctionId].allocator;
-		
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Reveal);
-		*/
-		CPAAllocationPhase.endAllocationPhase(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles, winningBundleIds);
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
-	}
-
-	// ========================================
-	// PERMISSIONLESS PHASE TRANSITIONS
-	// ========================================
-
-	/**
-	 * @notice Transition from Proxy to Allocation phase (callable by anyone)
-	 * @param auctionId The auction ID
-	 */
-	function transitionToAllocation(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
-		// Check if phase has expired (no auctioneer override for bidder protection)
-		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Proxy)) {
-			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
-		}
-		
-		// Check if any bundles were submitted
-		if (!hasBundles[auctionId]) {
-			// Force cancel auction if no bundles submitted
-			auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-			_updateCPAHookStates(auctionId);
-			emit IErrorsAndEvents.AuctionCancelled(auctionId, address(0)); // Contract-initiated
-			emit IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
-			return;
-		}
-		
-		// Transition to allocation phase
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
-	}
-
-	/**
-	 * @notice Transition from Allocation to Settlement phase (callable by anyone)
-	 * @param auctionId The auction ID
-	 */
-	function transitionToSettlement(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
-		// Check if phase has expired (no auctioneer override for bidder protection)
-		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Allocation)) {
-			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
-		}
-		
-		// Check if any allocations were submitted
-		if (!hasAllocations[auctionId]) {
-			// Force cancel auction if no allocations submitted
-			auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-			_updateCPAHookStates(auctionId);
-			emit IErrorsAndEvents.AuctionCancelled(auctionId, address(0)); // Contract-initiated
-			emit IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
-			return;
-		}
-		
-		// Transition to settlement phase
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
-	}
-
-	/**
-	 * @notice Transition from Settlement to Finished phase (callable by anyone)
-	 * @param auctionId The auction ID
-	 */
-	function transitionToFinished(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		// Check if phase has expired (no auctioneer override for bidder protection)
-		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Settlement)) {
-			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Settlement);
-		}
-		
-		// Transition to finished phase
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Finished);
+		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized(); // cannot submit an allocation for someone else
+		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo, poolInfo, bundles, hasAllocations);
 	}
 
 	// ========================================
@@ -588,15 +517,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	}
 
 	/**
-	 * @notice End settlement phase and transition to finished (auctioneer only)
-	 * @dev Kept for backward compatibility. Use transitionToFinished() for permissionless transition.
-	 */
-	function endSettlementPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		CPASettlementPhase.endSettlementPhase(this, auctionId);
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Finished);
-	}
-
-	/**
 	 * @notice Claim the allocator reward for the winning allocation.
 	 * @dev Only callable by the winning allocator during or after the settlement phase.
 	 *      This function will trigger a callback to transfer the reward to the allocator.
@@ -625,6 +545,69 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		auctionInfo[auctionId].allocatorReward = 0; // update their reward to 0 since it was claimed
 
 		emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, winningAllocator, auctionInfo[auctionId].allocatorReward);
+	}
+
+	// ========================================
+	// PERMISSIONLESS PHASE TRANSITIONS
+	// ========================================
+
+	/**
+	 * @notice Transition from Proxy to Allocation phase (callable by anyone)
+	 * @param auctionId The auction ID
+	 */
+	function transitionToAllocation(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
+		// Check if phase has expired (no auctioneer override for bidder protection)
+		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Proxy)) {
+			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
+		}
+		
+		// Check if any bundles were submitted
+		if (!hasBundles[auctionId]) {
+			_cancelAuction(auctionId);
+			revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
+		}
+		
+		// Transition to allocation phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
+	}
+
+	/**
+	 * @notice Transition from Allocation to Settlement phase (callable by anyone)
+	 * @param auctionId The auction ID
+	 */
+	function transitionToSettlement(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+		// Check if phase has expired (no auctioneer override for bidder protection)
+		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Allocation)) {
+			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
+		}
+		
+		// Check if any allocations were submitted
+		// if not, force cancel the auction
+		if (!hasAllocations[auctionId]) {
+			_cancelAuction(auctionId);
+			revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
+		}
+
+		// select the winner and move the assets to the pools
+		CPAAllocationPhase.selectWinner(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles, winningBundleIds);
+		CPAAllocationPhase.transferAssetsToPools(this, auctionId, auctionInfo, poolInfo);
+		
+		// Transition to settlement phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
+	}
+
+	/**
+	 * @notice Transition from Settlement to Finished phase (callable by anyone)
+	 * @param auctionId The auction ID
+	 */
+	function transitionToFinished(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+		// Check if phase has expired (no auctioneer override for bidder protection)
+		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Settlement)) {
+			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Settlement);
+		}
+		
+		// Transition to finished phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Finished);
 	}
 
 	// ========================================
@@ -707,8 +690,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		return false; // Clock phase doesn't use time-based expiration
 	}
 
-
-
 	/**
 	 * @notice Update pool hook states
 	 * @param auctionId The auction ID
@@ -725,6 +706,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 				auctionInfo[auctionId].currentPhase
 			);
 		}
+	}
+
+	function _cancelAuction(AuctionId auctionId) internal {
+		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
+		_updateCPAHookStates(auctionId);
+		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
 
 	// ========================================
@@ -968,21 +955,31 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 
 		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
 		uint256 numerairePaidByManager = 0;
+		uint256 protocolPenalty = 0;
 		if (bidderStake >= totalNumeraireOwed) {
 			// since they have enough to cover, we can settle directly
 			numeraire.settle(manager, address(this), totalNumeraireOwed, true); // might need to be true since the manager has ERC6909 claims
 			numerairePaidByManager = totalNumeraireOwed;
 
-			// since they had enough, refund any leftover numeraire
-			manager.burn(address(this), CurrencyLibrary.toId(numeraire), bidderStake - totalNumeraireOwed);
-			numeraire.take(manager, callbackData.bidder, bidderStake - totalNumeraireOwed, false);
+			// since they had enough, we need to check if they met the minimum spend ratio and refund any leftover numeraire
+			uint256 minSpendAmount = auctionInfo[callbackData.auctionId].config.minSpendRatio * bidderStake / 10000;
+			if (minSpendAmount > numerairePaidByManager) {
+				// Didn't meet minimum spend - penalty applies
+				protocolPenalty = minSpendAmount - numerairePaidByManager;
+				protocolPenalties[callbackData.auctionId] += protocolPenalty;
+				bidderStake -= minSpendAmount;
+			} // else they met the minimum spend ratio so no penalty applies
+
+			// refund the leftover numeraire after applying the penalty
+			manager.burn(address(this), CurrencyLibrary.toId(numeraire), bidderStake - totalNumeraireOwed - protocolPenalty);
+			numeraire.take(manager, callbackData.bidder, bidderStake - totalNumeraireOwed - protocolPenalty, false);
 		} else {
-			//since they don't have enough, we need to do two settles
+			//since they don't have enough numeraire to cover the bundle price, we need to do two settles
 			numeraire.settle(manager, address(this), bidderStake, true); // might need to be true since the manager has ERC6909 claims
 			numeraire.settle(manager, callbackData.bidder, totalNumeraireOwed - bidderStake, false); // the bidder pays in ERC20
 			numerairePaidByManager = bidderStake;
 
-			// bidder has no leftover stake so all is well here
+			// bidder has no leftover stake so there is no need to refund anything
 		}
 		
 		// Return the balance delta
