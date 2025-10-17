@@ -18,6 +18,7 @@ import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/Po
 import { Constants } from "../lib/uniswap-hooks/lib/v4-core/test/utils/Constants.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
+import { IErrorsAndEvents } from "../src/utils/IErrorsAndEvents.sol";
 
 contract CPASetupPhaseTest is CPATestBase {
     using PoolIdLibrary for PoolKey;
@@ -369,5 +370,278 @@ contract CPASetupPhaseTest is CPATestBase {
 		
 		// Test that the auction manager can actually move tokens successfully
 		assertTrue(true, "Deposit functionality working correctly - tokens moved from auctioneer to pools via auction manager");
+	}
+
+	// ============ startClockPhase() Tests ============
+
+	function test_StartClockPhase_Success() public {
+		// Create auction and deposit to all pools
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens to auctioneer
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		// Approve and deposit to both pools
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		uint256 depositAmount1 = 50000 * 10**18;
+		uint256 depositAmount2 = 60000 * 10**18;
+		
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, depositAmount1);
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset2PoolKey, depositAmount2);
+		
+		// Verify initial state
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Should be in Setup phase");
+		assertEq(auctionInfo.clockOpen, 1, "Clock should not be open initially");
+		assertEq(auctionInfo.currentRound, 0, "Current round should be 0");
+		
+		// Start clock phase
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+		
+		// Verify phase transition
+		auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Clock), "Should transition to Clock phase");
+		assertEq(auctionInfo.clockOpen, 2, "Clock should be open after starting");
+		assertEq(auctionInfo.currentRound, 1, "Current round should be initialized to 1");
+	}
+
+	function test_StartClockPhase_RevertNonOwner() public {
+		// Create auction and deposit to all pools as auctioneer
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens and deposit
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset2PoolKey, 60000 * 10**18);
+		
+		// Attempt to start clock phase as different address (bidder1)
+		vm.expectRevert();
+		vm.prank(bidder1);
+		cpaManager.startClockPhase(auctionId);
+	}
+
+	function test_StartClockPhase_RevertWrongPhase() public {
+		// Create auction, deposit, and start clock phase
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens and deposit
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset2PoolKey, 60000 * 10**18);
+		
+		// Start clock phase
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+		
+		// Verify we're in Clock phase
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Clock), "Should be in Clock phase");
+		
+		// Attempt to start clock phase again (already in Clock phase)
+		vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Setup, AuctionTypes.AuctionPhase.Clock));
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+	}
+
+	function test_StartClockPhase_RevertSetupNotComplete() public {
+		// Create auction
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Deposit to only first pool, leave second pool at zero
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		// Only deposit to first pool
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+		// Intentionally skip second pool deposit
+		
+		// Attempt to start clock phase (setup not complete)
+		vm.expectRevert();
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+	}
+
+	// ============ moveDeposit() Error Tests ============
+
+	function test_MoveDeposit_RevertNonOwner() public {
+		// Create auction as auctioneer
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens to bidder1 and approve CPAManager
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(bidder1, tokenAmount);
+		vm.prank(bidder1);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		
+		// Attempt moveDeposit() as bidder1 (non-owner)
+		vm.expectRevert();
+		vm.prank(bidder1);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+	}
+
+	function test_MoveDeposit_RevertWrongPhase() public {
+		// Create auction and deposit to all pools
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens and deposit
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 50000 * 10**18);
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset2PoolKey, 60000 * 10**18);
+		
+		// Start clock phase
+		vm.prank(auctioneer);
+		cpaManager.startClockPhase(auctionId);
+		
+		// Attempt to deposit again (in Clock phase)
+		vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Setup, AuctionTypes.AuctionPhase.Clock));
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, 10000 * 10**18);
+	}
+
+	function test_MoveDeposit_RevertInsufficientBalance() public {
+		// Create auction
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint only 1000 tokens to auctioneer
+		uint256 smallAmount = 1000 * 10**18;
+		uint256 largeAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, smallAmount);
+		
+		// Approve CPAManager for large amount
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), largeAmount);
+		
+		// Attempt to deposit large amount (more than balance)
+		vm.expectRevert();
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, largeAmount);
+	}
+
+	function test_MoveDeposit_RevertInsufficientApproval() public {
+		// Create auction
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint large amount to auctioneer
+		uint256 tokenAmount = 100000 * 10**18;
+		uint256 smallApproval = 1000 * 10**18;
+		uint256 largeDeposit = 10000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		
+		// Approve CPAManager for only small amount
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), smallApproval);
+		
+		// Attempt to deposit large amount (more than approval)
+		vm.expectRevert();
+		vm.prank(auctioneer);
+		cpaManager.moveDeposit(auctionId, asset1PoolKey, largeDeposit);
+	}
+
+	// ============ depositAllAndStartClock() Tests ============
+
+	function test_DepositAllAndStartClock_Success() public {
+		// Create auction
+		vm.prank(auctioneer);
+		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		
+		// Mint tokens to auctioneer
+		uint256 tokenAmount = 100000 * 10**18;
+		asset1Token.mint(auctioneer, tokenAmount);
+		asset2Token.mint(auctioneer, tokenAmount);
+		
+		// Approve CPAManager for both tokens
+		vm.prank(auctioneer);
+		asset1Token.approve(address(cpaManager), tokenAmount);
+		vm.prank(auctioneer);
+		asset2Token.approve(address(cpaManager), tokenAmount);
+		
+		// Prepare batch deposit data
+		PoolKey[] memory poolKeys = new PoolKey[](2);
+		uint256[] memory amounts = new uint256[](2);
+		
+		poolKeys[0] = asset1PoolKey;
+		poolKeys[1] = asset2PoolKey;
+		amounts[0] = 50000 * 10**18;
+		amounts[1] = 60000 * 10**18;
+		
+		// Verify initial state
+		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Should be in Setup phase");
+		assertEq(auctionInfo.clockOpen, 1, "Clock should not be open initially");
+		assertEq(auctionInfo.currentRound, 0, "Current round should be 0");
+		
+		// Call batch deposit and start clock
+		vm.prank(auctioneer);
+		cpaManager.depositAllAndStartClock(auctionId, poolKeys, amounts);
+		
+		// Verify phase transition
+		auctionInfo = cpaManager.getAuctionInfo(auctionId);
+		assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Clock), "Should transition to Clock phase");
+		assertEq(auctionInfo.clockOpen, 2, "Clock should be open after starting");
+		assertEq(auctionInfo.currentRound, 1, "Current round should be initialized to 1");
+		
+		// Verify deposits were made
+		PoolId pool1Id = asset1PoolKey.toId();
+		PoolId pool2Id = asset2PoolKey.toId();
+		
+		(,,,uint256 pool1DepositAmount,,,,) = cpaManager.poolInfo(pool1Id);
+		(,,,uint256 pool2DepositAmount,,,,) = cpaManager.poolInfo(pool2Id);
+		
+		assertEq(pool1DepositAmount, amounts[0], "Pool1 deposit amount should be set");
+		assertEq(pool2DepositAmount, amounts[1], "Pool2 deposit amount should be set");
 	}
 }
