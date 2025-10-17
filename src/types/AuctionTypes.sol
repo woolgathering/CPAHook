@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { AuctionId } from "./AuctionId.sol";
 import { BundleId } from "./BundleId.sol";
 
@@ -154,6 +155,14 @@ library AuctionTypes {
 		address allocator;
 		address numeraire;
 		uint256 reward;
+	}
+
+	struct CallbackDataBatchDeposit {
+		PoolKey[] poolKeys;
+		Currency[] itemCurrencies;  // The non-numeraire currency for each pool
+		uint256[] depositAmounts;
+		AuctionId auctionId;
+		address originalCaller;
 	}
 
 }

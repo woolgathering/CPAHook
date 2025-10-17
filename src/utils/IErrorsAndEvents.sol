@@ -98,6 +98,7 @@ interface IErrorsAndEvents {
 	error InvalidHook();
 	error PoolPriceUpdateFailed();
 	error PoolNotFound(AuctionId auctionId, PoolId poolId);
+	error InvalidPool();
 	
 	// Auction cancellation and phase transition errors
 	error CannotCancelInThisPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
