@@ -172,7 +172,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
 
-	function reclaimStake(AuctionId auctionId) external whenAuctionActive(auctionId) {
+	function reclaimStake(AuctionId auctionId) external {
 		uint256 stake = bidderStake[auctionId][msg.sender];
 		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
 		
@@ -349,7 +349,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Submit a bid during clock phase
 	 * @param auctionId The auction ID
 	 * @param demands Array of item demands
-	 * @param maxStakeAmount Maximum stake amount the bidder is willing to provide for this bid
+	 * @param maxStakeAmount Maximum stake amount the bidder is willing to provide for this bid. This is inclusive of the allocator reward.
 	 */
 	function submitBid(
 		AuctionId auctionId,
@@ -395,6 +395,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		// Clear bidder data
 		bidderStake[auctionId][msg.sender] = 0;
 		bidderBidPoints[auctionId][msg.sender] = 0;
+		removeBidder(auctionId, msg.sender);
 		
 		// Set dropped bidder status
 		droppedBidders[auctionId][msg.sender] = true;
@@ -650,6 +651,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	function registerCommit(AuctionId auctionId, bytes32 commitHash) external {
 		if (commitProxy[auctionId][commitHash] != address(0)) revert InvalidCommitHash();
 		commitProxy[auctionId][commitHash] = msg.sender;
+	}
+
+	function removeBidder(AuctionId auctionId, address bidder) internal {
+		address[] storage activeBiddersInThisAuction = activeBidders[auctionId];
+		for (uint256 i = 0; i < activeBiddersInThisAuction.length; i++) {
+			if (activeBiddersInThisAuction[i] == bidder) {
+				activeBiddersInThisAuction[i] = address(0); // just leave it as 0, it's fine
+				break;
+			}
+		}
 	}
 
 	// ========================================
@@ -1062,6 +1073,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		
 		// Refund the stake
 		manager.burn(address(this), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.amount);
+
+		// now that we are credited, transfer the tokens to the address
+		Currency.wrap(data.numeraire).take(manager, data.recipient, data.amount, false);
+
 		
 		// Return the balance delta
 		return abi.encode(data.amount);
