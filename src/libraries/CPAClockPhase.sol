@@ -8,6 +8,7 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
@@ -64,37 +65,37 @@ library CPAClockPhase {
 		}
 		
 		// Calculate total bid value first
-		uint256 totalValue = calculateBidValue(demands, auctionId, auctionInfo, poolInfo, self.manager());
+		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionId, auctionInfo, poolInfo, self.manager());
+		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo[auctionId].commonNumeraire);
+		uint256 currentBidPoints = bidderBidPoints[auctionId][msg.sender];
+		uint256 requiredAdditionalStake = 0;
+		uint256 allocatorRewardAmount = 0;
 		
 		// Check if bidder already has sufficient bid points
-		uint256 currentBidPoints = bidderBidPoints[auctionId][msg.sender];
-		if (totalValue > currentBidPoints) {
+		if (requiredBidPoints > currentBidPoints) {
 			// Bidder needs additional stake
-			uint256 requiredAdditionalStake = totalValue - currentBidPoints;
+			requiredAdditionalStake = totalValueInNumeraire - bidderStake[auctionId][msg.sender];
+			allocatorRewardAmount = (requiredAdditionalStake * auctionInfo[auctionId].config.allocatorRewardPct) / 10000;
 
 			// Safety check: ensure the bidder's max stake is sufficient for the required amount
-			if (maxStakeAmount < requiredAdditionalStake) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
+			if (maxStakeAmount < requiredAdditionalStake + allocatorRewardAmount) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
 			
 			// Add the required stake amount to bidder (not the max, just what's needed)
 			bidderStake[auctionId][msg.sender] += requiredAdditionalStake;
 			
 			// Set bidder bid points
-			bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender]);
+			bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender], auctionInfo[auctionId].commonNumeraire); // this uses the required additional stake
 			
 			// Transfer the required stake amount from bidder to auction contract via pool manager
 			if (requiredAdditionalStake > 0) {
 				// Call swap callback to transfer tokens from user to pool manager
 				// and mint ERC6909 claims to hook
-
-				uint256 allocatorRewardAmount = (requiredAdditionalStake * auctionInfo[auctionId].config.allocatorRewardPct) / 10000;
 				auctionInfo[auctionId].allocatorReward += allocatorRewardAmount; // add this to the allocator reward
-				requiredAdditionalStake = requiredAdditionalStake + allocatorRewardAmount; // update
-
 
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
 					sender: msg.sender,
 					numeraire: auctionInfo[auctionId].commonNumeraire,
-					stake: int128(int256(requiredAdditionalStake)), // stake amount in numeraire
+					stake: int128(int256(requiredAdditionalStake + allocatorRewardAmount)), // stake amount in numeraire
 					deadline: block.timestamp + 60
 				});
 				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
@@ -108,7 +109,7 @@ library CPAClockPhase {
 		// the complication is that we do not assert a common numeraire across all auction contracts.
 		
 		// Calculate the actual stake amount used for this bid
-		uint256 actualStakeAmount = totalValue > currentBidPoints ? totalValue - currentBidPoints : 0;
+		uint256 actualStakeAmount = totalValueInNumeraire > currentBidPoints ? totalValueInNumeraire - currentBidPoints : 0;
 		
 		// // Record the bid
 		// AuctionTypes.Bid memory bid = AuctionTypes.Bid({
@@ -134,54 +135,17 @@ library CPAClockPhase {
 		// since activeBidders is a separate mapping in CPAStorage, not part of AuctionInfo
 		activeBidders.push(msg.sender);
 		
-		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, actualStakeAmount, auctionInfo[auctionId].currentRound);
+		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, requiredAdditionalStake, auctionInfo[auctionId].currentRound);
 		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
 		// would be useful if there are participant-limited auctions where more people want in than actually got in.
 	}
 
 
-	function computeBidPoints(uint256 stakeAmount) internal pure returns (uint256 bidPoints) {
-		bidPoints = stakeAmount; // 1:1 ratio for now, could theoretically be anything
+	function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256 bidPoints) {
+		bidPoints = stakeAmount * 10**18 / (10**IERC20(numeraire).decimals());
+		// bidPoints = stakeAmount; // 1:1 ratio for now, could theoretically be anything
 	}
-
-    // /**
-	//  * @notice Dropout from auction with penalty
-	//  * @param auctionId The auction ID
-	//  * @param bidder The bidder address
-	//  * @param auctionInfo Mapping for auction info
-	//  * @param bidderStake Mapping for bidder stakes
-	//  * @param bidderBidPoints Mapping for bidder bid points
-	//  * @param droppedBidders Mapping for dropped bidders
-	//  */
-	// function dropout(
-	// 	AuctionId auctionId,
-	// 	address bidder,
-	// 	mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-	// 	mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
-	// 	mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
-	// 	mapping(AuctionId => mapping(address => bool)) storage droppedBidders
-	// ) internal {
-	// 	uint256 stake = bidderStake[auctionId][bidder];
-	// 	if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
-		
-	// 	uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
-	// 	uint256 refund = stake - penalty;
-		
-	// 	// Clear bidder data
-	// 	bidderStake[auctionId][bidder] = 0;
-	// 	bidderBidPoints[auctionId][bidder] = 0;
-		
-	// 	// Set dropped bidder status
-	// 	droppedBidders[auctionId][bidder] = true;
-		
-	// 	// Transfer refund to bidder (simplified)
-	// 	// In practice, this would use SafeERC20
-		
-	// 	emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, penalty);
-	// 	emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
-	// }
     
-
 	/**
 	 * @notice Process clock round results
 	 * @param auctionId The auction ID
@@ -210,8 +174,12 @@ library CPAClockPhase {
 			PoolId poolId = pools[i];
 			
 			// Sum up all demand for this item across all active bidders
+			address bidder;
 			for (uint256 j = 0; j < activeBidders[auctionId].length; j++) {
-				totalDemands[i] += bids[auctionId][activeBidders[auctionId][j]][i];
+				bidder = activeBidders[auctionId][j]; // just one read
+				if (bidder != address(0)) {
+					totalDemands[i] += bids[auctionId][bidder][i];
+				}
 			}
 			
 			// Calculate excess demand (can be negative for undersell)
