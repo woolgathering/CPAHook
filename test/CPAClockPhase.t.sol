@@ -91,7 +91,7 @@ contract CPAClockPhaseTest is CPATestBase {
     function test_StartClockPhase_UnauthorizedCaller() public {
         // Non-auctioneer should not be able to start clock phase
         vm.prank(bidder1);
-        vm.expectRevert(IErrorsAndEvents.Unauthorized.selector);    
+        vm.expectRevert(IErrorsAndEvents.Unauthorized.selector);
         cpaManager.startClockPhase(auctionId);
     }
 
@@ -148,11 +148,11 @@ contract CPAClockPhaseTest is CPATestBase {
         bidder2Demands[1] = 70 * 10**asset2Token.decimals();
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        cpaManager.submitBid(auctionId, bidder1Demands, type(uint256).max);
         vm.stopPrank();
         
         vm.startPrank(testBidder2);
-        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        cpaManager.submitBid(auctionId, bidder2Demands, type(uint256).max);
         vm.stopPrank();
 
         // End first round - this should automatically start the second round (due to excess demand)
@@ -174,11 +174,11 @@ contract CPAClockPhaseTest is CPATestBase {
         bidder2Demands2[1] = 60 * 10**asset2Token.decimals(); // Reduced from 70
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, bidder1Demands2, calculateBidValue(bidder1Demands2));
+        cpaManager.submitBid(auctionId, bidder1Demands2, type(uint256).max);
         vm.stopPrank();
         
         vm.startPrank(testBidder2);
-        cpaManager.submitBid(auctionId, bidder2Demands2, calculateBidValue(bidder2Demands2));
+        cpaManager.submitBid(auctionId, bidder2Demands2, type(uint256).max);
         vm.stopPrank();
 
         // End second round - this should automatically start the third round
@@ -229,11 +229,10 @@ contract CPAClockPhaseTest is CPATestBase {
         zeroDemands[0] = 0;
         zeroDemands[1] = 0;
         
-        uint256 requiredStake = calculateBidValue(zeroDemands);
         approveNumeraireForBidder(testBidder, type(uint256).max);
         
         vm.prank(testBidder);
-        cpaManager.submitBid(auctionId, zeroDemands, requiredStake);
+        cpaManager.submitBid(auctionId, zeroDemands, type(uint256).max);
         
         // Verify the zero bid was accepted using mapping-based storage
         uint256[] memory zeroDemandsCheck = cpaManager.getBidderDemands(auctionId, testBidder);
@@ -266,11 +265,10 @@ contract CPAClockPhaseTest is CPATestBase {
         largeDemands[0] = 1000000 * 10**18; // Large but reasonable
         largeDemands[1] = 500000 * 10**18;
         
-        uint256 requiredStake = calculateBidValue(largeDemands) * 2;
         approveNumeraireForBidder(testBidder, type(uint256).max);
         
         vm.prank(testBidder);
-        cpaManager.submitBid(auctionId, largeDemands, requiredStake);
+        cpaManager.submitBid(auctionId, largeDemands, type(uint256).max);
         
         // Verify the large bid was accepted using mapping-based storage
         uint256[] memory largeDemandsCheck = cpaManager.getBidderDemands(auctionId, testBidder);
@@ -299,12 +297,11 @@ contract CPAClockPhaseTest is CPATestBase {
         demands[0] = 100 * 10**18;
         demands[1] = 50 * 10**18;
         
-        uint256 requiredStake = calculateBidValue(demands) * 2;
         approveNumeraireForBidder(testBidder, type(uint256).max);
         
         vm.prank(testBidder);
         // This should succeed since the proxy commitment check is commented out
-        cpaManager.submitBid(auctionId, demands, requiredStake);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
     }
 
     function test_CommitToBidder_ProxyCommitsToMultipleBidders() public {
@@ -423,12 +420,11 @@ contract CPAClockPhaseTest is CPATestBase {
         demands[0] = 100 * 10**18;
         demands[1] = 50 * 10**18;
         
-        uint256 requiredStake = calculateBidValue(demands);
         approveNumeraireForBidder(testBidder, type(uint256).max);
         
         vm.prank(testBidder);
         vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, uint8(AuctionTypes.AuctionPhase.Clock), uint8(AuctionTypes.AuctionPhase.Setup)));
-        cpaManager.submitBid(auctionId, demands, requiredStake);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
     }
 
     function test_SubmitBid_InvalidAuctionId() public {
@@ -457,12 +453,11 @@ contract CPAClockPhaseTest is CPATestBase {
         demands[0] = 100 * 10**18;
         demands[1] = 50 * 10**18;
         
-        uint256 requiredStake = calculateBidValue(demands);
         approveNumeraireForBidder(testBidder, type(uint256).max);
         
         vm.prank(testBidder);
         vm.expectRevert(); // Should revert due to invalid auction
-        cpaManager.submitBid(invalidAuctionId, demands, requiredStake);
+        cpaManager.submitBid(invalidAuctionId, demands, type(uint256).max);
     }
 
     // ============ ACTIVITY RULE TESTS ============
@@ -492,11 +487,11 @@ contract CPAClockPhaseTest is CPATestBase {
         bidder2Demands[1] = 40 * 10**asset2Token.decimals();
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        cpaManager.submitBid(auctionId, bidder1Demands, type(uint256).max);
         vm.stopPrank();
         
         vm.startPrank(testBidder2);
-        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        cpaManager.submitBid(auctionId, bidder2Demands, type(uint256).max);
         vm.stopPrank();
 
         // End round to trigger price increase (excess demand on asset1)
@@ -542,11 +537,11 @@ contract CPAClockPhaseTest is CPATestBase {
         bidder2Demands[1] = 40 * 10**asset2Token.decimals();
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        cpaManager.submitBid(auctionId, bidder1Demands, type(uint256).max);
         vm.stopPrank();
 
         vm.startPrank(testBidder2);
-        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        cpaManager.submitBid(auctionId, bidder2Demands, type(uint256).max);
         vm.stopPrank();
 
         // End round to trigger price increase (excess demand on asset1)
@@ -561,7 +556,7 @@ contract CPAClockPhaseTest is CPATestBase {
         reducedDemands[1] = 25 * 10**asset2Token.decimals(); // Reduced from 30 (valid)
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, reducedDemands, calculateBidValue(reducedDemands));
+        cpaManager.submitBid(auctionId, reducedDemands, type(uint256).max);
         vm.stopPrank();
 
         // Verify the reduced demands were accepted
@@ -597,11 +592,11 @@ contract CPAClockPhaseTest is CPATestBase {
         bidder2Demands[1] = 30 * 10**asset2Token.decimals();
         
         vm.startPrank(testBidder1);
-        cpaManager.submitBid(auctionId, bidder1Demands, calculateBidValue(bidder1Demands));
+        cpaManager.submitBid(auctionId, bidder1Demands, type(uint256).max);
         vm.stopPrank();
         
         vm.startPrank(testBidder2);
-        cpaManager.submitBid(auctionId, bidder2Demands, calculateBidValue(bidder2Demands));
+        cpaManager.submitBid(auctionId, bidder2Demands, type(uint256).max);
         vm.stopPrank();
 
         // End round - should automatically end clock phase due to no excess demand
@@ -744,5 +739,706 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(asset2LastOversoldTick2, asset2LastOversoldTick1, "Asset2 should keep lastOversoldTick from round 1");
         
         console.log("Test completed successfully - excessDemand and lastOversoldTick tracking working correctly");
+    }
+
+    // ============ dropout() Function Tests ============
+
+    function test_Dropout_SuccessInClockPhase() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit bid to establish stake
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 50 * 10**asset1Token.decimals();
+        demands[1] = 30 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
+
+        // Verify bidder is in activeBidders and has stake
+        address activeBidder = cpaManager.activeBidders(auctionId, 0);
+        assertEq(activeBidder, testBidder, "Active bidder should be testBidder");
+        
+        uint256 bidderStake = cpaManager.bidderStake(auctionId, testBidder);
+        assertGt(bidderStake, 0, "Bidder should have stake");
+
+        // Dropout
+        vm.prank(testBidder);
+        cpaManager.dropout(auctionId);
+
+        // Verify bidderStake is set to 0
+        uint256 bidderStakeAfter = cpaManager.bidderStake(auctionId, testBidder);
+        assertEq(bidderStakeAfter, 0, "Bidder stake should be 0 after dropout");
+
+        // Verify bidder removed from activeBidders
+        // After dropout, there should be no active bidders (index 0 should be address(0))
+        address activeBidderAfter = cpaManager.activeBidders(auctionId, 0);
+        assertEq(activeBidderAfter, address(0), "Should have 0 active bidders after dropout");
+
+        // Verify protocol penalties accumulated
+        uint256 protocolPenalties = cpaManager.protocolPenalties(auctionId);
+        assertGt(protocolPenalties, 0, "Protocol penalties should be accumulated");
+    }
+
+    function test_Dropout_CorrectPenaltyCalculation() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder with known stake amount
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit bid with known stake amount
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**asset1Token.decimals(); // Higher demands for larger stake
+        demands[1] = 50 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
+
+        // Get the actual stake amount
+        uint256 stakeAmount = cpaManager.bidderStake(auctionId, testBidder);
+        assertGt(stakeAmount, 0, "Bidder should have stake");
+
+        // Get auction config to check dropoutSlashRatio
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        uint256 dropoutSlashRatio = auctionInfo.config.dropoutSlashRatio;
+        
+        // Calculate expected penalty and refund
+        uint256 expectedPenalty = (stakeAmount * dropoutSlashRatio) / 10000;
+        uint256 expectedRefund = stakeAmount - expectedPenalty;
+
+        // Get initial protocol penalties
+        uint256 initialProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+
+        // Dropout
+        vm.prank(testBidder);
+        cpaManager.dropout(auctionId);
+
+        // Verify penalty calculation
+        uint256 finalProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        uint256 actualPenalty = finalProtocolPenalties - initialProtocolPenalties;
+        assertEq(actualPenalty, expectedPenalty, "Penalty should match expected calculation");
+        
+        // Verify bidder stake is 0
+        uint256 bidderStakeAfter = cpaManager.bidderStake(auctionId, testBidder);
+        assertEq(bidderStakeAfter, 0, "Bidder stake should be 0 after dropout");
+    }
+
+    function test_Dropout_RevertNonBidder() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create address that hasn't submitted bid
+        address nonBidder = makeAddr("nonBidder");
+        createBidder(nonBidder, 100000 * 10**18);
+
+        // Attempt dropout without having submitted bid
+        vm.prank(nonBidder);
+        vm.expectRevert();
+        cpaManager.dropout(auctionId);
+    }
+
+    function test_Dropout_RevertWrongPhase() public {
+        // Create auction but don't start clock phase (stay in Setup)
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Setup), "Should be in Setup phase");
+
+        // Create bidder
+        address testBidder = makeAddr("testBidder");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Attempt dropout in Setup phase
+        vm.prank(testBidder);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Clock, AuctionTypes.AuctionPhase.Setup));
+        cpaManager.dropout(auctionId);
+    }
+
+    function test_Dropout_MultipleBiddersDropout() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create 3 bidders
+        address bidder1 = makeAddr("bidder1");
+        address bidder2 = makeAddr("bidder2");
+        address bidder3 = makeAddr("bidder3");
+        address proxy1 = makeAddr("proxy1");
+        address proxy2 = makeAddr("proxy2");
+        address proxy3 = makeAddr("proxy3");
+
+        createBidder(bidder1, 10000000 * 10**18);
+        createBidder(bidder2, 10000000 * 10**18);
+        createBidder(bidder3, 10000000 * 10**18);
+
+        // Generate commit hashes
+        bytes32 saltA1 = keccak256("saltA1");
+        bytes32 saltB1 = keccak256("saltB1");
+        bytes32 commitHash1 = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1, saltB1);
+        
+        bytes32 saltA2 = keccak256("saltA2");
+        bytes32 saltB2 = keccak256("saltB2");
+        bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
+        
+        bytes32 saltA3 = keccak256("saltA3");
+        bytes32 saltB3 = keccak256("saltB3");
+        bytes32 commitHash3 = CommitReveal.generateCommitHash(bidder3, proxy3, saltA3, saltB3);
+
+        // Proxies commit
+        vm.prank(proxy1);
+        cpaManager.commitToBidder(auctionId, commitHash1);
+        vm.prank(proxy2);
+        cpaManager.commitToBidder(auctionId, commitHash2);
+        vm.prank(proxy3);
+        cpaManager.commitToBidder(auctionId, commitHash3);
+
+        // All submit bids in round 1 with high demands to ensure excess demand
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 100 * 10**asset1Token.decimals(); // Increased to ensure excess demand
+        demands1[1] = 80 * 10**asset2Token.decimals();  // Increased to ensure excess demand
+        
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 90 * 10**asset1Token.decimals();   // Increased to ensure excess demand
+        demands2[1] = 70 * 10**asset2Token.decimals();   // Increased to ensure excess demand
+        
+        uint256[] memory demands3 = new uint256[](2);
+        demands3[0] = 85 * 10**asset1Token.decimals();  // Increased to ensure excess demand
+        demands3[1] = 65 * 10**asset2Token.decimals();  // Increased to ensure excess demand
+
+        approveNumeraireForBidder(bidder1, type(uint256).max);
+        approveNumeraireForBidder(bidder2, type(uint256).max);
+        approveNumeraireForBidder(bidder3, type(uint256).max);
+
+        vm.prank(bidder1);
+        cpaManager.submitBid(auctionId, demands1, type(uint256).max);
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2, type(uint256).max);
+        vm.prank(bidder3);
+        cpaManager.submitBid(auctionId, demands3, type(uint256).max);
+
+        // Verify all 3 bidders are active
+        address activeBidder1 = cpaManager.activeBidders(auctionId, 0);
+        address activeBidder2 = cpaManager.activeBidders(auctionId, 1);
+        address activeBidder3 = cpaManager.activeBidders(auctionId, 2);
+        assertTrue(activeBidder1 == bidder1 || activeBidder1 == bidder2 || activeBidder1 == bidder3, "Should have active bidders");
+
+        // Bidder1 drops out
+        vm.prank(bidder1);
+        cpaManager.dropout(auctionId);
+
+        // Verify bidder2 and bidder3 still active
+        // After dropout, bidder1 becomes address(0) but stays in the array
+        address activeBidder1After = cpaManager.activeBidders(auctionId, 0);
+        address activeBidder2After = cpaManager.activeBidders(auctionId, 1);
+        address activeBidder3After = cpaManager.activeBidders(auctionId, 2);
+        
+        // bidder1 should be address(0) (dropped out)
+        assertEq(activeBidder1After, address(0), "Bidder1 should be dropped (address(0))");
+        // bidder2 and bidder3 should still be active
+        assertTrue(activeBidder2After == bidder2 || activeBidder2After == bidder3, "Bidder2 or bidder3 should be active at index 1");
+        assertTrue(activeBidder3After == bidder2 || activeBidder3After == bidder3, "Bidder2 or bidder3 should be active at index 2");
+
+        // End round 1, start round 2
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Bidder2 and bidder3 submit new bids in round 2
+        // Must respect activity rule: if price increased, new demand <= previous demand
+        uint256[] memory demands2_2 = new uint256[](2);
+        demands2_2[0] = 80 * 10**asset1Token.decimals();  // Reduced from 90 to respect activity rule
+        demands2_2[1] = 60 * 10**asset2Token.decimals();  // Reduced from 70 to respect activity rule
+        
+        uint256[] memory demands3_2 = new uint256[](2);
+        demands3_2[0] = 75 * 10**asset1Token.decimals();  // Reduced from 85 to respect activity rule
+        demands3_2[1] = 55 * 10**asset2Token.decimals();  // Reduced from 65 to respect activity rule
+
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2_2, type(uint256).max);
+        vm.prank(bidder3);
+        cpaManager.submitBid(auctionId, demands3_2, type(uint256).max);
+
+        // Bidder2 drops out
+        vm.prank(bidder2);
+        cpaManager.dropout(auctionId);
+
+        // Verify only bidder3 active
+        // After round 2 starts, activeBidders array is reset, so only contains current round bidders
+        // bidder1 was dropped in round 1, so not in round 2 activeBidders
+        // bidder2 was dropped in round 2, so becomes address(0) in round 2 activeBidders
+        // bidder3 is still active in round 2
+        address activeBidder2Final = cpaManager.activeBidders(auctionId, 0);
+        address activeBidder3Final = cpaManager.activeBidders(auctionId, 1);
+        
+        // activeBidders[0] should be address(0) (bidder2 dropped out in round 2)
+        assertEq(activeBidder2Final, address(0), "Bidder2 should be dropped (address(0))");
+        // activeBidders[1] should be bidder3 (only remaining active bidder)
+        assertEq(activeBidder3Final, bidder3, "Only bidder3 should be active");
+
+        // Verify protocol penalties accumulated from both dropouts
+        uint256 protocolPenalties = cpaManager.protocolPenalties(auctionId);
+        assertGt(protocolPenalties, 0, "Protocol penalties should be accumulated from both dropouts");
+    }
+
+    function test_Dropout_CannotDropoutTwice() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit bid
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 50 * 10**asset1Token.decimals();
+        demands[1] = 30 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
+
+        // First dropout - should succeed
+        vm.prank(testBidder);
+        cpaManager.dropout(auctionId);
+
+        // Verify bidder stake is 0
+        uint256 bidderStake = cpaManager.bidderStake(auctionId, testBidder);
+        assertEq(bidderStake, 0, "Bidder stake should be 0 after first dropout");
+
+        // Attempt to dropout again - should revert
+        vm.prank(testBidder);
+        vm.expectRevert();
+        cpaManager.dropout(auctionId);
+    }
+
+    // ============ cancelAuction() Function Tests ============
+
+    function test_CancelAuction_SuccessInClockPhase() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Verify auction is in Clock phase
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Clock), "Should be in Clock phase");
+
+        // Cancel auction
+        vm.prank(auctioneer);
+        cpaManager.cancelAuction(auctionId);
+
+        // Verify auction status is Cancelled
+        AuctionTypes.AuctionInfo memory auctionInfoAfter = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfoAfter.currentStatus), uint8(AuctionTypes.AuctionStatus.Cancelled), "Auction should be cancelled");
+    }
+
+    function test_CancelAuction_WithBidsSubmitted() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and submit bid
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit bid
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 30 * 10**asset1Token.decimals();
+        demands[1] = 35 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
+
+        // Verify bidder has stake
+        uint256 bidderStake = cpaManager.bidderStake(auctionId, testBidder);
+        assertGt(bidderStake, 0, "Bidder should have stake");
+
+        // Cancel auction
+        vm.prank(auctioneer);
+        cpaManager.cancelAuction(auctionId);
+
+        // Verify auction status is Cancelled
+        AuctionTypes.AuctionInfo memory auctionInfoAfter = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfoAfter.currentStatus), uint8(AuctionTypes.AuctionStatus.Cancelled), "Auction should be cancelled");
+
+        // Verify bidder can reclaim full stake (no penalty for cancelled auctions)
+        uint256 initialBalance = numeraireToken.balanceOf(testBidder);
+        vm.prank(testBidder);
+        cpaManager.reclaimStake(auctionId);
+        uint256 finalBalance = numeraireToken.balanceOf(testBidder);
+        
+        assertGt(finalBalance, initialBalance, "Bidder should receive stake back");
+        assertEq(finalBalance - initialBalance, bidderStake, "Bidder should receive full stake back (no penalty)");
+    }
+
+    function test_CancelAuction_CannotCancelAfterClock() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and submit bid
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 100000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit bid
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 30 * 10**asset1Token.decimals();
+        demands[1] = 35 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands, type(uint256).max);
+
+        // End clock phase and transition to proxy phase
+        vm.prank(auctioneer);
+        cpaManager.endClockPhase(auctionId);
+
+        // Verify we're now in Proxy phase
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        assertEq(uint8(auctionInfo.currentPhase), uint8(AuctionTypes.AuctionPhase.Proxy), "Should be in Proxy phase");
+
+        // Try to cancel auction - should revert
+        vm.prank(auctioneer);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.CannotCancelInThisPhase.selector, auctionId, AuctionTypes.AuctionPhase.Proxy));
+        cpaManager.cancelAuction(auctionId);
+    }
+
+    // ============ Stake Management Tests ============
+
+    function test_StakeTracking_SingleBidder() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 10000000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit first bid with high demands to ensure overdemand
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 30000 * 10**asset1Token.decimals(); // High demand to cause overdemand (30k vs 50k available)
+        demands1[1] = 35000 * 10**asset2Token.decimals(); // High demand to cause overdemand (35k vs 60k available)
+        
+        uint256 requiredStake1 = calculateBidValue(demands1);
+        uint256 allocatorReward1 = calculateBidValue(demands1) * allocatorRewardPct / 10000;
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands1, requiredStake1 + allocatorReward1);
+
+        // Verify initial stake
+        uint256 stake1 = cpaManager.bidderStake(auctionId, testBidder);
+        assertEq(stake1, requiredStake1, "Bidder should have stake equal to required stake after first bid");
+
+        // End round 1, start round 2
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Submit second bid with same demands (to respect activity rule after price increase)
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 30000 * 10**asset1Token.decimals(); // Same demand (activity rule)
+        demands2[1] = 35000 * 10**asset2Token.decimals();  // Same demand (activity rule)
+        
+        uint256 requiredStake2 = calculateBidValue(demands2);
+        uint256 allocatorReward2 = calculateBidValue(demands2) * allocatorRewardPct / 10000;
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands2, requiredStake2 + allocatorReward2);
+
+        // Verify stake increased by the difference (if requiredStake2 > requiredStake1)
+        uint256 stake2 = cpaManager.bidderStake(auctionId, testBidder);
+        if (requiredStake2 > requiredStake1) {
+            assertEq(stake2, requiredStake2, "Stake should be updated to new required stake");
+        } else {
+            assertEq(stake2, requiredStake1, "Stake should remain unchanged if new required stake is lower");
+        }
+    }
+
+    function test_StakeTracking_MultipleBidders() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create 3 bidders
+        address bidder1 = makeAddr("bidder1");
+        address bidder2 = makeAddr("bidder2");
+        address bidder3 = makeAddr("bidder3");
+        address proxy1 = makeAddr("proxy1");
+        address proxy2 = makeAddr("proxy2");
+        address proxy3 = makeAddr("proxy3");
+
+        createBidder(bidder1, 10000000 * 10**18);
+        createBidder(bidder2, 10000000 * 10**18);
+        createBidder(bidder3, 10000000 * 10**18);
+
+        // Generate commit hashes
+        bytes32 saltA1 = keccak256("saltA1");
+        bytes32 saltB1 = keccak256("saltB1");
+        bytes32 commitHash1 = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1, saltB1);
+        
+        bytes32 saltA2 = keccak256("saltA2");
+        bytes32 saltB2 = keccak256("saltB2");
+        bytes32 commitHash2 = CommitReveal.generateCommitHash(bidder2, proxy2, saltA2, saltB2);
+        
+        bytes32 saltA3 = keccak256("saltA3");
+        bytes32 saltB3 = keccak256("saltB3");
+        bytes32 commitHash3 = CommitReveal.generateCommitHash(bidder3, proxy3, saltA3, saltB3);
+
+        // Proxies commit
+        vm.prank(proxy1);
+        cpaManager.commitToBidder(auctionId, commitHash1);
+        vm.prank(proxy2);
+        cpaManager.commitToBidder(auctionId, commitHash2);
+        vm.prank(proxy3);
+        cpaManager.commitToBidder(auctionId, commitHash3);
+
+        // All submit bids with different stake amounts
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 100 * 10**asset1Token.decimals();
+        demands1[1] = 80 * 10**asset2Token.decimals();
+        
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 90 * 10**asset1Token.decimals();
+        demands2[1] = 70 * 10**asset2Token.decimals();
+        
+        uint256[] memory demands3 = new uint256[](2);
+        demands3[0] = 85 * 10**asset1Token.decimals();
+        demands3[1] = 65 * 10**asset2Token.decimals();
+
+        approveNumeraireForBidder(bidder1, type(uint256).max);
+        approveNumeraireForBidder(bidder2, type(uint256).max);
+        approveNumeraireForBidder(bidder3, type(uint256).max);
+
+        // Calculate bid values before prank calls
+        uint256 requiredStake1 = calculateBidValue(demands1);
+        uint256 allocatorReward1 = calculateBidValue(demands1) * allocatorRewardPct / 10000;
+        uint256 requiredStake2 = calculateBidValue(demands2);
+        uint256 allocatorReward2 = calculateBidValue(demands2) * allocatorRewardPct / 10000;
+        uint256 requiredStake3 = calculateBidValue(demands3);
+        uint256 allocatorReward3 = calculateBidValue(demands3) * allocatorRewardPct / 10000;
+
+        // Submit bids
+        vm.prank(bidder1);
+        cpaManager.submitBid(auctionId, demands1, requiredStake1 + allocatorReward1);
+        vm.prank(bidder2);
+        cpaManager.submitBid(auctionId, demands2, requiredStake2 + allocatorReward2);
+        vm.prank(bidder3);
+        cpaManager.submitBid(auctionId, demands3, requiredStake3 + allocatorReward3);
+
+        // Verify all bidders have stakes equal to their calculated required stakes
+        uint256 stake1 = cpaManager.bidderStake(auctionId, bidder1);
+        uint256 stake2 = cpaManager.bidderStake(auctionId, bidder2);
+        uint256 stake3 = cpaManager.bidderStake(auctionId, bidder3);
+
+        assertEq(stake1, requiredStake1, "Bidder1 stake should equal required stake");
+        assertEq(stake2, requiredStake2, "Bidder2 stake should equal required stake");
+        assertEq(stake3, requiredStake3, "Bidder3 stake should equal required stake");
+
+        // Verify stakes are different based on demands (higher demands = higher stakes)
+        assertGt(stake1, stake2, "Bidder1 should have higher stake than bidder2 (higher demands)");
+        assertGt(stake2, stake3, "Bidder2 should have higher stake than bidder3 (higher demands)");
+
+        // Verify PoolManager holds all the numeraire tokens
+        uint256 poolManagerBalance = numeraireToken.balanceOf(address(poolManager));
+        uint256 totalStake = requiredStake1 + requiredStake2 + requiredStake3 + allocatorReward1 + allocatorReward2 + allocatorReward3;
+        assertEq(poolManagerBalance, totalStake, "PoolManager should hold all numeraire tokens PLUS allocator rewards");
+
+        // Verify CPAManager has ERC6909 claims for the numeraire
+        // Check ERC6909 claims balance using the numeraire currency ID
+        uint256 cpaManagerERC6909Balance = IERC6909Claims(address(poolManager)).balanceOf(address(cpaManager), numeraireCurrencyId);
+        assertEq(cpaManagerERC6909Balance, totalStake, "CPAManager should have ERC6909 claims equal to total stake PLUS allocator rewards");
+    }
+
+    function test_StakeUpdate_OnNewBid() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 10000000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit first bid
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 30000 * 10**asset1Token.decimals();
+        demands1[1] = 35000 * 10**asset2Token.decimals();
+        
+        uint256 requiredStake1 = calculateBidValue(demands1);
+        uint256 allocatorReward1 = calculateBidValue(demands1) * allocatorRewardPct / 10000;
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands1, requiredStake1 + allocatorReward1);
+
+        // Get initial stake
+        uint256 initialStake = cpaManager.bidderStake(auctionId, testBidder);
+        assertGt(initialStake, 0, "Bidder should have initial stake");
+
+        // End round 1, start round 2
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Submit second bid with same demands (to respect activity rule after price increase)
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 30000 * 10**asset1Token.decimals(); // Same demand (activity rule)
+        demands2[1] = 35000 * 10**asset2Token.decimals();  // Same demand (activity rule)
+        
+        uint256 requiredStake2 = calculateBidValue(demands2);
+        uint256 allocatorReward2 = calculateBidValue(demands2) * allocatorRewardPct / 10000;
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands2, requiredStake2 + allocatorReward2);
+
+        // Verify stake behavior based on required stake difference
+        uint256 finalStake = cpaManager.bidderStake(auctionId, testBidder);
+        if (requiredStake2 > initialStake) {
+            assertEq(finalStake, requiredStake2, "Stake should increase to new required stake");
+        } else {
+            assertEq(finalStake, initialStake, "Stake should remain unchanged if new required stake is lower");
+        }
+    }
+
+    function test_StakeUpdate_OnReducedBid() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 10000000 * 10**18);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit first bid with high demands
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 30000 * 10**asset1Token.decimals(); // High demand
+        demands1[1] = 35000 * 10**asset2Token.decimals(); // High demand
+        
+        uint256 requiredStake1 = calculateBidValue(demands1);
+        uint256 allocatorReward1 = calculateBidValue(demands1) * allocatorRewardPct / 10000;
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands1, requiredStake1 + allocatorReward1);
+
+        // Get initial stake
+        uint256 initialStake = cpaManager.bidderStake(auctionId, testBidder);
+        assertGt(initialStake, 0, "Bidder should have initial stake");
+
+        // End round 1, start round 2
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(auctionId);
+
+        // Submit second bid with lower demands (stake should NOT decrease)
+        uint256[] memory demands2 = new uint256[](2);
+        demands2[0] = 28000 * 10**asset1Token.decimals(); // Lower demand (respects activity rule)
+        demands2[1] = 33000 * 10**asset2Token.decimals(); // Lower demand (respects activity rule)
+        
+        uint256 requiredStake2 = calculateBidValue(demands2);
+        uint256 allocatorReward2 = calculateBidValue(demands2) * allocatorRewardPct / 10000;
+        
+        vm.prank(testBidder);
+        cpaManager.submitBid(auctionId, demands2, requiredStake2 + allocatorReward2);
+
+        // Verify stake behavior: if requiredStake2 < initialStake, stake stays the same
+        // If requiredStake2 > initialStake, stake increases to requiredStake2
+        uint256 finalStake = cpaManager.bidderStake(auctionId, testBidder);
+        if (requiredStake2 > initialStake) {
+            assertEq(finalStake, requiredStake2, "Stake should increase if new required stake is higher");
+        } else {
+            assertEq(finalStake, initialStake, "Stake should remain unchanged if new required stake is lower");
+        }
     }
 }
