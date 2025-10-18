@@ -342,6 +342,47 @@ abstract contract CPATestBase is Deployers {
         cpaManager.moveDeposit(_auctionId, poolKey, depositAmount);
     }
 
+    /// @notice Deposit to all pools and start clock phase in one transaction
+    function depositAllAndStartClock(
+        AuctionId _auctionId,
+        PoolKey[] memory poolKeys,
+        uint256[] memory amounts
+    ) internal {
+        vm.prank(auctioneer);
+        cpaManager.depositAllAndStartClock(_auctionId, poolKeys, amounts);
+    }
+
+    /// @notice Setup complete auction with deposits and clock phase started
+    function setupCompleteAuction() internal returns (AuctionId) {
+        // Create auction
+        AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
+        
+        // Mint tokens to auctioneer
+        uint256 tokenAmount = 100000 * 10**18;
+        asset1Token.mint(auctioneer, tokenAmount);
+        asset2Token.mint(auctioneer, tokenAmount);
+        
+        // Approve CPAManager for both tokens
+        vm.prank(auctioneer);
+        asset1Token.approve(address(cpaManager), tokenAmount);
+        vm.prank(auctioneer);
+        asset2Token.approve(address(cpaManager), tokenAmount);
+        
+        // Prepare batch deposit data
+        PoolKey[] memory poolKeys = new PoolKey[](2);
+        uint256[] memory amounts = new uint256[](2);
+        
+        poolKeys[0] = asset1PoolKey;
+        poolKeys[1] = asset2PoolKey;
+        amounts[0] = 50000 * 10**18;
+        amounts[1] = 60000 * 10**18;
+        
+        // Deposit to all pools and start clock phase
+        depositAllAndStartClock(auctionId, poolKeys, amounts);
+        
+        return auctionId;
+    }
+
     /// @notice Mint tokens to auctioneer for deposits
     function mintTokensToAuctioneer(uint256 amount) internal {
         asset1Token.mint(auctioneer, amount);
