@@ -36,26 +36,24 @@ library CPAClockPhase {
 		AuctionId auctionId,
 		uint256[] calldata demands,
 		uint256 maxStakeAmount,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		mapping(address => uint256) storage bidderStake,
+		mapping(address => uint256) storage bidderBidPoints,
 		mapping(address => uint256[]) storage bids, // pre-read mapping
 		address[] storage activeBidders
 	) internal {
-		if (auctionInfo[auctionId].clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
-		if (demands.length != auctionInfo[auctionId].poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
+		address bidder = msg.sender;
+		
+		if (auctionInfo.clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
+		if (demands.length != auctionInfo.poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
 
 		// before storing the new demands, we need to validate the activity rule
 		// Get the bidder's previous demands
-		uint256[] memory previousDemands = bids[msg.sender];
+		uint256[] memory previousDemands = bids[bidder];
 		
 		// If bidder has previous demands, validate the activity rule
 		if (previousDemands.length > 0) {
-			bool[] memory changedPrices = auctionInfo[auctionId].changedPrices;
-			// Ensure arrays have the same length (not needed, this gets checked elsewhere)
-			// require(changedPrices.length == demands.length && changedPrices.length == previousDemands.length, "Array length mismatch");
-			
+			bool[] memory changedPrices = auctionInfo.changedPrices;
 			for(uint256 i = 0; i < changedPrices.length; i++) {
 				// If price increased (changedPrices[i] is true), new demand must be <= previous demand
 				if(changedPrices[i] && demands[i] > previousDemands[i]) {
@@ -65,41 +63,39 @@ library CPAClockPhase {
 		}
 		
 		// Calculate total bid value first
-		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionId, auctionInfo, poolInfo, self.manager());
-		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo[auctionId].commonNumeraire);
-		uint256 currentBidPoints = bidderBidPoints[auctionId][msg.sender];
-		uint256 requiredAdditionalStake = 0;
-		uint256 allocatorRewardAmount = 0;
+		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionInfo, self.manager());
+		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
 		
 		// Check if bidder already has sufficient bid points
+		uint256 currentBidPoints = bidderBidPoints[bidder];
+		uint256 requiredAdditionalStake = 0;
+		
 		if (requiredBidPoints > currentBidPoints) {
 			// Bidder needs additional stake
-			requiredAdditionalStake = totalValueInNumeraire - bidderStake[auctionId][msg.sender];
-			allocatorRewardAmount = (requiredAdditionalStake * auctionInfo[auctionId].config.allocatorRewardPct) / 10000;
+			uint256 currentStake = bidderStake[bidder];
+			requiredAdditionalStake = totalValueInNumeraire - currentStake;
+			uint256 allocatorRewardAmount = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
 
 			// Safety check: ensure the bidder's max stake is sufficient for the required amount
 			if (maxStakeAmount < requiredAdditionalStake + allocatorRewardAmount) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
 			
-			// Add the required stake amount to bidder (not the max, just what's needed)
-			bidderStake[auctionId][msg.sender] += requiredAdditionalStake;
-			
-			// Set bidder bid points
-			bidderBidPoints[auctionId][msg.sender] = computeBidPoints(bidderStake[auctionId][msg.sender], auctionInfo[auctionId].commonNumeraire); // this uses the required additional stake
+			// Update storage directly
+			bidderStake[bidder] += requiredAdditionalStake;
+			bidderBidPoints[bidder] = computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
 			
 			// Transfer the required stake amount from bidder to auction contract via pool manager
 			if (requiredAdditionalStake > 0) {
 				// Call swap callback to transfer tokens from user to pool manager
 				// and mint ERC6909 claims to hook
-				auctionInfo[auctionId].allocatorReward += allocatorRewardAmount; // add this to the allocator reward
+				auctionInfo.allocatorReward += allocatorRewardAmount; // add this to the allocator reward
 
 				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
-					sender: msg.sender,
-					numeraire: auctionInfo[auctionId].commonNumeraire,
+					sender: bidder,
+					numeraire: auctionInfo.commonNumeraire,
 					stake: int128(int256(requiredAdditionalStake + allocatorRewardAmount)), // stake amount in numeraire
 					deadline: block.timestamp + 60
 				});
-				bytes memory callbackData = abi.encode(uint8(0), abi.encode(callbackDataStruct));
-				self.manager().unlock(callbackData);
+				self.manager().unlock(abi.encode(uint8(0), abi.encode(callbackDataStruct)));
 			}
 		}
 		// would be interesting to eventually have "deposits" for bidders who use the system often
@@ -110,40 +106,21 @@ library CPAClockPhase {
 		
 		// Calculate the actual stake amount used for this bid
 		uint256 actualStakeAmount = totalValueInNumeraire > currentBidPoints ? totalValueInNumeraire - currentBidPoints : 0;
-		
-		// // Record the bid
-		// AuctionTypes.Bid memory bid = AuctionTypes.Bid({
-		// 	bidder: msg.sender,
-		// 	stakeAmount: actualStakeAmount,
-		// 	itemIds: new uint256[](0), // TODO: Add item IDs
-		// 	quantities: demands,
-		// 	round: auctionInfo[auctionId].currentRound,
-		// 	timestamp: block.timestamp
-		// });
-		
-		// auctionInfo[auctionId].roundBids.push(bid);
-		// I am going to change the above line and logic to instead just a mapping of bidder to demand vector.
-		// we need to keep the last bid for each bidder so that we can validate the activity rule
-		// and cross-round constraint validation
-		// however, we will need a list of bidders so that we can iterate over them and update the price for
-		// each pool if there is excess demand
 
-		// Store bidder demands in the mapping
-		bids[msg.sender] = demands;
+		// Store bidder demands
+		bids[bidder] = demands;
 		
 		// Note: Active bidders management should be handled by the calling function
 		// since activeBidders is a separate mapping in CPAStorage, not part of AuctionInfo
-		activeBidders.push(msg.sender);
+		activeBidders.push(bidder);
 		
-		emit IErrorsAndEvents.BidSubmitted(auctionId, msg.sender, requiredAdditionalStake, auctionInfo[auctionId].currentRound);
+		emit IErrorsAndEvents.BidSubmitted(auctionId, bidder, requiredAdditionalStake, auctionInfo.currentRound);
 		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
 		// would be useful if there are participant-limited auctions where more people want in than actually got in.
 	}
 
-
 	function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256 bidPoints) {
 		bidPoints = stakeAmount * 10**18 / (10**IERC20(numeraire).decimals());
-		// bidPoints = stakeAmount; // 1:1 ratio for now, could theoretically be anything
 	}
     
 	/**
@@ -157,15 +134,17 @@ library CPAClockPhase {
 	function processClockRound(
 		CPAStorage self,
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(address => uint256[])) storage bids,
+		mapping(address => uint256[]) storage bids,
 		mapping(AuctionId => address[]) storage activeBidders
 	) internal returns (uint256[] memory) {
 		// Calculate excess demand for each item and update pool prices accordingly
-		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
-		PoolId[] memory pools = getAllPools(auctionId, auctionInfo);
+		PoolId[] memory pools = getAllPools(auctionInfo);
 		uint256[] memory totalDemands = new uint256[](pools.length);
+
+		// Pre-index the activeBidders array for gas efficiency
+		address[] storage currentActiveBidders = activeBidders[auctionId];
 
 		// Note: changedPrices array is already initialized in openClockRound
 
@@ -175,10 +154,10 @@ library CPAClockPhase {
 			
 			// Sum up all demand for this item across all active bidders
 			address bidder;
-			for (uint256 j = 0; j < activeBidders[auctionId].length; j++) {
-				bidder = activeBidders[auctionId][j]; // just one read
+			for (uint256 j = 0; j < currentActiveBidders.length; j++) {
+				bidder = currentActiveBidders[j]; // just one read
 				if (bidder != address(0)) {
-					totalDemands[i] += bids[auctionId][bidder][i];
+					totalDemands[i] += bids[bidder][i];
 				}
 			}
 			
@@ -193,14 +172,15 @@ library CPAClockPhase {
 				(, int24 currentTick, , ) = StateLibrary.getSlot0(self.manager(), poolId);
 				poolInfo[poolId].lastOversoldTick = currentTick;
 				
-				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auction.commonNumeraire);
-				auction.changedPrices[i] = true; // Mark this price as changed
+				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auctionInfo.commonNumeraire);
+				auctionInfo.changedPrices[i] = true; // Mark this price as changed
 			} else {
-				auction.changedPrices[i] = false; // Mark this price as not changed
+				auctionInfo.changedPrices[i] = false; // Mark this price as not changed
 			}
 		}
 
-		delete activeBidders[auctionId]; // clear the active bidders list
+		// Clear the active bidders list using delete (more gas efficient)
+		delete activeBidders[auctionId];
 		
 		// Note: We don't clear bids here anymore since we want to keep them for activity rule validation
 		// The bids mapping persists across rounds until explicitly cleared
@@ -293,7 +273,7 @@ library CPAClockPhase {
 		// for now.
 		// EMA formula: R_t = alpha * r_t + (1 - alpha) * R_{t-1}
 		uint256 alpha = 5e17; // 1/2 in 1e18 precision
-		uint256 revenue = calculateBidValueWithMemoryDemands(totalDemands, auctionId, auctionInfo, poolInfo, poolManager);
+		uint256 revenue = calculateBidValueWithMemoryDemands(totalDemands, auctionInfo, poolManager);
 		uint256 R_t = _computeEMA(revenue, auctionInfo.lastRevenue, alpha);
 		// if (R_t < revenue * 0.005) {
 		if ((R_t * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
@@ -324,45 +304,13 @@ library CPAClockPhase {
 	/**
 	 * @notice Calculate bid value
 	 * @param demands Array of demands
-	 * @param auctionId The auction ID
 	 * @param auctionInfo Mapping for auction info
-	 * @param poolInfo Mapping for pool info
 	 * @param poolManager The pool manager instance
 	 * @return totalValue Total value of the bid
 	 */
 	function calculateBidValue(
 		uint256[] calldata demands,
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		IPoolManager poolManager
-	) internal view returns (uint256 totalValue) {
-		// Get all pool keys for this auction
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
-		
-		// Calculate inner product: sum(demands[i] * prices[i])
-		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-			// Get the pool ID and its current price from the pool
-			PoolId poolId = poolKeys[i].toId();
-			uint256 price;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo[auctionId].commonNumeraire) {
-				// Since the numeraire is currency0, we need to get the price of currency1
-				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
-			} else {
-				// Since the numeraire is currency1, we need to get the price of currency0
-				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
-			}
-			
-			// Add to total value: demand * price
-			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
-		}
-	}
-
-	function calculateBidValueWithMemoryDemands(
-		uint256[] memory demands,
-		AuctionId auctionId,
 		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		IPoolManager poolManager
 	) internal view returns (uint256 totalValue) {
 		// Get all pool keys for this auction
@@ -371,7 +319,6 @@ library CPAClockPhase {
 		// Calculate inner product: sum(demands[i] * prices[i])
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
 			// Get the pool ID and its current price from the pool
-			PoolId poolId = poolKeys[i].toId();
 			uint256 price;
 			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
 				// Since the numeraire is currency0, we need to get the price of currency1
@@ -386,18 +333,29 @@ library CPAClockPhase {
 		}
 	}
 
-
-	/**
-	 * @notice Get total bidders
-	 * @param auctionId The auction ID
-	 * @param activeBidders Mapping for active bidders
-	 * @return totalBidders Total number of bidders
-	 */
-	function getTotalBidders(
-		AuctionId auctionId,
-		address[] storage activeBidders
-	) internal view returns (uint256 totalBidders) {
-		return activeBidders.length;
+	function calculateBidValueWithMemoryDemands(
+		uint256[] memory demands,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		IPoolManager poolManager
+	) internal view returns (uint256 totalValue) {
+		// Get all pool keys for this auction
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		
+		// Calculate inner product: sum(demands[i] * prices[i])
+		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
+			// Get the pool ID and its current price from the pool
+			uint256 price;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
+				// Since the numeraire is currency0, we need to get the price of currency1
+				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+			} else {
+				// Since the numeraire is currency1, we need to get the price of currency0
+				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+			}
+			
+			// Add to total value: demand * price
+			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
+		}
 	}
 
 	/**
@@ -415,108 +373,14 @@ library CPAClockPhase {
 	}
 
 	/**
-	 * @notice Set current round in AuctionInfo
-	 * @param auctionId The auction ID
-	 * @param _currentRound The new round number
-	 * @param auctionInfo Mapping for auction info
-	 */
-	function setCurrentRound(
-		AuctionId auctionId, 
-		uint256 _currentRound,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal {
-		auctionInfo[auctionId].currentRound = _currentRound;
-	}
-
-	/**
-	 * @notice Add a bidder to active bidders list
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param activeBidders Mapping for active bidders
-	 */
-	function addActiveBidder(
-		AuctionId auctionId, 
-		address bidder,
-		mapping(AuctionId => address[]) storage activeBidders
-	) internal {
-		activeBidders[auctionId].push(bidder);
-	}
-
-	/**
-	 * @notice Set dropped bidder status
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param dropped Whether the bidder is dropped
-	 * @param droppedBidders Mapping for dropped bidders
-	 */
-	function setDroppedBidder(
-		AuctionId auctionId, 
-		address bidder, 
-		bool dropped,
-		mapping(AuctionId => mapping(address => bool)) storage droppedBidders
-	) internal {
-		droppedBidders[auctionId][bidder] = dropped;
-	}
-
-	/**
-	 * @notice Clear bidder stake and bid points
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param bidderStake Mapping for bidder stakes
-	 * @param bidderBidPoints Mapping for bidder bid points
-	 */
-	function clearBidderData(
-		AuctionId auctionId, 
-		address bidder,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderStake,
-		mapping(AuctionId => mapping(address => uint256)) storage bidderBidPoints
-	) internal {
-		bidderStake[auctionId][bidder] = 0;
-		bidderBidPoints[auctionId][bidder] = 0;
-	}
-
-	/**
-	 * @notice Get bidder demands
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param bids Mapping for bidder demands
-	 * @return The bidder's demand array
-	 */
-	function getBidderDemands(
-		AuctionId auctionId, 
-		address bidder,
-		mapping(AuctionId => mapping(address => uint256[])) storage bids
-	) internal view returns (uint256[] memory) {
-		return bids[auctionId][bidder];
-	}
-
-	/**
-	 * @notice Set bidder demands
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address
-	 * @param demands The demand array
-	 * @param bids Mapping for bidder demands
-	 */
-	function setBidderDemands(
-		AuctionId auctionId, 
-		address bidder,
-		uint256[] memory demands,
-		mapping(AuctionId => mapping(address => uint256[])) storage bids
-	) internal {
-		bids[auctionId][bidder] = demands;
-	}
-
-	/**
 	 * @notice Get all pool IDs for an auction
-	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
+	 * @param auctionInfo Storage reference to auction info
 	 * @return Array of all pool IDs
 	 */
 	function getAllPools(
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+		AuctionTypes.AuctionInfo storage auctionInfo
 	) internal view returns (PoolId[] memory) {
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		PoolId[] memory poolIds = new PoolId[](poolKeys.length);
 		
 		for (uint256 i = 0; i < poolKeys.length; i++) {
@@ -565,15 +429,11 @@ library CPAClockPhase {
 
 	/**
 	 * @notice Revert prices to last oversold ticks for any items currently undersold
-	 * @param self The contract instance
-	 * @param auctionId The auction ID
 	 * @param auctionInfo Storage reference to auction info
 	 * @param poolInfo Storage reference to pool info
 	 * @param poolManager The pool manager instance
 	 */
 	function revertUndersoldPrices(
-		CPAStorage self,
-		AuctionId auctionId,
 		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		IPoolManager poolManager
