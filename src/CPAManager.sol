@@ -302,7 +302,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
 		// Process round results (calculate excess demand and update prices)
-		uint256[] memory totalDemands = CPAClockPhase.processClockRound(this, auctionId, auctionInfo, poolInfo, bids, activeBidders);
+		uint256[] memory totalDemands = CPAClockPhase.processClockRound(this, auctionId, auctionInfo[auctionId], poolInfo, bids[auctionId], activeBidders);
 		
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
@@ -331,7 +331,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		}
 		
 		// Handle undersell by reverting to last oversold prices
-		CPAClockPhase.revertUndersoldPrices(this, auctionId, auctionInfo[auctionId], poolInfo, manager);
+		CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], poolInfo, manager);
 		
 		// Transition to proxy phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
@@ -361,10 +361,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			auctionId,
 			demands,
 			maxStakeAmount,
-			auctionInfo,
-			bidderStake,
-			bidderBidPoints,
-			poolInfo,
+			auctionInfo[auctionId],
+			bidderStake[auctionId],
+			bidderBidPoints[auctionId],
 			bids[auctionId],
 			activeBidders[auctionId]
 		);
