@@ -16,6 +16,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 // wanted to use Ownable2Step but we were getting some errors
 // review this thread: https://github.com/OpenZeppelin/openzeppelin-contracts/issues/4690
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "./base/CPAStorage.sol";
@@ -27,29 +28,24 @@ import { CPASettlementPhase } from "./libraries/CPASettlementPhase.sol";
 
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "./utils/CommitReveal.sol";
+import { Callbacks } from "./utils/Callbacks.sol";
 import { AuctionTypes } from "./types/AuctionTypes.sol";
 import { AuctionId } from "./types/AuctionId.sol";
 import { BundleId } from "./types/BundleId.sol";
-import { CPAHook } from "./CPAHook.sol";
+import { ICPAHook } from "./interfaces/ICPAHook.sol";
 
 /**
  * @title CPAManager
  * @notice Main auction manager implementing clock-proxy auction with commit-reveal privacy
  * @author notthatintodefi.eth
  */
-contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
+contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, Callbacks {
 	using AuctionTypes for *;
 	using PoolIdLibrary for PoolKey;
 	using CurrencySettler for Currency;
 	using BalanceDeltaLibrary for BalanceDelta;
 	using CurrencyLibrary for Currency;
 	using SafeCast for *;
-
-	// ========================================
-	// CONSTANTS AND STATE VARIABLES
-	// ========================================
-
-	uint256 constant twoPow96 = 2**96;
 
 	// ========================================
 	// CONSTRUCTOR
@@ -59,6 +55,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Constructor
 	 * @param _poolManager The V4 pool manager
 	 * @param _owner The auction owner
+	 * @param _cpaAuctionHookAddr The CPA auction hook address
+	 * @param _protocolWallet The protocol wallet address for penalty collection
 	 */
 	constructor(
 		IPoolManager _poolManager,
@@ -142,7 +140,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	/**
 	 * @notice Pause the auction
 	 */
-	function pause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
+	function pause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Paused;
 		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPaused(auctionId, msg.sender);
@@ -151,7 +149,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	/**
 	 * @notice Unpause the auction
 	 */
-	function unpause(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
+	function unpause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Active;
 		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionUnpaused(auctionId, msg.sender);
@@ -161,7 +159,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Cancel the auction and refund all stakes
 	 * @dev Only allowed in Setup and Clock phases
 	 */
-	function cancelAuction(AuctionId auctionId) external onlyAuctionOwner(auctionId) {
+	function cancelAuction(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		AuctionTypes.AuctionPhase phase = auctionInfo[auctionId].currentPhase;
 		if (phase != AuctionTypes.AuctionPhase.Setup && phase != AuctionTypes.AuctionPhase.Clock) {
 			revert IErrorsAndEvents.CannotCancelInThisPhase(auctionId, phase);
@@ -218,6 +216,52 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, stake - (stake * penaltyRate / 10000));
 	}
 
+	/**
+	 * @notice Forfeit bidder who didn't claim in time
+	 * @dev Only callable in Finished phase. Caller gets 1% reward incentive.
+	 * @param auctionId The auction ID
+	 * @param bidder The bidder address to forfeit
+	 */
+	function forfeit(AuctionId auctionId, address bidder) external onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) {
+		uint256 stake = bidderStake[auctionId][bidder];
+		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // No stake to forfeit
+		
+		// Calculate penalty and reward amounts
+		uint256 penaltyRate = auctionInfo[auctionId].config.minSpendRatio;
+		
+		// Transfer penalty to protocol
+		protocolPenalties[auctionId] += stake * penaltyRate / 10000;
+		
+		// Transfer reward to caller
+		uint256 callerReward = stake * FORFEITURE_REWARD_RATE / 10000;
+		if (callerReward > 0) {
+			AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
+				numeraire: auctionInfo[auctionId].commonNumeraire,
+				recipient: msg.sender,
+				amount: callerReward
+			});
+			manager.unlock(abi.encode(uint8(5), abi.encode(data)));
+			
+			emit IErrorsAndEvents.ForfeitureRewardTransferred(auctionId, msg.sender, callerReward);
+		}
+		
+		// Transfer remaining stake back to bidder
+		uint256 remaining = stake - (stake * (penaltyRate + FORFEITURE_REWARD_RATE) / 10000);
+		if (remaining > 0) {
+			AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
+				numeraire: auctionInfo[auctionId].commonNumeraire,
+				recipient: bidder,
+				amount: remaining
+			});
+			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
+		}
+		
+		// Zero out their stake
+		bidderStake[auctionId][bidder] = 0;
+		
+		emit IErrorsAndEvents.BundleForfeited(auctionId, bidder, stake * penaltyRate / 10000);
+	}
+
 	// ========================================
 	// SETUP PHASE
 	// ========================================
@@ -231,7 +275,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	function createAuction(
 		AuctionTypes.AuctionConfig memory config, 
 		address auctionOwner
-	) external returns (AuctionId) {
+	) external nonReentrant returns (AuctionId) {
 		AuctionId auctionId = CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
 		_updateCPAHookStates(auctionId);
 		return auctionId;
@@ -247,7 +291,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionId auctionId,
 		PoolKey memory poolKey,
 		uint256 depositAmount
-	) external onlyAuctionOwner(auctionId) {
+	) external nonReentrant onlyAuctionOwner(auctionId) {
 		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
 		_updateCPAHookStates(auctionId);
 	}
@@ -257,7 +301,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// ========================================
 
 
-	function startClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
+	function startClockPhase(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
 		_startClockRound(auctionId);
 	}
 
@@ -271,7 +315,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		AuctionId auctionId,
 		PoolKey[] memory poolKeys,
 		uint256[] memory amounts
-	) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
+	) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
 		CPASetup.depositAllAndStartClock(this, auctionInfo[auctionId], poolInfo, poolKeys, amounts, auctionId);
 
 		// Update CPAHook states for all pools
@@ -297,7 +341,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice End current clock round
 	 * @param auctionId The auction ID
 	 */
-	 function endClockRound(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	 function endClockRound(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Set the clock to closed
 		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
 		
@@ -341,7 +385,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice End the clock phase and transition to proxy phase
 	 * @param auctionId The auction ID
 	 */
-	function endClockPhase(AuctionId auctionId) external onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	function endClockPhase(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		_endClockPhase(auctionId);
 	}
 
@@ -368,8 +412,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			activeBidders[auctionId]
 		);
 	}
-	// we should consider using whenActive(auctionId) as the modifier and just have the actuon be active or inactive. Paused or cancelled can be emitted as an event or something. Having two modifiers feels unnecessary.
-
 
 	/**
 	 * @notice Commit to a bidder (proxy function)
@@ -476,13 +518,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	// SETTLEMENT PHASE	
 	// ========================================
 
-
-	// start settlement phase
-
-	// end settlement phase
-
-	// claim item(s)
-
 	/**
 	 * @notice Claim tokens from winning allocation
 	 * @param auctionId The auction ID
@@ -572,7 +607,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Transition from Proxy to Allocation phase (callable by anyone)
 	 * @param auctionId The auction ID
 	 */
-	function transitionToAllocation(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
+	function transitionToAllocation(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
 		// Check if phase has expired (no auctioneer override for bidder protection)
 		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Proxy)) {
 			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
@@ -592,7 +627,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Transition from Allocation to Settlement phase (callable by anyone)
 	 * @param auctionId The auction ID
 	 */
-	function transitionToSettlement(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+	function transitionToSettlement(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
 		// Check if phase has expired (no auctioneer override for bidder protection)
 		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Allocation)) {
 			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
@@ -617,7 +652,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 	 * @notice Transition from Settlement to Finished phase (callable by anyone)
 	 * @param auctionId The auction ID
 	 */
-	function transitionToFinished(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+	function transitionToFinished(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		// Check if phase has expired (no auctioneer override for bidder protection)
 		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Settlement)) {
 			revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Settlement);
@@ -728,7 +763,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 			// address cpaHookAddress = address(poolKeys[i].hooks);
 			
 			// Update the pool hook state
-			CPAHook(cpaAuctionHookAddr).setPoolState(
+			ICPAHook(cpaAuctionHookAddr).setPoolState(
 				poolKeys[i],
 				auctionInfo[auctionId].currentPhase
 			);
@@ -788,354 +823,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage {
 		} else {
 			revert("Invalid operation type");
 		}
-	}
-
-	/**
-	 * @dev Handle deposit transfer operation (setup)
-	 * @param operationData The encoded operation data
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
-		(, , , AuctionId auctionId, ) = 
-			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
-		return CPASetup.handleDepositTransfer(this, auctionInfo[auctionId], poolInfo, operationData);
-	}
-
-	/**
-	 * @dev Handle batch deposit transfer operation (setup)
-	 * @param operationData The encoded batch deposit data
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleBatchDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode batch deposit data
-		AuctionTypes.CallbackDataBatchDeposit memory batchData = 
-			abi.decode(operationData, (AuctionTypes.CallbackDataBatchDeposit));
-		
-		// Verify this is a legitimate auction owner
-		require(batchData.originalCaller == auctionInfo[batchData.auctionId].auctionOwner, "Not auction owner");
-		
-		// Process each deposit
-		BalanceDelta[] memory deltas = new BalanceDelta[](batchData.poolKeys.length);
-		
-		for (uint256 i = 0; i < batchData.poolKeys.length; i++) {
-			// Update pool info deposit amount
-			poolInfo[batchData.poolKeys[i].toId()].depositAmount = batchData.depositAmounts[i];
-			
-			// Transfer assets using V4's settle/take mechanism
-			batchData.itemCurrencies[i].settle(manager, batchData.originalCaller, batchData.depositAmounts[i], false);
-			batchData.itemCurrencies[i].take(manager, address(this), batchData.depositAmounts[i], true);
-			
-			// Create balance delta for this pool
-			int128 amount0 = 0;
-			int128 amount1 = 0;
-			
-			if (address(Currency.unwrap(batchData.poolKeys[i].currency0)) == address(Currency.unwrap(batchData.itemCurrencies[i]))) {
-				amount0 = int128(uint128(batchData.depositAmounts[i]));
-			} else {
-				amount1 = int128(uint128(batchData.depositAmounts[i]));
-			}
-			
-			deltas[i] = toBalanceDelta(amount0, amount1);
-			
-			// Emit event for each deposit
-			emit IErrorsAndEvents.AssetsDeposited(
-				batchData.auctionId, 
-				batchData.poolKeys[i].toId(), 
-				address(Currency.unwrap(batchData.itemCurrencies[i])), 
-				batchData.depositAmounts[i], 
-				cpaAuctionHookAddr
-			);
-		}
-		
-		// Return all balance deltas
-		return abi.encode(deltas, BalanceDeltaLibrary.ZERO_DELTA);
-	}
-	
-	/**
-	 * @dev Handle bid as liquidity add operation
-	 * @param operationData The encoded operation data containing (int128 amount0, int128 amount1)
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleBid(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode the callback data
-		(AuctionTypes.CallbackDataBid memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataBid));
-		address sender = data.sender;
-		address numeraire = data.numeraire;
-		int128 stake = data.stake;
-		
-		// Validate deadline
-		require(block.timestamp <= data.deadline, "Bid deadline expired");
-		
-		// Transfer numeraire from bidder to pool manager
-		Currency.wrap(numeraire).settle(manager, sender, uint256(int256(stake)), false);
-		
-		// Mint ERC6909 claims to this hook (bypassing V3 curve)
-		Currency.wrap(numeraire).take(manager, address(this), uint256(int256(stake)), true);
-		
-		// Return the balance deltas
-		return abi.encode(
-			toBalanceDelta(0, -stake), // callerDelta
-			BalanceDeltaLibrary.ZERO_DELTA // feesAccrued
-		);
-	}
-
-	/**
-	 * @notice Handle price update swap in callback
-	 */
-	function _handlePriceUpdateSwap(bytes memory operationData) internal returns (bytes memory) {
-		// Decode the swap parameters
-		(PoolKey memory poolKey, SwapParams memory swapParams) = abi.decode(operationData, (PoolKey, SwapParams)); 
-		
-		// Execute the swap to update the price
-		BalanceDelta delta = manager.swap(poolKey, swapParams, "");
-
-		// Return the delta
-		return abi.encode(delta);
-	}
-	
-	/**
-	 * @dev Handle mint position after allocation
-	 * @param operationData The encoded operation data
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleMintPosition(bytes memory operationData) internal returns (bytes memory returnData) {
-		// decode the operation data
-		(AuctionTypes.CallbackDataMintPosition memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataMintPosition));
-
-		(BalanceDelta callerDelta, BalanceDelta feesAccrued) = manager.modifyLiquidity(
-			data.poolKey,
-			ModifyLiquidityParams({
-				tickLower: data.tickLower,
-				tickUpper: data.tickUpper,
-				liquidityDelta: data.liquidity.toInt128(),
-				salt: AuctionId.unwrap(data.auctionId)
-			}),
-			data.hookData
-		);
-
-		// handle the deltas
-		if (callerDelta.amount0() < 0) {
-			// If amount0 is negative, send tokens from the sender to the pool
-			data.poolKey.currency0.settle(manager, address(this), uint256(int256(-callerDelta.amount0())), true);
-		}
-
-		if (callerDelta.amount1() < 0) {
-			// If amount1 is negative, send tokens from the sender to the pool
-			data.poolKey.currency1.settle(manager, address(this), uint256(int256(-callerDelta.amount1())), true);
-		}
-
-		return abi.encode(callerDelta, feesAccrued);
-	}
-
-	/**
-	 * @notice Handle claim token settlement operation
-	 * @param operationData The encoded operation data
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleClaimToken(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode the operation data
-		AuctionTypes.CallbackDataClaimToken memory callbackData = abi.decode(operationData, (AuctionTypes.CallbackDataClaimToken));
-		
-		// now that we have everything, we need to call swap on the pool manager
-		BalanceDelta delta = manager.swap(callbackData.poolKey, callbackData.swapParams, "");
-
-		Currency numeraire = Currency.wrap(callbackData.numeraire);
-		uint256 numeraireOwed;
-		uint256 assetGained;
-		{
-			Currency asset;
-			if (callbackData.swapParams.zeroForOne) {
-				// if zeroForOne is true, this means that the numeraire is token0
-				if (delta.amount1() < 0) revert("Should not owe asset");
-				numeraireOwed = uint256((-delta.amount0()).toUint128());
-				assetGained = uint256((delta.amount1()).toUint128());
-				asset = callbackData.poolKey.currency1;
-			} else {
-				// if zeroForOne is false, this means that the numeraire is token1
-				if (delta.amount0() < 0) revert("Should not owe asset");
-				numeraireOwed = uint256((-delta.amount1()).toUint128());
-				assetGained = uint256((delta.amount0()).toUint128());
-				asset = callbackData.poolKey.currency0;
-			}
-			asset.take(manager, callbackData.bidder, assetGained, false);
-		}
-
-		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
-		uint256 numerairePaidByManager = 0;
-		if (bidderStake >= numeraireOwed) {
-			// since they have enough to cover, we can settle directly
-			numeraire.settle(manager, address(this), numeraireOwed, true); // might need to be true since the manager has ERC6909 claims
-			numerairePaidByManager = numeraireOwed;
-		} else {
-			//since they don't have enough, we need to do two settles
-			numeraire.settle(manager, address(this), bidderStake, true); // might need to be true since the manager has ERC6909 claims
-			numeraire.settle(manager, callbackData.bidder, numeraireOwed - bidderStake, false); // the bidder pays in ERC20
-			numerairePaidByManager = bidderStake;
-		}
-		
-		// Return the balance delta
-		return abi.encode(numerairePaidByManager, assetGained);
-	}
-
-
-	/**
-	 * @notice Handle claim token settlement operation
-	 * @param operationData The encoded operation data
-	 * @return returnData The encoded balance deltas
-	 */
-	function _handleClaimAllTokens(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode the operation data
-		AuctionTypes.CallbackDataClaimAllTokens memory callbackData = abi.decode(operationData, (AuctionTypes.CallbackDataClaimAllTokens));
-		
-		Currency numeraire = Currency.wrap(callbackData.numeraire);
-		uint256 totalNumeraireOwed = 0;
-		
-		// Loop through all pool keys and execute swaps for tokens the bidder is owed
-		for (uint256 i = 0; i < callbackData.poolKeys.length; i++) {
-			uint256 amountOwed = callbackData.allocatedQuantities[i];
-			if (amountOwed > 0) {
-				PoolKey memory poolKey = callbackData.poolKeys[i];
-				bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == callbackData.numeraire);
-
-				SwapParams memory params = SwapParams({
-					zeroForOne: numeraireIsCurrency0,
-					amountSpecified: (amountOwed.toInt256()),
-					sqrtPriceLimitX96: numeraireIsCurrency0
-						? TickMath.MIN_SQRT_PRICE + 1
-						: TickMath.MAX_SQRT_PRICE - 1
-				});
-				
-				// Execute swap on this pool
-				BalanceDelta delta = manager.swap(poolKey, params, "");
-
-				uint256 numeraireOwed;
-				{
-					Currency asset;
-					if (params.zeroForOne) {
-						// if zeroForOne is true, this means that the numeraire is token0
-						if (delta.amount1() < 0) revert("Should not owe asset");
-						numeraireOwed = uint256((-delta.amount0()).toUint128());
-						uint256 assetGained = uint256((delta.amount1()).toUint128());
-						asset = poolKey.currency1;
-						asset.take(manager, callbackData.bidder, assetGained, false);
-					} else {
-						// if zeroForOne is false, this means that the numeraire is token1
-						if (delta.amount0() < 0) revert("Should not owe asset");
-						numeraireOwed = uint256((-delta.amount1()).toUint128());
-						uint256 assetGained = uint256((delta.amount0()).toUint128());
-						asset = poolKey.currency0;
-						asset.take(manager, callbackData.bidder, assetGained, false);
-					}
-				}
-				
-				// Add to total numeraire owed
-				totalNumeraireOwed += numeraireOwed;
-			}
-		}
-
-		uint256 bidderStake = bidderStake[callbackData.auctionId][callbackData.bidder];
-		uint256 numerairePaidByManager = 0;
-		uint256 protocolPenalty = 0;
-		if (bidderStake >= totalNumeraireOwed) {
-			// since they have enough to cover, we can settle directly
-			numeraire.settle(manager, address(this), totalNumeraireOwed, true); // might need to be true since the manager has ERC6909 claims
-			numerairePaidByManager = totalNumeraireOwed;
-
-			// since they had enough, we need to check if they met the minimum spend ratio and refund any leftover numeraire
-			uint256 minSpendAmount = auctionInfo[callbackData.auctionId].config.minSpendRatio * bidderStake / 10000;
-			if (minSpendAmount > numerairePaidByManager) {
-				// Didn't meet minimum spend - penalty applies
-				protocolPenalty = minSpendAmount - numerairePaidByManager;
-				protocolPenalties[callbackData.auctionId] += protocolPenalty;
-				bidderStake -= minSpendAmount;
-			} // else they met the minimum spend ratio so no penalty applies
-
-			// refund the leftover numeraire after applying the penalty
-			manager.burn(address(this), CurrencyLibrary.toId(numeraire), bidderStake - totalNumeraireOwed - protocolPenalty);
-			numeraire.take(manager, callbackData.bidder, bidderStake - totalNumeraireOwed - protocolPenalty, false);
-		} else {
-			//since they don't have enough numeraire to cover the bundle price, we need to do two settles
-			numeraire.settle(manager, address(this), bidderStake, true); // might need to be true since the manager has ERC6909 claims
-			numeraire.settle(manager, callbackData.bidder, totalNumeraireOwed - bidderStake, false); // the bidder pays in ERC20
-			numerairePaidByManager = bidderStake;
-
-			// bidder has no leftover stake so there is no need to refund anything
-		}
-		
-		// Return the balance delta
-		return abi.encode(numerairePaidByManager);
-	}
-
-	function _refundStake(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode the operation data
-		(AuctionTypes.CallbackDataRefundStake memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataRefundStake));
-		
-		// Refund the stake
-		manager.burn(address(this), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.amount);
-
-		// now that we are credited, transfer the tokens to the address
-		Currency.wrap(data.numeraire).take(manager, data.recipient, data.amount, false);
-
-		
-		// Return the balance delta
-		return abi.encode(data.amount);
-	}
-
-	function _handleClaimAllocatorReward(bytes memory operationData) internal returns (bytes memory returnData) {
-		// Decode the operation data
-		(AuctionTypes.CallbackDataClaimAllocatorReward memory data) = abi.decode(operationData, (AuctionTypes.CallbackDataClaimAllocatorReward));
-		
-		// we are already unlocked here so we just need to transfer tokens from the CPAManager to the allocator
-		Currency.wrap(data.numeraire).take(manager, data.allocator, data.reward, false); // give ERC20 to the allocator
-		manager.burn(address(this), CurrencyLibrary.toId(Currency.wrap(data.numeraire)), data.reward); // burn ERC6909 from the CPAManager
-		
-		return abi.encode(data.reward);
-	}
-
-	/**
-	 * @notice Forfeit bidder who didn't claim in time
-	 * @dev Only callable in Finished phase. Caller gets 1% reward incentive.
-	 * @param auctionId The auction ID
-	 * @param bidder The bidder address to forfeit
-	 */
-	function forfeit(AuctionId auctionId, address bidder) external onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) {
-		uint256 stake = bidderStake[auctionId][bidder];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // No stake to forfeit
-		
-		// Calculate penalty and reward amounts
-		uint256 penaltyRate = auctionInfo[auctionId].config.minSpendRatio;
-		
-		// Transfer penalty to protocol
-		protocolPenalties[auctionId] += stake * penaltyRate / 10000;
-		
-		// Transfer reward to caller
-		uint256 callerReward = stake * FORFEITURE_REWARD_RATE / 10000;
-		if (callerReward > 0) {
-			AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
-				numeraire: auctionInfo[auctionId].commonNumeraire,
-				recipient: msg.sender,
-				amount: callerReward
-			});
-			manager.unlock(abi.encode(uint8(5), abi.encode(data)));
-			
-			emit IErrorsAndEvents.ForfeitureRewardTransferred(auctionId, msg.sender, callerReward);
-		}
-		
-		// Transfer remaining stake back to bidder
-		uint256 remaining = stake - (stake * (penaltyRate + FORFEITURE_REWARD_RATE) / 10000);
-		if (remaining > 0) {
-			AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-				numeraire: auctionInfo[auctionId].commonNumeraire,
-				recipient: bidder,
-				amount: remaining
-			});
-			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
-		}
-		
-		// Zero out their stake
-		bidderStake[auctionId][bidder] = 0;
-		
-		emit IErrorsAndEvents.BundleForfeited(auctionId, bidder, stake * penaltyRate / 10000);
 	}
 
 }
