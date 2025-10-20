@@ -10,19 +10,32 @@ import { BundleId } from "../types/BundleId.sol";
 
 /**
  * @title ICPAManager
- * @notice Interface for the Clock-Proxy Auction Manager
+ * @notice Comprehensive interface for the Clock-Proxy Auction Manager
+ * @dev This interface defines all public and external functions of the CPAManager contract
  * @author notthatintodefi.eth
  */
 interface ICPAManager {
     // ========================================
-    // AUCTION MANAGEMENT
+    // ADMIN FUNCTIONS
     // ========================================
     
     /**
-     * @notice Create a new auction
-     * @param config The auction configuration
-     * @param auctionOwner The auction owner
-     * @return The auction ID
+     * @notice Set the CPA auction hook address
+     * @dev Only callable by the contract owner
+     * @param _cpaAuctionHookAddr The new CPA auction hook address
+     */
+    function setCpaAuctionHookAddr(address _cpaAuctionHookAddr) external;
+    
+    // ========================================
+    // AUCTION CREATION AND SETUP
+    // ========================================
+    
+    /**
+     * @notice Create a new auction with the specified configuration
+     * @dev Creates a new auction and returns its unique identifier
+     * @param config The auction configuration including pool keys, initial prices, and price increments
+     * @param auctionOwner The address that will own and control this auction
+     * @return The unique auction identifier
      */
     function createAuction(
         AuctionTypes.AuctionConfig memory config,
@@ -30,15 +43,29 @@ interface ICPAManager {
     ) external returns (AuctionId);
     
     /**
-     * @notice Move deposit from auction owner to a pool
-     * @param auctionId The auction ID
-     * @param poolKey The pool key
-     * @param amount The amount to deposit
+     * @notice Move deposit from auction owner to a single pool, giving ERC6909 claims to CPAHook
+     * @dev Transfers assets from auction owner to the pool manager and mints ERC6909 claims
+     * @param auctionId The auction identifier
+     * @param poolKey The pool key to deposit to
+     * @param depositAmount The amount to deposit
      */
     function moveDeposit(
         AuctionId auctionId,
-        PoolKey calldata poolKey,
-        uint256 amount
+        PoolKey memory poolKey,
+        uint256 depositAmount
+    ) external;
+    
+    /**
+     * @notice Deposit to all pools and start clock phase in one transaction
+     * @dev Batch operation to deposit to multiple pools and immediately start the clock phase
+     * @param auctionId The auction identifier
+     * @param poolKeys Array of pool keys to deposit to
+     * @param amounts Array of deposit amounts (must match poolKeys length)
+     */
+    function depositAllAndStartClock(
+        AuctionId auctionId,
+        PoolKey[] memory poolKeys,
+        uint256[] memory amounts
     ) external;
     
     // ========================================
@@ -46,56 +73,64 @@ interface ICPAManager {
     // ========================================
     
     /**
-     * @notice Pause an auction
-     * @param auctionId The auction ID
+     * @notice Pause the auction, preventing further operations
+     * @dev Only callable by the auction owner. Paused auctions cannot accept new bids or transitions
+     * @param auctionId The auction identifier
      */
     function pause(AuctionId auctionId) external;
     
     /**
-     * @notice Unpause an auction
-     * @param auctionId The auction ID
+     * @notice Unpause the auction, allowing normal operations to resume
+     * @dev Only callable by the auction owner. Restores normal auction functionality
+     * @param auctionId The auction identifier
      */
     function unpause(AuctionId auctionId) external;
     
     /**
-     * @notice Cancel an auction
-     * @param auctionId The auction ID
+     * @notice Cancel the auction and refund all stakes
+     * @dev Only allowed in Setup and Clock phases. Refunds all bidder stakes
+     * @param auctionId The auction identifier
      */
     function cancelAuction(AuctionId auctionId) external;
     
     /**
      * @notice Reclaim stake from a cancelled auction
-     * @param auctionId The auction ID
+     * @dev Allows bidders to reclaim their stake after auction cancellation
+     * @param auctionId The auction identifier
      */
     function reclaimStake(AuctionId auctionId) external;
     
     // ========================================
-    // CLOCK PHASE
+    // CLOCK PHASE OPERATIONS
     // ========================================
     
     /**
-     * @notice Start a clock round
-     * @param auctionId The auction ID
+     * @notice Start the clock phase of the auction
+     * @dev Transitions auction from Setup to Clock phase and opens the first round
+     * @param auctionId The auction identifier
      */
-    function startClockRound(AuctionId auctionId) external;
+    function startClockPhase(AuctionId auctionId) external;
     
     /**
-     * @notice End a clock round
-     * @param auctionId The auction ID
+     * @notice End the current clock round
+     * @dev Processes round results, updates prices, and determines if clock phase should continue
+     * @param auctionId The auction identifier
      */
     function endClockRound(AuctionId auctionId) external;
     
     /**
-     * @notice End the clock phase
-     * @param auctionId The auction ID
+     * @notice End the clock phase and transition to proxy phase
+     * @dev Manually ends the clock phase and moves to proxy phase
+     * @param auctionId The auction identifier
      */
     function endClockPhase(AuctionId auctionId) external;
     
     /**
      * @notice Submit a bid during clock phase
-     * @param auctionId The auction ID
-     * @param demands Array of item demands
-     * @param maxStakeAmount Maximum stake amount
+     * @dev Submits demand quantities for each asset and provides stake
+     * @param auctionId The auction identifier
+     * @param demands Array of item demands (quantities for each asset)
+     * @param maxStakeAmount Maximum stake amount the bidder is willing to provide (inclusive of allocator reward)
      */
     function submitBid(
         AuctionId auctionId,
@@ -104,41 +139,39 @@ interface ICPAManager {
     ) external;
     
     /**
-     * @notice Commit to a bidder (called by proxy)
-     * @param auctionId The auction ID
-     * @param commitHash The commit hash
+     * @notice Commit to a bidder (proxy function)
+     * @dev Allows a proxy to commit to representing a bidder
+     * @param auctionId The auction identifier
+     * @param commitHash The commit hash for the proxy relationship
      */
     function commitToBidder(AuctionId auctionId, bytes32 commitHash) external;
     
     /**
-     * @notice Register a commit hash
-     * @param auctionId The auction ID
-     * @param commitHash The commit hash
+     * @notice Register a commit hash for proxy operations
+     * @dev Registers a commit hash that can be used for proxy operations
+     * @param auctionId The auction identifier
+     * @param commitHash The commit hash to register
      */
     function registerCommit(AuctionId auctionId, bytes32 commitHash) external;
     
     /**
-     * @notice Dropout from auction
-     * @param auctionId The auction ID
+     * @notice Dropout from the auction during clock phase
+     * @dev Allows bidders to exit the auction, subject to penalties
+     * @param auctionId The auction identifier
      */
     function dropout(AuctionId auctionId) external;
     
     // ========================================
-    // PROXY PHASE
+    // PROXY PHASE OPERATIONS
     // ========================================
     
     /**
-     * @notice End the proxy phase
-     * @param auctionId The auction ID
-     */
-    function endProxyPhase(AuctionId auctionId) external;
-    
-    /**
      * @notice Submit bundle during proxy phase
-     * @param auctionId The auction ID
-     * @param commitHash The commit hash
-     * @param bundleData The bundle data
-     * @return The bundle ID
+     * @dev Submits a bundle with commit-reveal privacy
+     * @param auctionId The auction identifier
+     * @param commitHash The commit hash for the bundle
+     * @param bundleData The bundle data containing allocations
+     * @return The bundle identifier
      */
     function submitBundle(
         AuctionId auctionId,
@@ -147,35 +180,31 @@ interface ICPAManager {
     ) external returns (BundleId);
     
     // ========================================
-    // ALLOCATION PHASE
+    // ALLOCATION PHASE OPERATIONS
     // ========================================
     
     /**
      * @notice Submit allocation during allocation phase
-     * @param auctionId The auction ID
-     * @param allocationData The allocation data
+     * @dev Allows allocators to submit their allocation decisions
+     * @param auctionId The auction identifier
+     * @param allocationData The allocation data containing allocator and allocation details
      */
     function submitAllocation(
         AuctionId auctionId,
         AuctionTypes.Allocation calldata allocationData
     ) external;
     
-    /**
-     * @notice End allocation phase
-     * @param auctionId The auction ID
-     */
-    function endAllocationPhase(AuctionId auctionId) external;
-    
     // ========================================
-    // SETTLEMENT PHASE
+    // SETTLEMENT PHASE OPERATIONS
     // ========================================
     
     /**
      * @notice Reveal bidder identity
-     * @param auctionId The auction ID
-     * @param proxy The proxy address
-     * @param saltA First salt
-     * @param saltB Second salt
+     * @dev Called by bidders to reveal their identity before settlement
+     * @param auctionId The auction identifier
+     * @param proxy The proxy address used
+     * @param saltA First salt for the reveal
+     * @param saltB Second salt for the reveal
      */
     function reveal(
         AuctionId auctionId,
@@ -185,10 +214,11 @@ interface ICPAManager {
     ) external;
     
     /**
-     * @notice Claim tokens from winning allocation
-     * @param auctionId The auction ID
+     * @notice Claim tokens from winning allocation (owner only)
+     * @dev Only the contract owner can claim tokens on behalf of bidders
+     * @param auctionId The auction identifier
      * @param commitHash The commit hash
-     * @param poolId The pool ID
+     * @param poolId The pool identifier
      */
     function claimToken(
         AuctionId auctionId,
@@ -198,20 +228,16 @@ interface ICPAManager {
     
     /**
      * @notice Claim all tokens from winning allocation
-     * @param auctionId The auction ID
+     * @dev Allows bidders to claim all their allocated tokens at once
+     * @param auctionId The auction identifier
      * @param commitHash The commit hash
      */
     function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external;
     
     /**
-     * @notice End settlement phase
-     * @param auctionId The auction ID
-     */
-    function endSettlementPhase(AuctionId auctionId) external;
-    
-    /**
      * @notice Claim allocator reward
-     * @param auctionId The auction ID
+     * @dev Allows the winning allocator to claim their reward
+     * @param auctionId The auction identifier
      */
     function claimAllocatorReward(AuctionId auctionId) external;
     
@@ -221,21 +247,36 @@ interface ICPAManager {
     
     /**
      * @notice Transition from Proxy to Allocation phase (callable by anyone)
-     * @param auctionId The auction ID
+     * @dev Permissionless transition when proxy phase expires
+     * @param auctionId The auction identifier
      */
     function transitionToAllocation(AuctionId auctionId) external;
     
     /**
      * @notice Transition from Allocation to Settlement phase (callable by anyone)
-     * @param auctionId The auction ID
+     * @dev Permissionless transition when allocation phase expires
+     * @param auctionId The auction identifier
      */
     function transitionToSettlement(AuctionId auctionId) external;
     
     /**
      * @notice Transition from Settlement to Finished phase (callable by anyone)
-     * @param auctionId The auction ID
+     * @dev Permissionless transition when settlement phase expires
+     * @param auctionId The auction identifier
      */
     function transitionToFinished(AuctionId auctionId) external;
+    
+    // ========================================
+    // FINISHED PHASE OPERATIONS
+    // ========================================
+    
+    /**
+     * @notice Forfeit bidder who didn't claim in time
+     * @dev Only callable in Finished phase. Caller gets 1% reward incentive
+     * @param auctionId The auction identifier
+     * @param bidder The bidder address to forfeit
+     */
+    function forfeit(AuctionId auctionId, address bidder) external;
     
     // ========================================
     // VIEW FUNCTIONS
@@ -243,44 +284,50 @@ interface ICPAManager {
     
     /**
      * @notice Get auction information
-     * @param auctionId The auction ID
-     * @return The auction information
+     * @dev Returns comprehensive auction information including configuration and current state
+     * @param auctionId The auction identifier
+     * @return The complete auction information
      */
     function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory);
     
     /**
+     * @notice Get bidder demands for a specific auction and bidder
+     * @dev Returns the demand array submitted by a specific bidder
+     * @param auctionId The auction identifier
+     * @param bidder The bidder address
+     * @return Array of demand quantities for each asset
+     */
+    function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory);
+    
+    /**
      * @notice Get top allocation for an auction
-     * @param auctionId The auction ID
-     * @return The top allocation
-     * @return The top score
-     * @return The total value
+     * @dev Returns the winning allocation and its score
+     * @param auctionId The auction identifier
+     * @return allocation The top allocation
+     * @return score The top score
+     * @return value The total value
      */
     function topAllocation(AuctionId auctionId) external view returns (
-        AuctionTypes.Allocation memory,
-        uint256,
-        uint256
+        AuctionTypes.Allocation memory allocation,
+        uint256 score,
+        uint256 value
     );
     
     /**
-     * @notice Get bidder stake
-     * @param auctionId The auction ID
+     * @notice Get bidder stake for a specific auction and bidder
+     * @dev Returns the current stake amount for a bidder
+     * @param auctionId The auction identifier
      * @param bidder The bidder address
      * @return The stake amount
      */
     function bidderStake(AuctionId auctionId, address bidder) external view returns (uint256);
     
     /**
-     * @notice Get revealed mappings
-     * @param auctionId The auction ID
+     * @notice Get revealed mappings for commit hashes
+     * @dev Returns the revealed bidder address for a commit hash
+     * @param auctionId The auction identifier
      * @param commitHash The commit hash
      * @return The revealed bidder address
      */
     function revealedMappings(AuctionId auctionId, bytes32 commitHash) external view returns (address);
-    
-    /**
-     * @notice Forfeit bidder who didn't claim in time
-     * @param auctionId The auction ID
-     * @param bidder The bidder address to forfeit
-     */
-    function forfeit(AuctionId auctionId, address bidder) external;
 }
