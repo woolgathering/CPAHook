@@ -737,8 +737,6 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(asset1LastOversoldTick2, asset1LastOversoldTick1, "Asset1 should keep lastOversoldTick from round 1");
         // Asset2 should still have lastOversoldTick from round 1 (was oversold in round 1)
         assertEq(asset2LastOversoldTick2, asset2LastOversoldTick1, "Asset2 should keep lastOversoldTick from round 1");
-        
-        console.log("Test completed successfully - excessDemand and lastOversoldTick tracking working correctly");
     }
 
     // ============ dropout() Function Tests ============
