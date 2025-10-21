@@ -9,10 +9,34 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 
-    // for use on a pool manager instance
+/**
+ * @title PriceUtils
+ * @notice Utility library for retrieving token prices from Uniswap V4 pools
+ * @dev IMPORTANT: All prices returned by this library are in 18-decimal precision,
+ *      regardless of the numeraire token's actual decimals. This provides consistent
+ *      high-precision arithmetic. Calling code must convert to numeraire decimals.
+ *      
+ *      Formula for value calculation:
+ *      value_in_numeraire_decimals = (quantity * price_18decimals * 10^numeraireDecimals) / (10^(18 + assetDecimals))
+ *      
+ *      Example with 6-decimal numeraire (USDC) and 18-decimal asset:
+ *      - quantity = 1000e18 (1000 tokens)
+ *      - price = 2e18 (2 units in 18 decimals)
+ *      - value = (1000e18 * 2e18 * 1e6) / (1e18 * 1e18) = 2000e6 USDC
+ * @author notthatintodefi.eth
+ */
 library PriceUtils {
     using StateLibrary for IPoolManager;
 
+    /**
+     * @notice Get the price of a currency in terms of its pair
+     * @dev Returns price in 18-decimal precision for consistent high-precision calculations.
+     *      This is NOT in the numeraire's native decimals - calling code must convert.
+     * @param manager The pool manager instance
+     * @param poolKey The pool key
+     * @param currency The currency to get the price for
+     * @return price The price in 18-decimal precision (NOT in numeraire decimals)
+     */
     function getPriceOfCurrency(
         IPoolManager manager,
         PoolKey memory poolKey,
@@ -48,6 +72,13 @@ library PriceUtils {
         }
     }
 
+    /**
+     * @notice Get the price of currency0 in terms of currency1
+     * @dev Returns price in 18-decimal precision. See library documentation for usage.
+     * @param manager The pool manager instance
+     * @param poolKey The pool key
+     * @return price The price in 18-decimal precision
+     */
     function getPriceOfCurrency0(
         IPoolManager manager,
         PoolKey memory poolKey
@@ -55,6 +86,13 @@ library PriceUtils {
         return getPriceOfCurrency(manager, poolKey, Currency.unwrap(poolKey.currency0));
     }
 
+    /**
+     * @notice Get the price of currency1 in terms of currency0
+     * @dev Returns price in 18-decimal precision. See library documentation for usage.
+     * @param manager The pool manager instance
+     * @param poolKey The pool key
+     * @return price The price in 18-decimal precision
+     */
     function getPriceOfCurrency1(
         IPoolManager manager,
         PoolKey memory poolKey

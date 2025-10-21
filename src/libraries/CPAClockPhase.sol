@@ -316,30 +316,7 @@ library CPAClockPhase {
 		// Get all pool keys for this auction
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		
-		// Calculate inner product: sum(demands[i] * prices[i])
-		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-			// Get the pool ID and its current price from the pool
-			uint256 price;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
-				// Since the numeraire is currency0, we need to get the price of currency1
-				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
-			} else {
-				// Since the numeraire is currency1, we need to get the price of currency0
-				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
-			}
-			
-			// Add to total value: demand * price
-			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
-		}
-	}
-
-	function calculateBidValueWithMemoryDemands(
-		uint256[] memory demands,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		IPoolManager poolManager
-	) internal view returns (uint256 totalValue) {
-		// Get all pool keys for this auction
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		// Get numeraire decimals once for efficiency
 		
 		// Calculate inner product: sum(demands[i] * prices[i])
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
@@ -353,8 +330,53 @@ library CPAClockPhase {
 				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
 			}
 			
-			// Add to total value: demand * price
-			totalValue += (demands[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
+			// Get asset decimals for this pool
+			address assetCurrency;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
+				assetCurrency = Currency.unwrap(poolKeys[i].currency1);
+			} else {
+				assetCurrency = Currency.unwrap(poolKeys[i].currency0);
+			}
+			
+			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
+			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
+			totalValue += (demands[i] * price * (10**IERC20(auctionInfo.commonNumeraire).decimals())) / (10**(18 + IERC20(assetCurrency).decimals()));
+		}
+	}
+
+	function calculateBidValueWithMemoryDemands(
+		uint256[] memory demands,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		IPoolManager poolManager
+	) internal view returns (uint256 totalValue) {
+		// Get all pool keys for this auction
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		
+		// Get numeraire decimals once for efficiency
+		
+		// Calculate inner product: sum(demands[i] * prices[i])
+		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
+			// Get the pool ID and its current price from the pool
+			uint256 price;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
+				// Since the numeraire is currency0, we need to get the price of currency1
+				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+			} else {
+				// Since the numeraire is currency1, we need to get the price of currency0
+				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+			}
+			
+			// Get asset decimals for this pool
+			address assetCurrency;
+			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
+				assetCurrency = Currency.unwrap(poolKeys[i].currency1);
+			} else {
+				assetCurrency = Currency.unwrap(poolKeys[i].currency0);
+			}
+			
+			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
+			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
+			totalValue += (demands[i] * price * (10**IERC20(auctionInfo.commonNumeraire).decimals())) / (10**(18 + IERC20(assetCurrency).decimals()));
 		}
 	}
 

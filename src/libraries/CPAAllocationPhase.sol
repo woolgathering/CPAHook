@@ -15,7 +15,7 @@ import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-
+import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
@@ -125,6 +125,9 @@ library CPAAllocationPhase {
 			existingCommitHashes[i] = bundles[auctionId][bundleId].commitHash;
 		}
 
+		// Get numeraire decimals once for efficiency
+		uint8 numeraireDecimals = IERC20(auctionInfo[auctionId].commonNumeraire).decimals();
+		
 		// Validate quantities and compute total value in a single loop
 		for (uint256 i = 0; i < poolKeys.length; i++) {
 			PoolKey memory poolKey = poolKeys[i];
@@ -148,8 +151,12 @@ library CPAAllocationPhase {
 			// Get the price of the asset in terms of numeraire
 			uint256 price = self.manager().getPriceOfCurrency(poolKey, assetCurrency);
 			
-			// Calculate value: quantity * price
-			totalValue += (quantities[i] * price) / 10**18; // this will need to divide by the decimals of the numeraire (should be dynamic not static)
+			// Get asset decimals for this pool
+			uint8 assetDecimals = IERC20(assetCurrency).decimals();
+			
+			// Convert: (quantity in asset decimals) * (price in 18 decimals) => value in numeraire decimals
+			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
+			totalValue += (quantities[i] * price * (10**numeraireDecimals)) / (10**(18 + assetDecimals));
 		}
 		
 		return (totalValue, totalValue); // again, the total value is the same as the score here
