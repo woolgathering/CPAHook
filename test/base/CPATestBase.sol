@@ -11,7 +11,7 @@ import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPosition
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { Constants } from "../../lib/uniswap-hooks/lib/v4-core/test/utils/Constants.sol";
@@ -83,7 +83,7 @@ abstract contract CPATestBase is Deployers {
     }
 
     /// @notice Deploy test tokens
-    function deployTokens() internal {
+    function deployTokens() internal virtual {
         numeraireToken = new MockERC20("Numeraire Token", "NUM", 18);
         asset1Token = new MockERC20("Asset 1 Token", "AST1", 18);
         asset2Token = new MockERC20("Asset 2 Token", "AST2", 18);
@@ -436,15 +436,29 @@ abstract contract CPATestBase is Deployers {
         poolKeys[0] = asset1PoolKey;
         poolKeys[1] = asset2PoolKey;
         
+        // Get numeraire decimals for proper conversion
+        uint8 numeraireDecimals = IERC20(address(numeraireToken)).decimals();
+        
         for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-            // uint256 price = getCurrentPoolPriceWithOrdering(poolKeys[i]);
             uint256 price;
             if (Currency.unwrap(poolKeys[i].currency0) == address(numeraireToken)) {
                 price = poolManager.getPriceOfCurrency1(poolKeys[i]);
             } else {
                 price = poolManager.getPriceOfCurrency0(poolKeys[i]);
             }
-            totalValue += (demands[i] * price) / 10**18;
+            
+            // Get asset decimals for this pool
+            address assetCurrency;
+            if (Currency.unwrap(poolKeys[i].currency0) == address(numeraireToken)) {
+                assetCurrency = Currency.unwrap(poolKeys[i].currency1);
+            } else {
+                assetCurrency = Currency.unwrap(poolKeys[i].currency0);
+            }
+            uint8 assetDecimals = IERC20(assetCurrency).decimals();
+            
+            // Apply the same decimal conversion formula as the contract:
+            // (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
+            totalValue += (demands[i] * price * (10**numeraireDecimals)) / (10**(18 + assetDecimals));
         }
         
         return totalValue;
