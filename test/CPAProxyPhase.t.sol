@@ -307,4 +307,320 @@ contract CPAProxyPhaseTest is CPATestBase {
         vm.prank(proxy1);
         cpaManager.submitBundle(auctionId, commitHash, bundleData);
     }
+    
+    // ========================================
+    // EDGE CASE TESTS
+    // ========================================
+    
+    function test_SubmitBundle_ZeroQuantities() public {
+        // Create bundle with zero quantities
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0;
+        quantities[1] = 0;
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 0,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with zero quantities (no demand)
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_MixedZeroQuantities() public {
+        // Create bundle with mixed zero and non-zero quantities
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 0;        // Zero quantity
+        quantities[1] = 50 * 10**18;  // Non-zero quantity
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should succeed with mixed quantities (has some demand)
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+        
+        // Verify bundle was stored
+        BundleId bundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
+        (,,, uint256[] memory returnedQuantities,,) = cpaManager.getBundle(auctionId, bundleId);
+        assertEq(returnedQuantities[0], 0, "First quantity should be zero");
+        assertEq(returnedQuantities[1], 50 * 10**18, "Second quantity should be non-zero");
+    }
+    
+    function test_SubmitBundle_MaxUint256Quantities() public {
+        // Create bundle with max uint256 quantities
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = type(uint256).max;
+        quantities[1] = type(uint256).max;
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: type(uint256).max,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should succeed with max quantities
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+        
+        // Verify bundle was stored
+        BundleId bundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
+        (,,, uint256[] memory returnedQuantities,,) = cpaManager.getBundle(auctionId, bundleId);
+        assertEq(returnedQuantities[0], type(uint256).max, "First quantity should be max");
+        assertEq(returnedQuantities[1], type(uint256).max, "Second quantity should be max");
+    }
+    
+    function test_SubmitBundle_EmptyQuantitiesArray() public {
+        // Create bundle with empty quantities array
+        uint256[] memory quantities = new uint256[](0);
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with empty quantities array
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_InvalidAuctionId() public {
+        // Create bundle with invalid auction ID
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        AuctionId invalidAuctionId = AuctionId.wrap(keccak256("invalidAuctionId"));
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: invalidAuctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with invalid auction ID
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(invalidAuctionId, commitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_WrongAuctionIdInBundle() public {
+        // Create bundle with wrong auction ID in bundle data
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        AuctionId wrongAuctionId = AuctionId.wrap(keccak256("wrongAuctionId"));
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: wrongAuctionId, // Wrong auction ID in bundle
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail because auction ID in bundle doesn't match function parameter
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_CommitHashMismatch() public {
+        // Create bundle with commit hash that doesn't match the one in bundle data
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        bytes32 differentCommitHash = keccak256("differentCommitHash");
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash, // Different from function parameter
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail because commit hash doesn't match
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, differentCommitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_ZeroValue() public {
+        // Create bundle with zero value
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 0,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should succeed with zero value
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+        
+        // Verify bundle was stored with zero value
+        BundleId bundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
+        (,,,, uint256 returnedValue,) = cpaManager.getBundle(auctionId, bundleId);
+        assertEq(returnedValue, 0, "Bundle value should be zero");
+    }
+    
+    function test_SubmitBundle_MaxTimestamp() public {
+        // Create bundle with max timestamp
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: type(uint256).max
+        });
+        
+        // Should succeed with max timestamp
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+        
+        // Verify bundle was stored with max timestamp
+        BundleId bundleId = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities)));
+        (,,,,, uint256 returnedTimestamp) = cpaManager.getBundle(auctionId, bundleId);
+        assertEq(returnedTimestamp, type(uint256).max, "Bundle timestamp should be max");
+    }
+    
+    function test_SubmitBundle_MultipleBundlesSameProxy() public {
+        // Test submitting multiple bundles from the same proxy
+        uint256[] memory quantities1 = new uint256[](2);
+        quantities1[0] = 100 * 10**18;
+        quantities1[1] = 50 * 10**18;
+        
+        uint256[] memory quantities2 = new uint256[](2);
+        quantities2[0] = 200 * 10**18;
+        quantities2[1] = 75 * 10**18;
+        
+        AuctionTypes.Bundle memory bundleData1 = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities1,
+            timestamp: block.timestamp
+        });
+        
+        AuctionTypes.Bundle memory bundleData2 = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 2000 * 10**18,
+            quantities: quantities2,
+            timestamp: block.timestamp + 1
+        });
+        
+        // Submit first bundle
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData1);
+        
+        // Submit second bundle - should succeed
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData2);
+        
+        // Verify both bundles exist
+        BundleId bundleId1 = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities1)));
+        BundleId bundleId2 = BundleIdLibrary.createId(commitHash, keccak256(abi.encode(quantities2)));
+        
+        (,,, uint256[] memory returnedQuantities1,,) = cpaManager.getBundle(auctionId, bundleId1);
+        (,,, uint256[] memory returnedQuantities2,,) = cpaManager.getBundle(auctionId, bundleId2);
+        
+        assertEq(returnedQuantities1[0], quantities1[0], "First bundle quantities should match");
+        assertEq(returnedQuantities2[0], quantities2[0], "Second bundle quantities should match");
+    }
+    
+    function test_SubmitBundle_DifferentProxiesSameCommitHash() public {
+        // Test that different proxies cannot submit bundles for the same commit hash
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: commitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // proxy1 submits bundle successfully
+        vm.prank(proxy1);
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+        
+        // proxy2 tries to submit bundle for same commit hash - should fail
+        vm.prank(proxy2);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, commitHash, bundleData);
+    }
+    
+    function test_SubmitBundle_NonExistentCommitHash() public {
+        // Test submitting bundle for a commit hash that was never committed
+        uint256[] memory quantities = new uint256[](2);
+        quantities[0] = 100 * 10**18;
+        quantities[1] = 50 * 10**18;
+        
+        bytes32 nonExistentCommitHash = keccak256("nonExistentCommitHash");
+        
+        AuctionTypes.Bundle memory bundleData = AuctionTypes.Bundle({
+            auctionId: auctionId,
+            commitHash: nonExistentCommitHash,
+            value: 1000 * 10**18,
+            quantities: quantities,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail because commit hash was never committed
+        vm.prank(proxy1);
+        vm.expectRevert();
+        cpaManager.submitBundle(auctionId, nonExistentCommitHash, bundleData);
+    }
+    
+    function test_SubmitAllocation_RejectedInProxyPhase() public {
+        // Test that allocation submission is rejected during Proxy phase
+        address testAllocator = makeAddr("testAllocator");
+        
+        // Create a test allocation
+        AuctionTypes.Allocation memory testAllocation = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: testAllocator,
+            bundleIds: new BundleId[](0), // Empty bundle array
+            totalValue: 1000 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with InvalidPhase error (Proxy phase, not Allocation phase)
+        vm.prank(testAllocator);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Allocation, AuctionTypes.AuctionPhase.Proxy));
+        cpaManager.submitAllocation(auctionId, testAllocation);
+    }
 }

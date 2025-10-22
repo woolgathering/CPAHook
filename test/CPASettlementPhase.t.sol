@@ -375,4 +375,23 @@ contract CPASettlementPhaseTest is CPATestBase {
         assertLt(cpaManager.bidderStake(auctionId, bidder1), 1000 * 10**18, "Bidder1 stake reduced");
         assertLt(cpaManager.bidderStake(auctionId, bidder2), 1000 * 10**18, "Bidder2 stake reduced");
     }
+    
+    function test_SubmitAllocation_RejectedInSettlementPhase() public {
+        // Test that allocation submission is rejected during Settlement phase
+        address testAllocator = makeAddr("testAllocator");
+        
+        // Create a test allocation
+        AuctionTypes.Allocation memory testAllocation = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: testAllocator,
+            bundleIds: new BundleId[](0), // Empty bundle array
+            totalValue: 1000 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with InvalidPhase error (Settlement phase, not Allocation phase)
+        vm.prank(testAllocator);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Allocation, AuctionTypes.AuctionPhase.Settlement));
+        cpaManager.submitAllocation(auctionId, testAllocation);
+    }
 }

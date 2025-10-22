@@ -18,6 +18,7 @@ import { LPFeeLibrary } from "@uniswap/v4-core/src/libraries/LPFeeLibrary.sol";
 import { CPAManager } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
 import { AuctionId } from "../src/types/AuctionId.sol";
+import { BundleId } from "../src/types/BundleId.sol";
 import { IErrorsAndEvents } from "../src/utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
@@ -1477,5 +1478,28 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.prank(testBidder);
         vm.expectRevert(IErrorsAndEvents.EthNotAllowed.selector);
         cpaManager.submitBid{value: 1 ether}(auctionId, demands, type(uint256).max);
+    }
+    
+    function test_SubmitAllocation_RejectedInClockPhase() public {
+        // Start the clock phase first
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+        
+        // Test that allocation submission is rejected during Clock phase
+        address testAllocator = makeAddr("testAllocator");
+        
+        // Create a test allocation
+        AuctionTypes.Allocation memory testAllocation = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: testAllocator,
+            bundleIds: new BundleId[](0), // Empty bundle array
+            totalValue: 1000 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with InvalidPhase error (Clock phase, not Allocation phase)
+        vm.prank(testAllocator);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Allocation, AuctionTypes.AuctionPhase.Clock));
+        cpaManager.submitAllocation(auctionId, testAllocation);
     }
 }
