@@ -17,6 +17,7 @@ import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
@@ -35,21 +36,25 @@ library CPAAllocationPhase {
 	 * @notice Submit allocation during allocation phase
 	 * @param self The contract instance
 	 * @param allocationData The allocation data
+	 * @param topAllocation The top allocation mapping
+	 * @param auctionInfo The auction info mapping
+	 * @param poolInfo The pool info mapping
+	 * @param auctionBundles The auction-specific bundles mapping (bundles[auctionId])
+	 * @param hasAllocations The hasAllocations mapping
 	 */
 	function submitAllocation(
 		CPAStorage self,
 		AuctionTypes.Allocation calldata allocationData,
 		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
+		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
 		mapping(AuctionId => bool) storage hasAllocations
 	) external {
 		AuctionId auctionId = allocationData.auctionId;
 
-
 		// check if the submitted allocation outscores the existing top allocation
-		(uint256 score, uint256 totalValue) = _scoreAllocation(self, auctionId, allocationData, auctionInfo, poolInfo, bundles);
+		(uint256 score, uint256 totalValue) = _scoreAllocation(self, auctionId, allocationData, auctionInfo, poolInfo, auctionBundles);
 		if (score > topAllocation[auctionId].score) {
 			topAllocation[auctionId].allocation = allocationData;
 			topAllocation[auctionId].score = score;
@@ -67,9 +72,9 @@ library CPAAllocationPhase {
 		CPAStorage self,
 		AuctionId auctionId,
 		AuctionTypes.Allocation calldata allocationData,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles
+		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles
 	) internal view returns (uint256, uint256) {
 		/* 
 			This is where it gets interesting:
@@ -97,8 +102,11 @@ library CPAAllocationPhase {
 		// to do this, we need to get the prices of the assets in terms of the numeraire in each pool
 		// then we need to multiply the quantities of the assets by the prices and sum them up.
 
+		// Check that allocation is not empty
+		if (allocationData.bundleIds.length == 0) revert IErrorsAndEvents.EmptyAllocation(auctionId);
+
 		// (, address commonNumeraire, , , , , , , PoolKey[] memory poolKeys) = self.getAuctionInfo(auctionId);
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		uint256 totalValue = 0;
 		uint256[] memory quantities = new uint256[](poolKeys.length);
 		bytes32[] memory existingCommitHashes = new bytes32[](allocationData.bundleIds.length);
@@ -110,23 +118,23 @@ library CPAAllocationPhase {
 			BundleId bundleId = allocationData.bundleIds[i];
 			
 			// check that the bundle exists
-			if (bundles[auctionId][bundleId].commitHash == bytes32(0)) revert IErrorsAndEvents.InvalidBundle(auctionId, bundleId);
+			if (auctionBundles[bundleId].commitHash == bytes32(0)) revert IErrorsAndEvents.InvalidBundle(auctionId, bundleId);
 
 			// check that no bidder (commitHash) has been allocated more than one bundle
-			if (_checkIfDuplicateAllocation(bundles[auctionId][bundleId].commitHash, existingCommitHashes, i)) revert IErrorsAndEvents.DuplicateAllocation(auctionId, bundles[auctionId][bundleId].commitHash);
+			if (_checkIfDuplicateAllocation(auctionBundles[bundleId].commitHash, existingCommitHashes, i)) revert IErrorsAndEvents.DuplicateAllocation(auctionId, auctionBundles[bundleId].commitHash);
 
 			// update the quantities
-			AuctionTypes.Bundle memory bundle = bundles[auctionId][bundleId];
+			AuctionTypes.Bundle memory bundle = auctionBundles[bundleId];
 			for (uint256 j = 0; j < bundle.quantities.length; j++) {
 				quantities[j] += bundle.quantities[j];
 			}
 
 			// update the existing commit hashes
-			existingCommitHashes[i] = bundles[auctionId][bundleId].commitHash;
+			existingCommitHashes[i] = auctionBundles[bundleId].commitHash;
 		}
 
 		// Get numeraire decimals once for efficiency
-		uint8 numeraireDecimals = IERC20(auctionInfo[auctionId].commonNumeraire).decimals();
+		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire);
 		
 		// Validate quantities and compute total value in a single loop
 		for (uint256 i = 0; i < poolKeys.length; i++) {
@@ -140,7 +148,7 @@ library CPAAllocationPhase {
 			
 			// Determine which currency is the asset (not the numeraire)
 			address assetCurrency;
-			if (Currency.unwrap(poolKey.currency0) == auctionInfo[auctionId].commonNumeraire) {
+			if (Currency.unwrap(poolKey.currency0) == auctionInfo.commonNumeraire) {
 				// currency0 is numeraire, currency1 is the asset
 				assetCurrency = Currency.unwrap(poolKey.currency1);
 			} else {
@@ -152,7 +160,7 @@ library CPAAllocationPhase {
 			uint256 price = self.manager().getPriceOfCurrency(poolKey, assetCurrency);
 			
 			// Get asset decimals for this pool
-			uint8 assetDecimals = IERC20(assetCurrency).decimals();
+			uint8 assetDecimals = CurrencyDecimals.getDecimals(assetCurrency);
 			
 			// Convert: (quantity in asset decimals) * (price in 18 decimals) => value in numeraire decimals
 			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
@@ -179,7 +187,7 @@ library CPAAllocationPhase {
 		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
 		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) storage bundles,
+		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
 		mapping(bytes32 => BundleId) storage winningBundleIds
 	) internal {
 		// whatever allocation is the top one is the winner
@@ -188,7 +196,7 @@ library CPAAllocationPhase {
 
 		// store the winning bundle ids
 		for (uint i = 0; i < winner.bundleIds.length; i++) {
-			winningBundleIds[bundles[auctionId][winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
+			winningBundleIds[auctionBundles[winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
 		}
 	}
 	
