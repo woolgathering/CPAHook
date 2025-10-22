@@ -1439,4 +1439,43 @@ contract CPAClockPhaseTest is CPATestBase {
             assertEq(finalStake, initialStake, "Stake should remain unchanged if new required stake is lower");
         }
     }
+
+    // ============ ETH Error Tests ============
+
+    function test_ETHError_EthNotAllowed() public {
+        // Start clock phase
+        vm.prank(auctioneer);
+        cpaManager.startClockPhase(auctionId);
+
+        // Create bidder and proxy
+        address testBidder = makeAddr("testBidder");
+        address testProxy = makeAddr("testProxy");
+        createBidder(testBidder, 10000000 * 10**18);
+        vm.deal(testBidder, 1 ether);
+
+        // Generate commit hash
+        bytes32 saltA = keccak256("saltA");
+        bytes32 saltB = keccak256("saltB");
+        bytes32 commitHash = CommitReveal.generateCommitHash(testBidder, testProxy, saltA, saltB);
+
+        // Proxy commits
+        vm.prank(testProxy);
+        cpaManager.commitToBidder(auctionId, commitHash);
+
+        // Submit first bid
+        uint256[] memory demands1 = new uint256[](2);
+        demands1[0] = 30000 * 10**asset1Token.decimals();
+        demands1[1] = 35000 * 10**asset2Token.decimals();
+        
+        approveNumeraireForBidder(testBidder, type(uint256).max);
+        
+        uint256[] memory demands = new uint256[](2);
+        demands[0] = 100 * 10**18;
+        demands[1] = 50 * 10**18;
+        
+        // Should fail with EthNotAllowed error (ERC20 numeraire but ETH sent)
+        vm.prank(testBidder);
+        vm.expectRevert(IErrorsAndEvents.EthNotAllowed.selector);
+        cpaManager.submitBid{value: 1 ether}(auctionId, demands, type(uint256).max);
+    }
 }
