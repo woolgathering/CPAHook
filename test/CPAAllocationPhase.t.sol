@@ -201,8 +201,11 @@ contract CPAAllocationPhaseTest is CPATestBase {
         vm.prank(allocator2);
         cpaManager.submitAllocation(auctionId, allocationData2);
         
-        // Verify the function didn't revert (basic functionality test)
-        // TODO: Add getter functions to verify allocation replacement
+        // Verify that allocator2 is now the top allocator
+        AuctionTypes.TopAllocation memory topAllocation = cpaManager.getTopAllocation(auctionId);
+        assertEq(topAllocation.allocation.allocator, allocator2, "Top allocator should be allocator2");
+        assertGt(topAllocation.score, 0, "Top score should be greater than 0");
+        assertEq(topAllocation.allocation.bundleIds.length, 2, "Top allocation should have 2 bundles");
     }
     
     function test_SubmitAllocation_LowerScoreDoesNotReplace() public {
@@ -237,8 +240,11 @@ contract CPAAllocationPhaseTest is CPATestBase {
         vm.prank(allocator2);
         cpaManager.submitAllocation(auctionId, allocationData2);
         
-        // Verify the function didn't revert (basic functionality test)
-        // TODO: Add getter functions to verify allocation priority
+        // Verify that allocator1 is still the top allocator (higher score)
+        AuctionTypes.TopAllocation memory topAllocation = cpaManager.getTopAllocation(auctionId);
+        assertEq(topAllocation.allocation.allocator, allocator1, "Top allocator should still be allocator1");
+        assertGt(topAllocation.score, 0, "Top score should be greater than 0");
+        assertEq(topAllocation.allocation.bundleIds.length, 2, "Top allocation should have 2 bundles");
     }
     
     function test_SubmitAllocation_InvalidBundleId() public {
@@ -256,30 +262,29 @@ contract CPAAllocationPhaseTest is CPATestBase {
         
         // Should revert with InvalidBundle error
         vm.prank(allocator1);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidBundle.selector, auctionId, selectedBundles[0]));
         cpaManager.submitAllocation(auctionId, allocationData);
     }
     
-    function test_SubmitAllocation_NotInAllocationPhase() public {
-        // Try to submit allocation when not in allocation phase
-        // (This would require setting up the auction in a different phase)
-        
+    // Note: Phase rejection tests are handled in their respective phase test contracts:
+    // - Clock phase: test submission of bundles and allocations (should be rejected)
+    // - Proxy phase: test submission of allocations (should be rejected) 
+    // - Settlement phase: test submission of allocations (should be rejected)
+    // - Finished phase: test submission of allocations (should be rejected)
+    
+    function createTestAllocation() internal view returns (AuctionTypes.Allocation memory) {
         BundleId[] memory selectedBundles = new BundleId[](1);
         selectedBundles[0] = bundleId1;
         
-        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+        return AuctionTypes.Allocation({
             auctionId: auctionId,
             allocator: allocator1,
             bundleIds: selectedBundles,
             totalValue: 1000 * 10**18,
             timestamp: block.timestamp
         });
-        
-        // This test would need to be set up differently to test the phase check
-        // For now, we'll test that it works in the correct phase (allocation phase)
-        vm.prank(allocator1);
-        cpaManager.submitAllocation(auctionId, allocationData);
     }
+    
     
     function test_EndAllocationPhase_Success() public {
         // First submit an allocation
@@ -307,6 +312,12 @@ contract CPAAllocationPhaseTest is CPATestBase {
         // Verify phase changed to Settlement
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
         assertEq(uint256(auctionInfo.currentPhase), uint256(AuctionTypes.AuctionPhase.Settlement), "Phase should be Settlement");
+        
+        // Verify that the top allocation is preserved
+        AuctionTypes.TopAllocation memory topAllocation = cpaManager.getTopAllocation(auctionId);
+        assertEq(topAllocation.allocation.allocator, allocator1, "Top allocator should be preserved");
+        assertGt(topAllocation.score, 0, "Top score should be preserved");
+        assertEq(topAllocation.allocation.bundleIds.length, 2, "Top allocation bundle count should be preserved");
     }
     
     // TODO: Add claimReward test when the function is implemented
@@ -327,7 +338,7 @@ contract CPAAllocationPhaseTest is CPATestBase {
         
         // Should revert with duplicate bundle error
         vm.prank(allocator1);
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.DuplicateAllocation.selector, auctionId, commitHash1));
         cpaManager.submitAllocation(auctionId, allocationData);
     }
     
@@ -361,10 +372,14 @@ contract CPAAllocationPhaseTest is CPATestBase {
             timestamp: block.timestamp
         });
         
+        // Calculate expected total demand dynamically
+        uint256 expectedTotalDemand = 100 * 10**18 + 75 * 10**18 + 1000 * 10**18; // bundle1 + bundle2 + bundle3 asset1 demand
+        assertEq(expectedTotalDemand, 1175 * 10**18, "Expected total demand should be 1175 * 10**18");
+        
         // Should revert with InvalidQuantities error when quantities exceed deposit amounts
         // Total demand: 175 + 1000 = 1175 asset1 (exceeds 1000 deposit)
         vm.prank(allocator1);
-        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidQuantities.selector, auctionId, 1175 * 10**18));
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidQuantities.selector, auctionId, expectedTotalDemand));
         cpaManager.submitAllocation(auctionId, allocationData);
     }
     
@@ -427,7 +442,7 @@ contract CPAAllocationPhaseTest is CPATestBase {
         
         // This should fail because we're in allocation phase, not proxy phase
         vm.prank(proxy1);
-        vm.expectRevert(); // Should revert with InvalidPhase error
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Proxy, AuctionTypes.AuctionPhase.Allocation));
         cpaManager.submitBundle(auctionId, commitHash, bundleData);
     }
 
@@ -527,4 +542,111 @@ contract CPAAllocationPhaseTest is CPATestBase {
         
         console.log("Allocator reward claim test completed successfully");
     }
+    
+    function test_SubmitAllocation_EmptyBundleArray() public {
+        // Create allocation with empty bundle array
+        BundleId[] memory selectedBundles = new BundleId[](0);
+        
+        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator1,
+            bundleIds: selectedBundles,
+            totalValue: 0,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with EmptyAllocation error
+        vm.prank(allocator1);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.EmptyAllocation.selector, auctionId));
+        cpaManager.submitAllocation(auctionId, allocationData);
+    }
+    
+    function test_SubmitAllocation_AfterPhaseExpiration() public {
+        // First submit a valid allocation
+        BundleId[] memory selectedBundles = new BundleId[](2);
+        selectedBundles[0] = bundleId1;
+        selectedBundles[1] = bundleId2;
+        
+        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator1,
+            bundleIds: selectedBundles,
+            totalValue: 1800 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        vm.prank(allocator1);
+        cpaManager.submitAllocation(auctionId, allocationData);
+        
+        // Warp past the allocation phase duration (but don't transition phase)
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
+        
+        // Try to submit another allocation after phase expiration
+        AuctionTypes.Allocation memory expiredAllocation = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator2,
+            bundleIds: selectedBundles,
+            totalValue: 2000 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail because allocation phase has expired
+        vm.prank(allocator2);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.PhaseExpired.selector, auctionId, AuctionTypes.AuctionPhase.Allocation));
+        cpaManager.submitAllocation(auctionId, expiredAllocation);
+    }
+    
+    function test_SubmitAllocation_NonExistentBundleIds() public {
+        // Create allocation with fake bundle IDs that don't exist
+        BundleId[] memory selectedBundles = new BundleId[](2);
+        selectedBundles[0] = BundleId.wrap(keccak256("fakeBundle1"));
+        selectedBundles[1] = BundleId.wrap(keccak256("fakeBundle2"));
+        
+        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator1,
+            bundleIds: selectedBundles,
+            totalValue: 1000 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should fail with InvalidBundle error for the first non-existent bundle
+        vm.prank(allocator1);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidBundle.selector, auctionId, selectedBundles[0]));
+        cpaManager.submitAllocation(auctionId, allocationData);
+    }
+    
+    function test_SubmitAllocation_AtExactExpiration() public {
+        // Test submission at exactly startTime + phaseDuration (should succeed due to >= check)
+        AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
+        uint256 allocationPhaseDuration = auctionInfo.config.phaseDurations[1]; // Allocation phase duration
+        uint256 exactExpirationTime = auctionInfo.clockOpen + allocationPhaseDuration;
+        
+        // Warp to exactly the expiration time
+        vm.warp(exactExpirationTime);
+        
+        // Create allocation data
+        BundleId[] memory selectedBundles = new BundleId[](2);
+        selectedBundles[0] = bundleId1;
+        selectedBundles[1] = bundleId2;
+        
+        AuctionTypes.Allocation memory allocationData = AuctionTypes.Allocation({
+            auctionId: auctionId,
+            allocator: allocator1,
+            bundleIds: selectedBundles,
+            totalValue: 1800 * 10**18,
+            timestamp: block.timestamp
+        });
+        
+        // Should succeed because we're at exactly the expiration time (>= check)
+        vm.prank(allocator1);
+        cpaManager.submitAllocation(auctionId, allocationData);
+        
+        // Verify the allocation was accepted
+        AuctionTypes.TopAllocation memory topAllocation = cpaManager.getTopAllocation(auctionId);
+        assertEq(topAllocation.allocation.allocator, allocator1, "Allocation should be accepted at exact expiration");
+        assertGt(topAllocation.score, 0, "Allocation should have a valid score");
+    }
+    
 }
