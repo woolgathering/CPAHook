@@ -83,6 +83,7 @@ interface IErrorsAndEvents {
 	error DuplicateAllocation(AuctionId auctionId, bytes32 commitHash);
 	error SenderIsNotProxy(AuctionId auctionId, bytes32 commitHash);
 	error InvalidBundleQuantities(AuctionId auctionId, bytes32 commitHash);
+	error EmptyAllocation(AuctionId auctionId);
 	
 	// Privacy and Commit-Reveal Errors
 	error InvalidCommitHash();
@@ -103,6 +104,11 @@ interface IErrorsAndEvents {
 	// Auction cancellation and phase transition errors
 	error CannotCancelInThisPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
 	error PhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
+	error PhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
 	error NoSubmissionsReceived(AuctionId auctionId, AuctionTypes.AuctionPhase phase);
 	error AuctionAlreadyFinished(AuctionId auctionId);
+	
+	// ETH validation errors
+	error EthRequired();
+	error EthNotAllowed();
 }
