@@ -129,6 +129,28 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		_;
 	}
 
+	/**
+	 * @notice Modifier to ensure phase has not expired based on duration
+	 */
+	modifier onlyWhenPhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
+		if (_hasPhaseExpired(auctionId, phase)) {
+			revert IErrorsAndEvents.PhaseExpired(auctionId, phase);
+		}
+		_;
+	}
+
+	/**
+	 * @notice Validates ETH handling for numeraire
+	 * @dev For ETH numeraire: requires msg.value > 0
+	 *      For ERC20 numeraire: requires msg.value == 0
+	 */
+	modifier validateEthForNumeraire(AuctionId auctionId) {
+		address numeraire = auctionInfo[auctionId].commonNumeraire;
+		if (numeraire == address(0) && msg.value == 0) revert IErrorsAndEvents.EthRequired();
+		if (numeraire != address(0) && msg.value > 0) revert IErrorsAndEvents.EthNotAllowed();
+		_;
+	}
+
 	// ========================================
 	// AUCTION MANAGEMENT FUNCTIONS
 	// ========================================
@@ -399,7 +421,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		AuctionId auctionId,
 		uint256[] calldata demands,
 		uint256 maxStakeAmount
-	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) validateEthForNumeraire(auctionId) {
+		
 		CPAClockPhase.processBid(
 			this,
 			auctionId,
@@ -426,7 +449,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @notice Dropout from auction with penalty. Can only be done during the clock phase.
 	 * @param auctionId The auction ID
 	 */
-	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
+	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) {
+		
 		uint256 stake = bidderStake[auctionId][msg.sender];
 		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // this also covers the case where the bidder is not in the auction
 		
@@ -471,8 +495,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		AuctionId auctionId,
 		bytes32 commitHash,
 		AuctionTypes.Bundle calldata bundleData
-	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
-		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles, commitProxy, bundleData, hasBundles);
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
+		
+		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles[auctionId], commitProxy[auctionId], bundleData, hasBundles);
 	}
 
 	// ========================================
@@ -488,9 +513,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	function submitAllocation(
 		AuctionId auctionId,
 		AuctionTypes.Allocation calldata allocationData
-	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
+	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation) {
 		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized(); // cannot submit an allocation for someone else
-		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo, poolInfo, bundles, hasAllocations);
+		
+		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo[auctionId], poolInfo, bundles[auctionId], hasAllocations);
 	}
 
 	// ========================================
@@ -524,7 +550,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param commitHash The commit hash for the bidder
 	 * @param poolId The pool ID to claim from
 	 */
-	function claimToken(AuctionId auctionId, bytes32 commitHash, PoolId poolId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) onlyOwner() {
+	function claimToken(AuctionId auctionId, bytes32 commitHash, PoolId poolId) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) onlyOwner() {
 		// we only allow the owner to claim individual tokens on behalf of the bidder because in this function,
 		// we do not ever remove the bundle from the winning bundle ids.
 		// the owner here is NOT the auction owner, but the owner of the CPA protocol itself.
@@ -550,7 +576,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param auctionId The auction ID
 	 * @param commitHash The commit hash for the bidder
 	 */
-	function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
+	function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		CPASettlementPhase.claimAllTokens(
 			this,
 			msg.sender,
@@ -641,7 +667,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		}
 
 		// select the winner and move the assets to the pools
-		CPAAllocationPhase.selectWinner(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles, winningBundleIds);
+		CPAAllocationPhase.selectWinner(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles[auctionId], winningBundleIds);
 		CPAAllocationPhase.transferAssetsToPools(this, auctionId, auctionInfo, poolInfo);
 		
 		// Transition to settlement phase
