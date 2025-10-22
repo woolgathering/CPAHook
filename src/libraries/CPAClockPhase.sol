@@ -11,6 +11,7 @@ import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
@@ -120,7 +121,7 @@ library CPAClockPhase {
 	}
 
 	function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256 bidPoints) {
-		bidPoints = stakeAmount * 10**18 / (10**IERC20(numeraire).decimals());
+		bidPoints = stakeAmount * 10**18 / (10**CurrencyDecimals.getDecimals(numeraire));
 	}
     
 	/**
@@ -316,8 +317,6 @@ library CPAClockPhase {
 		// Get all pool keys for this auction
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		
-		// Get numeraire decimals once for efficiency
-		
 		// Calculate inner product: sum(demands[i] * prices[i])
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
 			// Get the pool ID and its current price from the pool
@@ -340,10 +339,20 @@ library CPAClockPhase {
 			
 			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
 			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
-			totalValue += (demands[i] * price * (10**IERC20(auctionInfo.commonNumeraire).decimals())) / (10**(18 + IERC20(assetCurrency).decimals()));
+			totalValue += (demands[i] * price * (10**CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire))) / (10**(18 + CurrencyDecimals.getDecimals(assetCurrency)));
 		}
 	}
 
+	/**
+	 * @notice Calculate bid value using memory demands array
+	 * @param demands Array of demands (memory parameter - used when demands are already in memory)
+	 * @param auctionInfo Mapping for auction info
+	 * @param poolManager The pool manager instance
+	 * @return totalValue Total value of the bid
+	 * @dev This function is identical to calculateBidValue() but takes memory demands instead of calldata.
+	 *      Used when demands are already loaded into memory (e.g., from totalDemands array in shouldEndClockPhase).
+	 *      Avoids unnecessary data copying between calldata and memory.
+	 */
 	function calculateBidValueWithMemoryDemands(
 		uint256[] memory demands,
 		AuctionTypes.AuctionInfo storage auctionInfo,
@@ -352,8 +361,6 @@ library CPAClockPhase {
 		// Get all pool keys for this auction
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		
-		// Get numeraire decimals once for efficiency
-		
 		// Calculate inner product: sum(demands[i] * prices[i])
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
 			// Get the pool ID and its current price from the pool
@@ -376,7 +383,7 @@ library CPAClockPhase {
 			
 			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
 			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
-			totalValue += (demands[i] * price * (10**IERC20(auctionInfo.commonNumeraire).decimals())) / (10**(18 + IERC20(assetCurrency).decimals()));
+			totalValue += (demands[i] * price * (10**CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire))) / (10**(18 + CurrencyDecimals.getDecimals(assetCurrency)));
 		}
 	}
 
