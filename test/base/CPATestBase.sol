@@ -430,7 +430,7 @@ abstract contract CPATestBase is Deployers {
     }
 
     /// @notice Calculate bid value at current pool prices
-    function calculateBidValue(uint256[] memory demands) internal view returns (uint256) {
+    function calculateBidValue(uint256[] memory demands) internal view virtual returns (uint256) {
         uint256 totalValue = 0;
         PoolKey[] memory poolKeys = new PoolKey[](2);
         poolKeys[0] = asset1PoolKey;
