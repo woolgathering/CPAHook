@@ -124,7 +124,7 @@ abstract contract CPATestBase is Deployers {
         cpaHook = deployCPAHook(poolManager);
         
         // Deploy CPAManager (no longer a hook, simple deployment)
-        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), address(this));
+        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), positionManager, address(this));
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));

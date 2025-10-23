@@ -29,13 +29,13 @@ contract CPAManagerTest is Deployers {
 	/// @notice Deploy CPAManager (no longer a hook, so no address mining needed)
 	function deployManager(IPoolManager _poolManager, address _owner, address _cpaHook) internal returns (CPAManager) {
 		// Simple deployment since CPAManager is no longer a hook
-		return new CPAManager(_poolManager, _owner, _cpaHook, _owner);
+		return new CPAManager(_poolManager, _owner, _cpaHook, positionManager, _owner);
 	}
 
 	/// @notice Deploy CPAManager with fallback (same as regular deployment now)
 	function deployManagerWithFallback(IPoolManager _poolManager, address _owner, address _cpaHook) internal returns (CPAManager) {
 		// Simple deployment since CPAManager is no longer a hook
-		return new CPAManager(_poolManager, _owner, _cpaHook, _owner);
+		return new CPAManager(_poolManager, _owner, _cpaHook, positionManager, _owner);
 	}
 
 	function test_Constructor_Success() public {
