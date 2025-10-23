@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 
@@ -35,6 +36,9 @@ abstract contract CPAStorage {
 
 	/// @notice Pool manager
 	IPoolManager public manager;
+	
+	/// @notice Position manager for NFT position creation
+	IPositionManager public immutable positionManager;
 	
 	/// @notice Protocol wallet address for penalty collection
 	address public immutable protocolWallet;
@@ -155,8 +159,10 @@ abstract contract CPAStorage {
 	/**
 	 * @notice Constructor
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
+	 * @param _positionManager The PositionManager address for NFT position creation
 	 */
-	constructor(address _cpaAuctionHookAddr) {
+	constructor(address _cpaAuctionHookAddr, IPositionManager _positionManager) {
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;
+		positionManager = _positionManager;
 	}
 }

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { IHooks } from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
@@ -56,14 +57,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param _poolManager The V4 pool manager
 	 * @param _owner The auction owner
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
+	 * @param _positionManager The PositionManager address for NFT position creation
 	 * @param _protocolWallet The protocol wallet address for penalty collection
 	 */
 	constructor(
 		IPoolManager _poolManager,
 		address _owner,
 		address _cpaAuctionHookAddr,
+		IPositionManager _positionManager,
 		address _protocolWallet
-	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr) {
+	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr, _positionManager) {
 		manager = _poolManager;
 		protocolWallet = _protocolWallet;
 	}
