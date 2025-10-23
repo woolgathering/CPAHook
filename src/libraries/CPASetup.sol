@@ -164,6 +164,12 @@ library CPASetup {
 		// Call poolManager.unlock() which will trigger unlockCallback
 		self.manager().unlock(callbackData);
 
+		// Approve asset currency to PositionManager for future position minting
+		IERC20(Currency.unwrap(itemCurrency)).approve(
+			address(self.positionManager()), 
+			type(uint256).max
+		);
+
 		// Emit event for tracking
 		emit IErrorsAndEvents.AssetsDeposited(auctionId, poolKey.toId(), address(Currency.unwrap(itemCurrency)), depositAmount, self.cpaAuctionHookAddr());
 	}
@@ -260,7 +266,10 @@ library CPASetup {
 			revert IErrorsAndEvents.InvalidBidsLength();
 		}
 
-		// Validate all pools are in the auction
+		// Validate pools, determine currencies, and approve to PositionManager in single loop
+		address numeraireAddress = auctionInfo.commonNumeraire;
+		Currency[] memory itemCurrencies = new Currency[](poolKeys.length);
+		
 		for (uint256 i = 0; i < poolKeys.length; i++) {
 			// Check that this pool is part of the auction
 			bool found = false;
@@ -273,18 +282,19 @@ library CPASetup {
 			if (!found) {
 				revert IErrorsAndEvents.InvalidPool();
 			}
-		}
-
-		// Determine item currencies for each pool
-		address numeraireAddress = auctionInfo.commonNumeraire;
-		Currency[] memory itemCurrencies = new Currency[](poolKeys.length);
-		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
+			
+			// Determine item currency (non-numeraire)
 			if (address(Currency.unwrap(poolKeys[i].currency0)) == numeraireAddress) {
 				itemCurrencies[i] = poolKeys[i].currency1;
 			} else {
 				itemCurrencies[i] = poolKeys[i].currency0;
 			}
+			
+			// Approve asset currency to PositionManager for future position minting
+			IERC20(Currency.unwrap(itemCurrencies[i])).approve(
+				address(self.positionManager()), 
+				type(uint256).max
+			);
 		}
 
 		// Create callback data for batch deposit
