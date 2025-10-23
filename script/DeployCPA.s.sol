@@ -5,6 +5,7 @@ import { Script, console } from "forge-std/Script.sol";
 import { CPAManager } from "../src/CPAManager.sol";
 import { CPAHook } from "../src/CPAHook.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 
@@ -12,16 +13,31 @@ import { HookMiner } from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
  * @title DeployCPA
  * @notice Deploy script for CPAManager and CPAHook contracts
  * @dev Run with: forge script script/DeployCPA.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
+ * 
+ * Required environment variables:
+ * - PRIVATE_KEY: Private key for deployment
+ * - POOL_MANAGER_ADDRESS: V4 PoolManager address
+ * - POSITION_MANAGER_ADDRESS: V4 PositionManager address
+ * - PROTOCOL_OWNER: Protocol owner address (optional, defaults to deployer)
+ * 
+ * PositionManager addresses by chain:
+ * - Mainnet: TBD (deployer must provide actual address)
+ * - Sepolia: TBD (deployer must provide actual address)  
+ * - Base: TBD (deployer must provide actual address)
+ * 
+ * Note: Deployer must provide correct PositionManager address for their target chain
  */
 contract DeployCPA is Script {
     function run() external {
         // Load environment variables
         address deployer = vm.addr(vm.envUint("PRIVATE_KEY"));
         address poolManagerAddress = vm.envAddress("POOL_MANAGER_ADDRESS");
+        address positionManagerAddress = vm.envAddress("POSITION_MANAGER_ADDRESS");
         address protocolOwner = vm.envOr("PROTOCOL_OWNER", deployer);
 
         console.log("Deploying from address:", deployer);
         console.log("PoolManager address:", poolManagerAddress);
+        console.log("PositionManager address:", positionManagerAddress);
         console.log("Protocol owner:", protocolOwner);
         console.log("Deployer balance:", deployer.balance);
 
@@ -33,12 +49,13 @@ contract DeployCPA is Script {
         CPAHook cpaHook = deployCPAHook(IPoolManager(poolManagerAddress), protocolOwner);
         console.log("CPAHook deployed at:", address(cpaHook));
 
-        // Deploy CPAManager with PoolManager and CPAHook addresses
+        // Deploy CPAManager with PoolManager, PositionManager, and CPAHook addresses
         console.log("Deploying CPAManager...");
         CPAManager cpaManager = new CPAManager(
             IPoolManager(poolManagerAddress),
             protocolOwner,
             address(cpaHook),
+            IPositionManager(positionManagerAddress),
             protocolOwner
         );
         console.log("CPAManager deployed at:", address(cpaManager));
@@ -54,6 +71,7 @@ contract DeployCPA is Script {
         console.log("CPAManager:", address(cpaManager));
         console.log("CPAHook:", address(cpaHook));
         console.log("PoolManager:", poolManagerAddress);
+        console.log("PositionManager:", positionManagerAddress);
         console.log("Protocol Owner:", protocolOwner);
         console.log("Deployer:", deployer);
 
@@ -62,6 +80,7 @@ contract DeployCPA is Script {
             "CPAManager=", vm.toString(address(cpaManager)), "\n",
             "CPAHook=", vm.toString(address(cpaHook)), "\n",
             "PoolManager=", vm.toString(poolManagerAddress), "\n",
+            "PositionManager=", vm.toString(positionManagerAddress), "\n",
             "ProtocolOwner=", vm.toString(protocolOwner), "\n",
             "Deployer=", vm.toString(deployer), "\n"
         ));
