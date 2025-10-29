@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { Test } from "forge-std/Test.sol";
 import { console } from "forge-std/console.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -393,5 +394,34 @@ contract CPASettlementPhaseTest is CPATestBase {
         vm.prank(testAllocator);
         vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Allocation, AuctionTypes.AuctionPhase.Settlement));
         cpaManager.submitAllocation(auctionId, testAllocation);
+    }
+
+    function test_PositionMintingAndIdMatching() public {
+        // This test verifies that positions are minted during transitionToSettlement
+        // and that position IDs are correctly set via ERC721 receiver
+        
+        // Get auction info to access pool keys
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        PoolKey[] memory poolKeys = auction.poolKeys;
+        
+        // Verify positions were minted for each pool
+        for (uint256 i = 0; i < poolKeys.length; i++) {
+            PoolId poolId = poolKeys[i].toId();
+            (,,,uint256 depositAmount,,,AuctionId poolAuctionId, uint256 positionId) = cpaManager.getPoolInfo(poolId);
+            
+            // Verify position ID is set (should be > 0)
+            assertTrue(positionId > 0, "Position ID should be set for pool");
+            
+            // Verify CPAManager owns the position NFT
+            assertEq(IERC721(address(positionManager)).ownerOf(positionId), address(cpaManager), "CPAManager should own the position NFT");
+            
+            // Verify the position ID corresponds to the correct pool using PositionManager
+            (PoolKey memory retrievedPoolKey, ) = positionManager.getPoolAndPositionInfo(positionId);
+            assertEq(PoolId.unwrap(retrievedPoolKey.toId()), PoolId.unwrap(poolId), "Position should be associated with correct pool");
+            
+            console.log("Pool %d: Position ID %d correctly associated with pool", i, positionId);
+        }
+        
+        console.log("All positions minted and IDs correctly matched!");
     }
 }
