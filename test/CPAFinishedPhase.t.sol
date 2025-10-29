@@ -817,6 +817,45 @@ contract CPAFinishedPhaseTest is CPATestBase {
     }
 
     // ========================================
+    // EVENT EMISSION TESTS
+    // ========================================
+
+    function test_AllocatorRewardClaimedEmitsCorrectAmount() public {
+        // Get the allocator reward amount before claiming
+        uint256 rewardAmount = cpaManager.getAuctionInfo(auctionId).allocatorReward;
+        assertTrue(rewardAmount > 0, "Allocator should have reward to claim");
+        
+        // Set up event expectation
+        vm.expectEmit(true, true, true, true);
+        emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, allocator1, rewardAmount);
+        
+        // Claim allocator reward
+        vm.prank(allocator1);
+        cpaManager.claimAllocatorReward(auctionId);
+    }
+
+    function test_ForfeitZerosBidderBidPoints() public {
+        // Verify bidder3 has both stake and bid points initially
+        uint256 initialStake = cpaManager.bidderStake(auctionId, bidder3);
+        uint256 initialBidPoints = cpaManager.bidderBidPoints(auctionId, bidder3);
+        
+        assertTrue(initialStake > 0, "Bidder3 should have stake");
+        assertTrue(initialBidPoints > 0, "Bidder3 should have bid points");
+        
+        // Call forfeit
+        cpaManager.forfeit(auctionId, bidder3);
+        
+        // Verify both are zeroed
+        uint256 finalStake = cpaManager.bidderStake(auctionId, bidder3);
+        uint256 finalBidPoints = cpaManager.bidderBidPoints(auctionId, bidder3);
+        
+        assertEq(finalStake, 0, "Stake should be zeroed after forfeit");
+        assertEq(finalBidPoints, 0, "Bid points should be zeroed after forfeit");
+        
+        console.log("Forfeit correctly zeros both bidderStake and bidderBidPoints");
+    }
+
+    // ========================================
     // HELPER FUNCTIONS
     // ========================================
 
