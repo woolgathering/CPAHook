@@ -30,6 +30,9 @@ library AuctionTypes {
 		Cancelled
 	}
 
+	/// @notice Maximum total pause duration (72 hours)
+	uint256 public constant MAX_PAUSE_DURATION = 72 * 60 * 60; // 259,200 seconds
+
 	/// @notice Bundle structure for proxy submissions
 	struct Bundle {
 		AuctionId auctionId;        // ID of the auction for this bundle
@@ -95,7 +98,7 @@ library AuctionTypes {
 		int256 excessDemand;        // Current excess demand (can be negative for undersell)
 		int24 lastOversoldTick;     // Last tick where demand > supply for this item
 		AuctionId auctionId;        // ID of the auction for this pool
-		bytes32 positionId;         // ID of the position for this pool when we deposit liquidity
+		uint256 positionId;         // NFT tokenId of the position for this pool
 	}
 
 	struct AuctionInfo {
@@ -110,6 +113,7 @@ library AuctionTypes {
 		uint256 allocatorReward;
 		bool[] changedPrices;       // Array tracking which prices changed in current round
 		uint256 lastRevenue;        // Last revenue for EMA calculation
+		uint256 totalPauseDuration; // Total time auction has been paused (in seconds)
 	}
 	
 	/// @notice Callback data structure for bid as liquidity operations
@@ -163,6 +167,11 @@ library AuctionTypes {
 		uint256[] depositAmounts;
 		AuctionId auctionId;
 		address originalCaller;
+	}
+
+	struct CallbackDataBatchERC6909ToERC20 {
+		Currency[] assetCurrencies;
+		uint256[] amounts;
 	}
 
 }

@@ -5,6 +5,7 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
@@ -26,6 +27,9 @@ abstract contract CPAStorage {
 	/// @notice Pool info mapping
 	mapping(PoolId => AuctionTypes.PoolInfo) public poolInfo;
 
+	/// @notice Pause start time mapping (timestamp when current pause started, 0 if not paused)
+	mapping(AuctionId => uint256) public pauseStartTime;
+
 	/// @notice Current prices for currencies (in numeraire units)
 	/// @dev Currency address => price in numeraire (e.g., 1e18 = 1 numeraire token per currency unit)
 	mapping(address => uint256) public currentPrices;
@@ -35,10 +39,14 @@ abstract contract CPAStorage {
 	address public cpaAuctionHookAddr;
 
 	/// @notice Pool manager
-	IPoolManager public manager;
+	IPoolManager public immutable manager;
 	
 	/// @notice Position manager for NFT position creation
 	IPositionManager public immutable positionManager;
+
+	/// @notice Permit2 address for allowance transfers
+	/// @dev This can be hardcoded since it is the same deployment address across all chains Uniswap V4 is deployed on
+	IAllowanceTransfer public immutable permit2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 	
 	/// @notice Protocol wallet address for penalty collection
 	address public immutable protocolWallet;
@@ -50,7 +58,7 @@ abstract contract CPAStorage {
     	return auctionInfo[auctionId];
 	}
 
-	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, bytes32) {
+	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, uint256) {
 		return (
 			poolInfo[poolId].key,
 			poolInfo[poolId].startingTick,
