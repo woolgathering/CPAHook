@@ -558,6 +558,265 @@ contract CPAFinishedPhaseTest is CPATestBase {
     }
 
     // ========================================
+    // RECLAIM STAKE TESTS
+    // ========================================
+
+    function test_ReclaimStakeSuccess() public {
+        // Verify basic reclaimStake functionality for bidder3 (who didn't claim)
+        uint256 initialStake = cpaManager.bidderStake(auctionId, bidder3);
+        assertTrue(initialStake > 0, "Bidder3 should have stake");
+        
+        // Get initial balances
+        uint256 initialBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 initialProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        
+        // Call reclaimStake
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+        
+        // Verify stake is zeroed
+        uint256 finalStake = cpaManager.bidderStake(auctionId, bidder3);
+        assertEq(finalStake, 0, "Bidder3's stake should be 0 after reclaim");
+        
+        // Verify penalty calculation (10% penalty)
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        uint256 expectedPenalty = initialStake * auction.config.minSpendRatio / 10000;
+        uint256 expectedRefund = initialStake - expectedPenalty;
+        
+        // Verify protocol penalties increased
+        uint256 finalProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        uint256 actualPenalty = finalProtocolPenalties - initialProtocolPenalties;
+        assertEq(actualPenalty, expectedPenalty, "Protocol penalties should increase by penalty amount");
+        
+        // Verify bidder received refund
+        uint256 finalBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 refundReceived = finalBidderBalance - initialBidderBalance;
+        assertEq(refundReceived, expectedRefund, "Bidder should receive 90% of stake");
+        
+        console.log("Successfully reclaimed stake: %d tokens, penalty: %d, refund: %d", 
+                   initialStake, expectedPenalty, expectedRefund);
+    }
+
+    function test_ReclaimStakeRevertsWithZeroStake() public {
+        // Use bidder1 who already claimed (stake = 0)
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder1);
+        assertEq(stake, 0, "Bidder1 should have no stake after claiming");
+        
+        // Attempt to reclaim stake
+        vm.prank(bidder1);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidStakeAmount.selector));
+        cpaManager.reclaimStake(auctionId);
+    }
+
+    function test_ReclaimStakeMultipleCalls() public {
+        // First call should succeed
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+        
+        // Verify stake is zeroed
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        assertEq(stake, 0, "Bidder3's stake should be 0 after first reclaim");
+        
+        // Second call should revert
+        vm.prank(bidder3);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidStakeAmount.selector));
+        cpaManager.reclaimStake(auctionId);
+    }
+
+    function test_ReclaimStakeEmitsCorrectEvents() public {
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        
+        uint256 expectedPenalty = stake * auction.config.minSpendRatio / 10000;
+        uint256 expectedRefund = stake - expectedPenalty;
+        
+        // Set up event expectations
+        vm.expectEmit(true, true, true, true);
+        emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder3, expectedPenalty);
+        
+        vm.expectEmit(true, true, true, true);
+        emit IErrorsAndEvents.StakeRefunded(auctionId, bidder3, expectedRefund);
+        
+        // Call reclaimStake
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+    }
+
+    function test_ReclaimStakePenaltyCalculation() public {
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        
+        // Calculate expected amounts
+        uint256 expectedPenalty = stake * auction.config.minSpendRatio / 10000; // 10%
+        uint256 expectedRefund = stake - expectedPenalty; // 90%
+        
+        // Get initial balances
+        uint256 initialBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 initialProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        
+        // Call reclaimStake
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+        
+        // Verify exact calculations
+        uint256 finalBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 finalProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        
+        uint256 actualRefund = finalBidderBalance - initialBidderBalance;
+        uint256 actualPenalty = finalProtocolPenalties - initialProtocolPenalties;
+        
+        assertEq(actualPenalty, expectedPenalty, "Penalty should be exactly 10% of stake");
+        assertEq(actualRefund, expectedRefund, "Refund should be exactly 90% of stake");
+        assertEq(actualPenalty + actualRefund, stake, "Penalty + refund should equal original stake");
+        
+        console.log("Penalty calculation verified: %d penalty, %d refund from %d stake", 
+                   actualPenalty, actualRefund, stake);
+    }
+
+    function test_ReclaimStakeZerosBidderState() public {
+        // Verify initial state
+        uint256 initialStake = cpaManager.bidderStake(auctionId, bidder3);
+        uint256 initialBidPoints = cpaManager.bidderBidPoints(auctionId, bidder3);
+        
+        assertTrue(initialStake > 0, "Bidder3 should have stake initially");
+        assertTrue(initialBidPoints > 0, "Bidder3 should have bid points initially");
+        
+        // Call reclaimStake
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+        
+        // Verify both mappings are zeroed
+        uint256 finalStake = cpaManager.bidderStake(auctionId, bidder3);
+        uint256 finalBidPoints = cpaManager.bidderBidPoints(auctionId, bidder3);
+        
+        assertEq(finalStake, 0, "bidderStake should be zeroed");
+        assertEq(finalBidPoints, 0, "bidderBidPoints should be zeroed");
+        
+        console.log("Bidder state completely zeroed after reclaim");
+    }
+
+    function test_ReclaimStakeDistribution() public {
+        // Test distribution when bidder calls reclaimStake themselves
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        
+        uint256 expectedPenalty = stake * auction.config.minSpendRatio / 10000; // 10%
+        uint256 expectedRefund = stake - expectedPenalty; // 90%
+        
+        // Get initial balances
+        uint256 initialBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 initialProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        
+        // Call reclaimStake
+        vm.prank(bidder3);
+        cpaManager.reclaimStake(auctionId);
+        
+        // Verify distribution
+        uint256 finalBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 finalProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        
+        uint256 bidderReceived = finalBidderBalance - initialBidderBalance;
+        uint256 protocolReceived = finalProtocolPenalties - initialProtocolPenalties;
+        
+        // Verify: 90% to bidder, 10% to protocol, no third-party reward
+        assertEq(bidderReceived, expectedRefund, "Bidder should receive 90%");
+        assertEq(protocolReceived, expectedPenalty, "Protocol should receive 10%");
+        assertEq(bidderReceived + protocolReceived, stake, "Total should equal original stake");
+        
+        console.log("Distribution verified: %d to bidder (90%%), %d to protocol (10%%)", 
+                   bidderReceived, protocolReceived);
+    }
+
+    function test_ForfeitDistribution() public {
+        // Test distribution when third party calls forfeit
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
+        
+        uint256 penaltyRate = auction.config.minSpendRatio; // 10%
+        uint256 forfeitureRewardRate = 500; // 5% (FORFEITURE_REWARD_RATE)
+        
+        uint256 expectedPenalty = stake * penaltyRate / 10000; // 10%
+        uint256 expectedReward = stake * forfeitureRewardRate / 10000; // 5%
+        uint256 expectedRefund = stake - expectedPenalty - expectedReward; // 85%
+        
+        // Get initial balances
+        uint256 initialBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 initialProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        uint256 initialCallerBalance = numeraireToken.balanceOf(address(this));
+        
+        // Call forfeit (this test contract as caller)
+        cpaManager.forfeit(auctionId, bidder3);
+        
+        // Verify distribution
+        uint256 finalBidderBalance = numeraireToken.balanceOf(bidder3);
+        uint256 finalProtocolPenalties = cpaManager.protocolPenalties(auctionId);
+        uint256 finalCallerBalance = numeraireToken.balanceOf(address(this));
+        
+        uint256 bidderReceived = finalBidderBalance - initialBidderBalance;
+        uint256 protocolReceived = finalProtocolPenalties - initialProtocolPenalties;
+        uint256 callerReceived = finalCallerBalance - initialCallerBalance;
+        
+        // Verify: 85% to bidder, 10% to protocol, 5% to caller
+        assertEq(bidderReceived, expectedRefund, "Bidder should receive 85%");
+        assertEq(protocolReceived, expectedPenalty, "Protocol should receive 10%");
+        assertEq(callerReceived, expectedReward, "Caller should receive 5%");
+        assertEq(bidderReceived + protocolReceived + callerReceived, stake, "Total should equal original stake");
+        
+        console.log("Forfeit distribution verified: %d to bidder (85%%), %d to protocol (10%%), %d to caller (5%%)", 
+                   bidderReceived, protocolReceived, callerReceived);
+    }
+
+    function test_ReclaimStakeAfterForfeit() public {
+        // First call forfeit on bidder3
+        cpaManager.forfeit(auctionId, bidder3);
+        
+        // Verify stake is zeroed
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        assertEq(stake, 0, "Bidder3's stake should be 0 after forfeit");
+        
+        // Now try to call reclaimStake - should revert
+        vm.prank(bidder3);
+        vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidStakeAmount.selector));
+        cpaManager.reclaimStake(auctionId);
+        
+        console.log("reclaimStake correctly reverts after forfeit");
+    }
+
+    function test_ForfeitEmitsForfeitureRewardTransferredEvent() public {
+        uint256 stake = cpaManager.bidderStake(auctionId, bidder3);
+        uint256 expectedReward = stake * 500 / 10000; // 5% (FORFEITURE_REWARD_RATE)
+        
+        // Set up event expectation
+        vm.expectEmit(true, true, true, true);
+        emit IErrorsAndEvents.ForfeitureRewardTransferred(auctionId, address(this), expectedReward);
+        
+        // Call forfeit
+        cpaManager.forfeit(auctionId, bidder3);
+    }
+
+    function test_GetBidderDemandsInFinishedPhase() public {
+        // Get demands for all bidders in Finished phase
+        uint256[] memory demands1 = cpaManager.getBidderDemands(auctionId, bidder1);
+        uint256[] memory demands2 = cpaManager.getBidderDemands(auctionId, bidder2);
+        uint256[] memory demands3 = cpaManager.getBidderDemands(auctionId, bidder3);
+        
+        // Verify correct demands from Clock phase
+        assertEq(demands1.length, 2, "Bidder1 should have 2 demands");
+        assertEq(demands1[0], 50 * 10**18, "Bidder1 demand1 should be 50e18");
+        assertEq(demands1[1], 60 * 10**18, "Bidder1 demand2 should be 60e18");
+        
+        assertEq(demands2.length, 2, "Bidder2 should have 2 demands");
+        assertEq(demands2[0], 40 * 10**18, "Bidder2 demand1 should be 40e18");
+        assertEq(demands2[1], 50 * 10**18, "Bidder2 demand2 should be 50e18");
+        
+        assertEq(demands3.length, 2, "Bidder3 should have 2 demands");
+        assertEq(demands3[0], 30 * 10**18, "Bidder3 demand1 should be 30e18");
+        assertEq(demands3[1], 41 * 10**18, "Bidder3 demand2 should be 41e18");
+        
+        console.log("All bidder demands correctly retrieved in Finished phase");
+    }
+
+    // ========================================
     // HELPER FUNCTIONS
     // ========================================
 
