@@ -692,8 +692,8 @@ contract CPAClockPhaseTest is CPATestBase {
         (, int24 asset2Tick1, , ) = poolManager.getSlot0(poolKeys[1].toId());
         
         // Verify pool info after round 1
-        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, bytes32 asset1PositionId1) = cpaManager.getPoolInfo(poolKeys[0].toId());
-        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, bytes32 asset2PositionId1) = cpaManager.getPoolInfo(poolKeys[1].toId());
+        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, uint256 asset1PositionId1) = cpaManager.getPoolInfo(poolKeys[0].toId());
+        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, uint256 asset2PositionId1) = cpaManager.getPoolInfo(poolKeys[1].toId());
         
         // Asset1 should have positive excess demand (oversold)
         assertGt(asset1ExcessDemand1, 0, "Asset1 should have positive excess demand (oversold)");
@@ -726,8 +726,8 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.endClockRound(auctionId);
         
         // Verify pool info after round 2
-        (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, bytes32 asset1PositionId2) = cpaManager.getPoolInfo(poolKeys[0].toId());
-        (,,,uint256 asset2Deposit2, int256 asset2ExcessDemand2, int24 asset2LastOversoldTick2, AuctionId asset2AuctionId2, bytes32 asset2PositionId2) = cpaManager.getPoolInfo(poolKeys[1].toId());
+        (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, uint256 asset1PositionId2) = cpaManager.getPoolInfo(poolKeys[0].toId());
+        (,,,uint256 asset2Deposit2, int256 asset2ExcessDemand2, int24 asset2LastOversoldTick2, AuctionId asset2AuctionId2, uint256 asset2PositionId2) = cpaManager.getPoolInfo(poolKeys[1].toId());
         
         // Asset1 should have zero excess demand (exactly clearing)
         assertEq(asset1ExcessDemand2, 0, "Asset1 should have zero excess demand (exactly clearing)");

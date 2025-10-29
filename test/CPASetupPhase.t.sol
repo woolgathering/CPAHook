@@ -82,7 +82,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			int256 pool1ExcessDemand,
 			int24 pool1LastOversoldTick,
 			AuctionId pool1AuctionId,
-			bytes32 pool1PositionId
+			uint256 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
 		
 		(
@@ -93,7 +93,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			int256 pool2ExcessDemand,
 			int24 pool2LastOversoldTick,
 			AuctionId pool2AuctionId,
-			bytes32 pool2PositionId
+			uint256 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
 		
 		// No main pool verification needed since CPAManager is not a hook
@@ -109,7 +109,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		assertEq(pool1DepositAmount, 0, "Pool1 deposit amount should be 0 initially");
 		assertEq(pool1ExcessDemand, 0, "Pool1 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool1AuctionId) == AuctionId.unwrap(auctionId), "Pool1 should reference the correct auction");
-		assertEq(pool1PositionId, bytes32(0), "Pool1 position id should be 0 initially");
+		assertEq(pool1PositionId, 0, "Pool1 position id should be 0 initially");
 		
 		// Verify pool2 info
 		assertEq(Currency.unwrap(pool2Key.currency0), Currency.unwrap(asset2PoolKey.currency0), "Pool2 currency0 should match");
@@ -122,7 +122,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		assertEq(pool2DepositAmount, 0, "Pool2 deposit amount should be 0 initially");
 		assertEq(pool2ExcessDemand, 0, "Pool2 excess demand should be 0 initially");
 		assertTrue(AuctionId.unwrap(pool2AuctionId) == AuctionId.unwrap(auctionId), "Pool2 should reference the correct auction");
-		assertEq(pool2PositionId, bytes32(0), "Pool2 position id should be 0 initially");
+		assertEq(pool2PositionId, 0, "Pool2 position id should be 0 initially");
 		
 		// ============ Verify Pool to Auction ID Mapping ============
 		// Check that poolToAuctionId mapping is correct
@@ -209,7 +209,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			int256 pool1ExcessDemand,
 			int24 pool1LastOversoldTick,
 			AuctionId pool1AuctionId,
-			bytes32 pool1PositionId
+			uint256 pool1PositionId
 		) = cpaManager.getPoolInfo(pool1Id);
 		
 		(
@@ -220,7 +220,7 @@ contract CPASetupPhaseTest is CPATestBase {
 			int256 pool2ExcessDemand,
 			int24 pool2LastOversoldTick,
 			AuctionId pool2AuctionId,
-			bytes32 pool2PositionId
+			uint256 pool2PositionId
 		) = cpaManager.getPoolInfo(pool2Id);
 		
 		// Verify pool1 info

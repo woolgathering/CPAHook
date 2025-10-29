@@ -412,8 +412,8 @@ contract CPAClock6DecimalsTest is CPATestBase6Decimals {
         cpaManager.endClockRound(auctionId);
         
         // Get pool info after price update
-        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, bytes32 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolId);
-        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, bytes32 asset2PositionId1) = cpaManager.getPoolInfo(asset2PoolId);
+        (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, uint256 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolId);
+        (,,,uint256 asset2Deposit1, int256 asset2ExcessDemand1, int24 asset2LastOversoldTick1, AuctionId asset2AuctionId1, uint256 asset2PositionId1) = cpaManager.getPoolInfo(asset2PoolId);
         
         // Get new tick values
         (, int24 asset1Tick1, , ) = poolManager.getSlot0(asset1PoolId);
