@@ -325,6 +325,8 @@ library CPASetup {
 			auctionInfo.currentRound = 1; // Initialize to round 1
 		}
 		
+		// Emit phase change event
+		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 		// Emit clock phase started event
 		emit IErrorsAndEvents.ClockRoundOpened(auctionId, 1);
 	}
