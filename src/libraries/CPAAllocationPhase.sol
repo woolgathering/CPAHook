@@ -215,27 +215,64 @@ library CPAAllocationPhase {
 	) internal {
 		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
 		PoolKey[] memory poolKeys = auction.poolKeys;
+		uint256 numPools = poolKeys.length;
 
-		for (uint256 i = 0; i < poolKeys.length; i++) {
-			// lets try it with an unlock without the position manager
-			(int24 tickLower, int24 tickUpper, uint128 liquidity) = _calculateLiquidityParams(self, auctionId, auctionInfo, poolInfo, poolKeys[i]);
-			bytes memory callbackData = abi.encode(
-				uint8(3), // operationType = 3 for mint position after allocation
-				abi.encode(AuctionTypes.CallbackDataMintPosition({
-					poolKey: poolKeys[i],
-					tickLower: tickLower,
-					tickUpper: tickUpper,
-					liquidity: liquidity,
-					hookData: "",
-					auctionId: auctionId
-				}))
+		// Step 1: Collect all data in single loop
+		Currency[] memory assetCurrencies = new Currency[](numPools);
+		uint256[] memory amounts = new uint256[](numPools);
+		bytes memory actions;
+		bytes[] memory params = new bytes[](numPools * 2);
+		
+		// Capture starting tokenId before any mints
+		uint256 startTokenId = self.positionManager().nextTokenId();
+		
+		for (uint256 i = 0; i < numPools; i++) {
+			// Collect asset currencies and amounts for ERC6909→ERC20 conversion
+			assetCurrencies[i] = _getAssetCurrency(poolKeys[i], auction.commonNumeraire);
+			amounts[i] = poolInfo[poolKeys[i].toId()].depositAmount;
+			
+			// Build actions array (MINT_POSITION + SETTLE_PAIR pattern)
+			actions = bytes.concat(
+				actions, 
+				abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR))
 			);
-			self.manager().unlock(callbackData);
-
-			// since this is being deposited on behalf of the auctioneer outside of the position manager,
-			// we need to keep track of the position id manually
-			poolInfo[poolKeys[i].toId()].positionId = Position.calculatePositionKey(address(self), tickLower, tickUpper, AuctionId.unwrap(auctionId));
+			
+			// Calculate liquidity parameters
+			(int24 tickLower, int24 tickUpper, uint128 liquidity) = _calculateLiquidityParams(
+				self, auctionId, auctionInfo, poolInfo, poolKeys[i]
+			);
+			
+			// Calculate amount maxes with 1% buffer
+			(uint128 amount0Max, uint128 amount1Max) = _calculateAmountMaxes(
+				poolKeys[i], poolInfo[poolKeys[i].toId()].depositAmount, auction.commonNumeraire
+			);
+			
+			// MINT_POSITION params at index i*2
+			params[i * 2] = abi.encode(
+				poolKeys[i], tickLower, tickUpper, liquidity, 
+				amount0Max, amount1Max, address(self), ""
+			);
+			
+			// SETTLE_PAIR params at index i*2 + 1
+			params[i * 2 + 1] = abi.encode(poolKeys[i].currency0, poolKeys[i].currency1);
+			
+			// Pre-store tokenId (will be startTokenId + i after minting)
+			poolInfo[poolKeys[i].toId()].positionId = startTokenId + i;
 		}
+		
+		// Step 2: Single batch callback to convert all ERC6909 to ERC20
+		bytes memory callbackData = abi.encode(
+			uint8(9), // operationType = 9 for batch ERC6909 to ERC20 conversion
+			abi.encode(AuctionTypes.CallbackDataBatchERC6909ToERC20({
+				assetCurrencies: assetCurrencies,
+				amounts: amounts
+			}))
+		);
+		self.manager().unlock(callbackData);
+
+		// Single call to mint all positions (if this fails, entire tx reverts including stored tokenIds)
+		uint256 deadline = block.timestamp + 60;
+		self.positionManager().modifyLiquidities(abi.encode(actions, params), deadline);
 	}
 
 	function _calculateLiquidityParams(
@@ -325,6 +362,44 @@ library CPAAllocationPhase {
 		
 		// Get phase duration from auction config
 		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[1];
+	}
+
+	/**
+	 * @notice Get the asset currency (non-numeraire) from a pool key
+	 * @param poolKey The pool key
+	 * @param commonNumeraire The common numeraire address
+	 * @return The asset currency
+	 */
+	function _getAssetCurrency(PoolKey memory poolKey, address commonNumeraire) internal pure returns (Currency) {
+		if (address(Currency.unwrap(poolKey.currency0)) == commonNumeraire) {
+			return poolKey.currency1;
+		} else {
+			return poolKey.currency0;
+		}
+	}
+
+	/**
+	 * @notice Calculate amount0Max and amount1Max for position minting (exact amounts for single-sided)
+	 * @param poolKey The pool key
+	 * @param depositAmount The deposit amount
+	 * @param commonNumeraire The common numeraire address
+	 * @return amount0Max The maximum amount for currency0
+	 * @return amount1Max The maximum amount for currency1
+	 */
+	function _calculateAmountMaxes(
+		PoolKey memory poolKey, 
+		uint256 depositAmount, 
+		address commonNumeraire
+	) internal pure returns (uint128 amount0Max, uint128 amount1Max) {
+		if (address(Currency.unwrap(poolKey.currency0)) == commonNumeraire) {
+			// Asset is currency1, numeraire is currency0
+			amount0Max = 0; // No numeraire liquidity
+			amount1Max = uint128(depositAmount); // Exact deposit amount
+		} else {
+			// Asset is currency0, numeraire is currency1
+			amount0Max = uint128(depositAmount); // Exact deposit amount
+			amount1Max = 0; // No numeraire liquidity
+		}
 	}
 
 }
