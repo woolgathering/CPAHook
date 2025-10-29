@@ -46,6 +46,7 @@ interface IErrorsAndEvents {
 	event BundleForfeited(AuctionId auctionId, address bidder, uint256 penalty);
 	event AssetsDeposited(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
 	event AssetsWithdrawn(AuctionId auctionId, PoolId poolId, address currency, uint256 amount, address hookAddress);
+	event PositionTransferred(AuctionId indexed auctionId, PoolId indexed poolId, uint256 tokenId, address indexed recipient);
 
 	/// @notice Shared errors
 	
@@ -64,6 +65,10 @@ interface IErrorsAndEvents {
 	error AuctionNotEnded();
 	error SetupNotComplete();
 	error PhaseNotStarted(AuctionId auctionId);
+	
+	// Pause Errors
+	error MaxPauseDurationExceeded(uint256 totalPauseDuration, uint256 maxAllowed);
+	error PauseDurationNotExceeded(uint256 totalPauseDuration, uint256 maxRequired);
 	
 	// Clock Phase Errors
 	error ClockNotOpen();

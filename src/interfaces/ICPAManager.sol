@@ -87,6 +87,13 @@ interface ICPAManager {
     function unpause(AuctionId auctionId) external;
     
     /**
+     * @notice Force cancel auction when max pause duration exceeded
+     * @dev Anyone can call this after 72 hours of total pause time
+     * @param auctionId The auction identifier
+     */
+    function forceCancelAuction(AuctionId auctionId) external;
+    
+    /**
      * @notice Cancel the auction and refund all stakes
      * @dev Only allowed in Setup and Clock phases. Refunds all bidder stakes
      * @param auctionId The auction identifier
@@ -277,6 +284,13 @@ interface ICPAManager {
      * @param bidder The bidder address to forfeit
      */
     function forfeit(AuctionId auctionId, address bidder) external;
+    
+    /**
+     * @notice Transfer all NFT positions to the auctioneer
+     * @dev Permissionless function - anyone can call as positions only go to auctioneer
+     * @param auctionId The auction identifier
+     */
+    function transferPositionsToAuctioneer(AuctionId auctionId) external;
     
     // ========================================
     // VIEW FUNCTIONS

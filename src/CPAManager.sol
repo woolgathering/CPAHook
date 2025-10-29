@@ -26,6 +26,7 @@ import { CPAClockPhase } from "./libraries/CPAClockPhase.sol";
 import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 import { CPASettlementPhase } from "./libraries/CPASettlementPhase.sol";
+import { CPAFinishedPhase } from "./libraries/CPAFinishedPhase.sol";
 
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "./utils/CommitReveal.sol";
@@ -166,7 +167,27 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @notice Pause the auction
 	 */
 	function pause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
-		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Paused;
+		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		
+		// Cannot pause in Settlement or Finished phases
+		if (auction.currentPhase == AuctionTypes.AuctionPhase.Settlement || 
+		    auction.currentPhase == AuctionTypes.AuctionPhase.Finished) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auction.currentPhase);
+		}
+		
+		// Check if total pause duration would exceed maximum
+		uint256 currentPauseDuration = auction.totalPauseDuration;
+		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
+			// Add current pause duration to total
+			currentPauseDuration += block.timestamp - pauseStartTime[auctionId];
+		}
+		
+		if (currentPauseDuration >= AuctionTypes.MAX_PAUSE_DURATION) {
+			revert IErrorsAndEvents.MaxPauseDurationExceeded(currentPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
+		}
+		
+		auction.currentStatus = AuctionTypes.AuctionStatus.Paused;
+		pauseStartTime[auctionId] = block.timestamp;
 		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionPaused(auctionId, msg.sender);
 	}
@@ -175,7 +196,17 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @notice Unpause the auction
 	 */
 	function unpause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
-		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Active;
+		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		
+		if (auction.currentStatus != AuctionTypes.AuctionStatus.Paused) {
+			revert IErrorsAndEvents.AuctionNotActive(auctionId, auction.currentStatus);
+		}
+		
+		// Update total pause duration
+		auction.totalPauseDuration += block.timestamp - pauseStartTime[auctionId];
+		pauseStartTime[auctionId] = 0;
+		
+		auction.currentStatus = AuctionTypes.AuctionStatus.Active;
 		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionUnpaused(auctionId, msg.sender);
 	}
@@ -191,6 +222,29 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		}
 		
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
+		_updateCPAHookStates(auctionId);
+		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+	}
+
+	/**
+	 * @notice Force cancel auction when max pause duration exceeded
+	 * @dev Anyone can call this after 72 hours of total pause time
+	 */
+	function forceCancelAuction(AuctionId auctionId) external nonReentrant {
+		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		
+		// Calculate total pause duration including current pause
+		uint256 totalPauseDuration = auction.totalPauseDuration;
+		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
+			totalPauseDuration += block.timestamp - pauseStartTime[auctionId];
+		}
+		
+		// Only allow force cancel if max pause duration exceeded
+		if (totalPauseDuration < AuctionTypes.MAX_PAUSE_DURATION) {
+			revert IErrorsAndEvents.PauseDurationNotExceeded(totalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
+		}
+		
+		auction.currentStatus = AuctionTypes.AuctionStatus.Cancelled;
 		_updateCPAHookStates(auctionId);
 		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
@@ -285,6 +339,25 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		bidderStake[auctionId][bidder] = 0;
 		
 		emit IErrorsAndEvents.BundleForfeited(auctionId, bidder, stake * penaltyRate / 10000);
+	}
+
+	/**
+	 * @notice Transfer all NFT positions to the auctioneer
+	 * @dev Permissionless function - anyone can call as positions only go to auctioneer
+	 * @param auctionId The auction identifier
+	 */
+	function transferPositionsToAuctioneer(AuctionId auctionId) 
+		external 
+		nonReentrant 
+		whenAuctionActive(auctionId) 
+		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) 
+	{
+		CPAFinishedPhase.transferPositionsToAuctioneer(
+			this, 
+			auctionId, 
+			auctionInfo[auctionId], 
+			poolInfo
+		);
 	}
 
 	// ========================================
@@ -849,9 +922,13 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		} else if (operationType == 8) {
 			// Batch deposit transfer
 			return _handleBatchDepositTransfer(operationData);
+		} else if (operationType == 9) {
+			// Batch ERC6909 to ERC20 conversion for position minting
+			return _handleBatchERC6909ToERC20Conversion(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
 	}
+
 
 }
