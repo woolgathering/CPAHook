@@ -327,4 +327,25 @@ abstract contract Callbacks is CPAStorage {
 		return abi.encode(data.reward);
 	}
 
+	/**
+	 * @notice Handle batch ERC6909 to ERC20 conversion for position minting
+	 * @dev Converts all asset ERC6909 claims to ERC20 in single unlock callback
+	 * @param operationData The encoded batch conversion data
+	 * @return returnData Empty bytes (no balance deltas needed)
+	 */
+	function _handleBatchERC6909ToERC20Conversion(bytes memory operationData) internal returns (bytes memory) {
+		AuctionTypes.CallbackDataBatchERC6909ToERC20 memory data = abi.decode(
+			operationData, 
+			(AuctionTypes.CallbackDataBatchERC6909ToERC20)
+		);
+		
+		// Convert all ERC6909 claims to ERC20 for each asset
+		for (uint256 i = 0; i < data.assetCurrencies.length; i++) {
+			manager.burn(address(this), CurrencyLibrary.toId(data.assetCurrencies[i]), data.amounts[i]);
+			data.assetCurrencies[i].take(manager, address(this), data.amounts[i], false);
+		}
+		
+		return "";
+	}
+
 }

@@ -82,7 +82,7 @@ library CPASetup {
 					excessDemand: 0,
 					lastOversoldTick: 0,
 					auctionId: auctionId,
-					positionId: bytes32(0)
+					positionId: 0
 				});
 				poolInfo[poolId] = poolInfoData;
 				
@@ -106,7 +106,8 @@ library CPASetup {
 			poolKeys: config.poolKeys,
 			allocatorReward: 0,
 			changedPrices: new bool[](config.poolKeys.length),
-			lastRevenue: 0
+			lastRevenue: 0,
+			totalPauseDuration: 0
 		});
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
@@ -164,11 +165,12 @@ library CPASetup {
 		// Call poolManager.unlock() which will trigger unlockCallback
 		self.manager().unlock(callbackData);
 
-		// Approve asset currency to PositionManager for future position minting
+		// Approve asset currency to Permit2 for PositionManager for when we deposit assets to the pool before settlement
 		IERC20(Currency.unwrap(itemCurrency)).approve(
-			address(self.positionManager()), 
+			address(self.permit2()), 
 			type(uint256).max
 		);
+		self.permit2().approve(Currency.unwrap(itemCurrency), address(self.positionManager()), type(uint160).max, type(uint48).max);
 
 		// Emit event for tracking
 		emit IErrorsAndEvents.AssetsDeposited(auctionId, poolKey.toId(), address(Currency.unwrap(itemCurrency)), depositAmount, self.cpaAuctionHookAddr());
@@ -290,11 +292,12 @@ library CPASetup {
 				itemCurrencies[i] = poolKeys[i].currency0;
 			}
 			
-			// Approve asset currency to PositionManager for future position minting
+			// Approve asset currency to Permit2 for PositionManager
 			IERC20(Currency.unwrap(itemCurrencies[i])).approve(
-				address(self.positionManager()), 
+				address(self.permit2()), 
 				type(uint256).max
 			);
+			self.permit2().approve(Currency.unwrap(itemCurrencies[i]), address(self.positionManager()), type(uint160).max, type(uint48).max);
 		}
 
 		// Create callback data for batch deposit
