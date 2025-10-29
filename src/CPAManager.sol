@@ -335,8 +335,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
 		}
 		
-		// Zero out their stake
+		// Zero out bidder state
 		bidderStake[auctionId][bidder] = 0;
+		bidderBidPoints[auctionId][bidder] = 0;
 		
 		emit IErrorsAndEvents.BundleForfeited(auctionId, bidder, stake * penaltyRate / 10000);
 	}
@@ -431,6 +432,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
 			_updateCPAHookStates(auctionId);
+			emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 		}
 		CPAClockPhase.openClockRound(auctionId, auctionInfo);
 	}
@@ -695,10 +697,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			reward: auctionInfo[auctionId].allocatorReward,
 			numeraire: auctionInfo[auctionId].commonNumeraire
 		});
+		emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, winningAllocator, auctionInfo[auctionId].allocatorReward);
 		manager.unlock(abi.encode(uint8(6), abi.encode(data)));
 		auctionInfo[auctionId].allocatorReward = 0; // update their reward to 0 since it was claimed
-
-		emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, winningAllocator, auctionInfo[auctionId].allocatorReward);
 	}
 
 	// ========================================
@@ -851,7 +852,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			return block.timestamp >= startTime + durations[2];
 		}
 		
-		return false; // Clock phase doesn't use time-based expiration
+		// Clock phase doesn't use time-based expiration.
+		// Clock phase ends based on three conditions (see CPAClockPhase.shouldEndClockPhase):
+		// 1. No excess demand on any item
+		// 2. Max clock rounds exceeded
+		// 3. Revenue improvement < 0.5% for two consecutive rounds
+		return false;
 	}
 
 	/**
