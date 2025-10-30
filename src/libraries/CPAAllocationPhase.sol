@@ -114,7 +114,7 @@ library CPAAllocationPhase {
 		// in the bundle submission we have already verified that the length of the quantities is equal to the number of assets in the auction
 		// so we don't need to worry about reading beyond the array length
 		// here we just sum the quantities of the bundles
-		for (uint256 i = 0; i < allocationData.bundleIds.length; i++) {
+		for (uint256 i = 0; i < allocationData.bundleIds.length; ) {
 			BundleId bundleId = allocationData.bundleIds[i];
 			
 			// check that the bundle exists
@@ -125,19 +125,21 @@ library CPAAllocationPhase {
 
 			// update the quantities
 			AuctionTypes.Bundle memory bundle = auctionBundles[bundleId];
-			for (uint256 j = 0; j < bundle.quantities.length; j++) {
+			for (uint256 j = 0; j < bundle.quantities.length; ) {
 				quantities[j] += bundle.quantities[j];
+				unchecked { ++j; }
 			}
 
 			// update the existing commit hashes
 			existingCommitHashes[i] = auctionBundles[bundleId].commitHash;
+			unchecked { ++i; }
 		}
 
 		// Get numeraire decimals once for efficiency
 		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire);
 		
 		// Validate quantities and compute total value in a single loop
-		for (uint256 i = 0; i < poolKeys.length; i++) {
+		for (uint256 i = 0; i < poolKeys.length; ) {
 			PoolKey memory poolKey = poolKeys[i];
 			PoolId poolId = poolKey.toId();
 			
@@ -165,6 +167,7 @@ library CPAAllocationPhase {
 			// Convert: (quantity in asset decimals) * (price in 18 decimals) => value in numeraire decimals
 			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
 			totalValue += (quantities[i] * price * (10**numeraireDecimals)) / (10**(18 + assetDecimals));
+			unchecked { ++i; }
 		}
 		
 		return (totalValue, totalValue); // again, the total value is the same as the score here
@@ -195,8 +198,9 @@ library CPAAllocationPhase {
 		AuctionTypes.Allocation memory winner = topAllocation[auctionId].allocation;
 
 		// store the winning bundle ids
-		for (uint i = 0; i < winner.bundleIds.length; i++) {
+		for (uint256 i = 0; i < winner.bundleIds.length; ) {
 			winningBundleIds[auctionBundles[winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
+			unchecked { ++i; }
 		}
 	}
 	
@@ -226,7 +230,7 @@ library CPAAllocationPhase {
 		// Capture starting tokenId before any mints
 		uint256 startTokenId = self.positionManager().nextTokenId();
 		
-		for (uint256 i = 0; i < numPools; i++) {
+		for (uint256 i = 0; i < numPools; ) {
 			// Collect asset currencies and amounts for ERC6909→ERC20 conversion
 			assetCurrencies[i] = _getAssetCurrency(poolKeys[i], auction.commonNumeraire);
 			amounts[i] = poolInfo[poolKeys[i].toId()].depositAmount;
@@ -258,6 +262,7 @@ library CPAAllocationPhase {
 			
 			// Pre-store tokenId (will be startTokenId + i after minting)
 			poolInfo[poolKeys[i].toId()].positionId = startTokenId + i;
+			unchecked { ++i; }
 		}
 		
 		// Step 2: Single batch callback to convert all ERC6909 to ERC20
