@@ -32,7 +32,7 @@ library CPAClockPhase {
 	 * @param bidderStake Mapping for bidder stakes
 	 * @param bidderBidPoints Mapping for bidder bid points
 	 */
-	function processBid(
+    function processBid(
 		CPAStorage self,
 		AuctionId auctionId,
 		uint256[] calldata demands,
@@ -47,67 +47,49 @@ library CPAClockPhase {
 		
 		if (auctionInfo.clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
 		if (demands.length != auctionInfo.poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
+        // Scope 1: Validate activity rule
+        {
+            _validateActivityRule(demands, bids[bidder], auctionInfo.changedPrices);
+        }
 
-		// before storing the new demands, we need to validate the activity rule
-		// Get the bidder's previous demands
-		uint256[] memory previousDemands = bids[bidder];
-		
-		// If bidder has previous demands, validate the activity rule
-		if (previousDemands.length > 0) {
-			bool[] memory changedPrices = auctionInfo.changedPrices;
-			for(uint256 i = 0; i < changedPrices.length; i++) {
-				// If price increased (changedPrices[i] is true), new demand must be <= previous demand
-				if(changedPrices[i] && demands[i] > previousDemands[i]) {
-					revert IErrorsAndEvents.ActivityRuleViolation();
-				}
-			}
-		}
-		
-		// Calculate total bid value first
-		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionInfo, self.manager());
-		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
-		
-		// Check if bidder already has sufficient bid points
-		uint256 currentBidPoints = bidderBidPoints[bidder];
-		uint256 requiredAdditionalStake = 0;
-		
-		if (requiredBidPoints > currentBidPoints) {
-			// Bidder needs additional stake
-			uint256 currentStake = bidderStake[bidder];
-			requiredAdditionalStake = totalValueInNumeraire - currentStake;
-			uint256 allocatorRewardAmount = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
+        // Scope 2: Calculate required stake and update bidder state
+        uint256 requiredAdditionalStake;
+        uint256 allocatorRewardAmount;
+        {
+            (requiredAdditionalStake, allocatorRewardAmount) = _calculateRequiredStake(
+                demands,
+                auctionInfo,
+                bidderStake[bidder],
+                bidderBidPoints[bidder],
+                maxStakeAmount,
+                auctionId,
+                self.manager()
+            );
 
-			// Safety check: ensure the bidder's max stake is sufficient for the required amount
-			if (maxStakeAmount < requiredAdditionalStake + allocatorRewardAmount) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
-			
-			// Update storage directly
-			bidderStake[bidder] += requiredAdditionalStake;
-			bidderBidPoints[bidder] = computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
-			
-			// Transfer the required stake amount from bidder to auction contract via pool manager
-			if (requiredAdditionalStake > 0) {
-				// Call swap callback to transfer tokens from user to pool manager
-				// and mint ERC6909 claims to hook
-				auctionInfo.allocatorReward += allocatorRewardAmount; // add this to the allocator reward
+            if (requiredAdditionalStake > 0) {
+                // Update storage directly
+                bidderStake[bidder] += requiredAdditionalStake;
+                bidderBidPoints[bidder] = computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
 
-				AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
-					sender: bidder,
-					numeraire: auctionInfo.commonNumeraire,
-					stake: int128(int256(requiredAdditionalStake + allocatorRewardAmount)), // stake amount in numeraire
-					deadline: block.timestamp + 60
-				});
-				self.manager().unlock(abi.encode(uint8(0), abi.encode(callbackDataStruct)));
-			}
-		}
+                // Account allocator reward now
+                auctionInfo.allocatorReward += allocatorRewardAmount;
+
+                // Transfer the required stake amount from bidder to auction contract via pool manager
+                AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
+                    sender: bidder,
+                    numeraire: auctionInfo.commonNumeraire,
+                    stake: int128(int256(requiredAdditionalStake + allocatorRewardAmount)), // stake amount in numeraire
+                    deadline: block.timestamp + 60
+                });
+                self.manager().unlock(abi.encode(uint8(0), abi.encode(callbackDataStruct)));
+            }
+        }
 		// would be interesting to eventually have "deposits" for bidders who use the system often
 		// so that they don't have to transfer the common numeraire every time they bid.
 		// the deposit could be rehypothecated by the protocol when not being used. During auctions,
 		// this auction contract would make a "claim" against the deposits that are needed for staking.
 		// the complication is that we do not assert a common numeraire across all auction contracts.
 		
-		// Calculate the actual stake amount used for this bid
-		uint256 actualStakeAmount = totalValueInNumeraire > currentBidPoints ? totalValueInNumeraire - currentBidPoints : 0;
-
 		// Store bidder demands
 		bids[bidder] = demands;
 		
@@ -150,16 +132,17 @@ library CPAClockPhase {
 		// Note: changedPrices array is already initialized in openClockRound
 
 		// Iterate over pools and calculate excess demand
-		for (uint256 i = 0; i < pools.length; i++) {
+		for (uint256 i = 0; i < pools.length; ) {
 			PoolId poolId = pools[i];
 			
 			// Sum up all demand for this item across all active bidders
 			address bidder;
-			for (uint256 j = 0; j < currentActiveBidders.length; j++) {
+			for (uint256 j = 0; j < currentActiveBidders.length; ) {
 				bidder = currentActiveBidders[j]; // just one read
 				if (bidder != address(0)) {
 					totalDemands[i] += bids[bidder][i];
 				}
+				unchecked { ++j; }
 			}
 			
 			// Calculate excess demand (can be negative for undersell)
@@ -178,6 +161,7 @@ library CPAClockPhase {
 			} else {
 				auctionInfo.changedPrices[i] = false; // Mark this price as not changed
 			}
+			unchecked { ++i; }
 		}
 
 		// Clear the active bidders list using delete (more gas efficient)
@@ -252,11 +236,12 @@ library CPAClockPhase {
 
 		// 1. No excess demand on any item - end clock phase
 		bool hasExcessDemand = false;
-		for (uint256 i = 0; i < auctionInfo.poolKeys.length; i++) {
+		for (uint256 i = 0; i < auctionInfo.poolKeys.length; ) {
 			if (poolInfo[auctionInfo.poolKeys[i].toId()].excessDemand > 0) {
 				hasExcessDemand = true;
 				break;
 			}
+			unchecked { ++i; }
 		}
 		if (!hasExcessDemand) {
 			return true; // End clock phase - no excess demand on any item
@@ -302,8 +287,42 @@ library CPAClockPhase {
 		return (alpha * r_t + (1e18 - alpha) * R_t_1) / 1e18;
 	}
 
+	// Helper: validate activity rule based on changedPrices and previous demands
+	function _validateActivityRule(
+		uint256[] calldata demands,
+		uint256[] memory previousDemands,
+		bool[] memory changedPrices
+	) private pure {
+		if (previousDemands.length == 0) return;
+		for (uint256 i = 0; i < changedPrices.length; i++) {
+			if (changedPrices[i] && demands[i] > previousDemands[i]) {
+				revert IErrorsAndEvents.ActivityRuleViolation();
+			}
+		}
+	}
+
+	// Helper: calculate required stake and allocator reward; validates maxStake
+	function _calculateRequiredStake(
+		uint256[] calldata demands,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		uint256 currentStake,
+		uint256 currentBidPoints,
+		uint256 maxStakeAmount,
+		AuctionId auctionId,
+		IPoolManager poolManager
+	) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
+		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionInfo, poolManager);
+		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
+		if (requiredBidPoints <= currentBidPoints) {
+			return (0, 0);
+		}
+		requiredAdditionalStake = totalValueInNumeraire - currentStake;
+		allocatorReward = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
+		if (maxStakeAmount < requiredAdditionalStake + allocatorReward) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
+	}
+
 	/**
-	 * @notice Calculate bid value
+	 * @notice Calculate bid value (accepts calldata)
 	 * @param demands Array of demands
 	 * @param auctionInfo Mapping for auction info
 	 * @param poolManager The pool manager instance
@@ -314,33 +333,8 @@ library CPAClockPhase {
 		AuctionTypes.AuctionInfo storage auctionInfo,
 		IPoolManager poolManager
 	) internal view returns (uint256 totalValue) {
-		// Get all pool keys for this auction
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		
-		// Calculate inner product: sum(demands[i] * prices[i])
-		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-			// Get the pool ID and its current price from the pool
-			uint256 price;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
-				// Since the numeraire is currency0, we need to get the price of currency1
-				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
-			} else {
-				// Since the numeraire is currency1, we need to get the price of currency0
-				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
-			}
-			
-			// Get asset decimals for this pool
-			address assetCurrency;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
-				assetCurrency = Currency.unwrap(poolKeys[i].currency1);
-			} else {
-				assetCurrency = Currency.unwrap(poolKeys[i].currency0);
-			}
-			
-			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
-			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
-			totalValue += (demands[i] * price * (10**CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire))) / (10**(18 + CurrencyDecimals.getDecimals(assetCurrency)));
-		}
+		// Delegate to internal implementation
+		return _calculateBidValueInternal(demands, auctionInfo, poolManager);
 	}
 
 	/**
@@ -349,41 +343,67 @@ library CPAClockPhase {
 	 * @param auctionInfo Mapping for auction info
 	 * @param poolManager The pool manager instance
 	 * @return totalValue Total value of the bid
-	 * @dev This function is identical to calculateBidValue() but takes memory demands instead of calldata.
-	 *      Used when demands are already loaded into memory (e.g., from totalDemands array in shouldEndClockPhase).
-	 *      Avoids unnecessary data copying between calldata and memory.
+	 * @dev Used when demands are already loaded into memory (e.g., from totalDemands array in shouldEndClockPhase).
 	 */
 	function calculateBidValueWithMemoryDemands(
 		uint256[] memory demands,
 		AuctionTypes.AuctionInfo storage auctionInfo,
 		IPoolManager poolManager
 	) internal view returns (uint256 totalValue) {
+		// Delegate to internal implementation
+		return _calculateBidValueInternal(demands, auctionInfo, poolManager);
+	}
+
+	/**
+	 * @notice Internal implementation for calculating bid value
+	 * @param demands Array of demands (works with both calldata and memory)
+	 * @param auctionInfo Mapping for auction info
+	 * @param poolManager The pool manager instance
+	 * @return totalValue Total value of the bid
+	 * @dev Consolidated implementation to avoid code duplication. Accepts both calldata and memory arrays.
+	 */
+	function _calculateBidValueInternal(
+		uint256[] memory demands,
+		AuctionTypes.AuctionInfo storage auctionInfo,
+		IPoolManager poolManager
+	) private view returns (uint256 totalValue) {
 		// Get all pool keys for this auction
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		
+		// Cache numeraire decimals and factor outside loop (HIGH priority optimization #5)
+		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire);
+		uint256 numeraireFactor = 10**numeraireDecimals;
+		
 		// Calculate inner product: sum(demands[i] * prices[i])
 		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-			// Get the pool ID and its current price from the pool
-			uint256 price;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
-				// Since the numeraire is currency0, we need to get the price of currency1
-				price = poolManager.getPriceOfCurrency1(poolKeys[i]);
-			} else {
-				// Since the numeraire is currency1, we need to get the price of currency0
-				price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+			uint256 itemValue;
+			{
+				(uint256 price, address assetCurrency) = _getPriceAndAssetCurrency(
+					poolKeys[i],
+					auctionInfo.commonNumeraire,
+					poolManager
+				);
+				uint8 assetDecimals = CurrencyDecimals.getDecimals(assetCurrency);
+				uint256 divisor = 10**(18 + assetDecimals);
+				itemValue = (demands[i] * price * numeraireFactor) / divisor;
 			}
-			
-			// Get asset decimals for this pool
-			address assetCurrency;
-			if (Currency.unwrap(poolKeys[i].currency0) == auctionInfo.commonNumeraire) {
-				assetCurrency = Currency.unwrap(poolKeys[i].currency1);
-			} else {
-				assetCurrency = Currency.unwrap(poolKeys[i].currency0);
-			}
-			
-			// Convert: (demand in asset decimals) * (price in 18 decimals) => value in numeraire decimals
-			// Formula: (quantity * price * 10^numeraireDecimals) / (10^(18 + assetDecimals))
-			totalValue += (demands[i] * price * (10**CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire))) / (10**(18 + CurrencyDecimals.getDecimals(assetCurrency)));
+			totalValue += itemValue;
+		}
+	}
+
+	// Helper: price and asset currency for a poolKey given common numeraire
+	function _getPriceAndAssetCurrency(
+		PoolKey memory poolKey,
+		address commonNumeraire,
+		IPoolManager poolManager
+	) private view returns (uint256 price, address assetCurrency) {
+		bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == commonNumeraire);
+		if (numeraireIsCurrency0) {
+			price = poolManager.getPriceOfCurrency1(poolKey);
+			assetCurrency = Currency.unwrap(poolKey.currency1);
+		} else {
+			price = poolManager.getPriceOfCurrency0(poolKey);
+			assetCurrency = Currency.unwrap(poolKey.currency0);
 		}
 	}
 
@@ -412,8 +432,9 @@ library CPAClockPhase {
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		PoolId[] memory poolIds = new PoolId[](poolKeys.length);
 		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
+		for (uint256 i = 0; i < poolKeys.length; ) {
 			poolIds[i] = poolKeys[i].toId();
+			unchecked { ++i; }
 		}
 		
 		return poolIds;
@@ -469,7 +490,7 @@ library CPAClockPhase {
 	) internal {
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
 		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
+		for (uint256 i = 0; i < poolKeys.length; ) {
 			PoolId poolId = poolKeys[i].toId();
 			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
 			
@@ -484,6 +505,7 @@ library CPAClockPhase {
 					_updatePoolPriceByTick(pool.key, pool.lastOversoldTick, poolManager, auctionInfo.commonNumeraire);
 				}
 			}
+			unchecked { ++i; }
 		}
 	}
 
