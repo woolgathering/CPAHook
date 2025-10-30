@@ -60,7 +60,7 @@ library CPASetup {
 			revert IErrorsAndEvents.InvalidBidsLength();
 		}
 
-		for (uint256 i = 0; i < config.poolKeys.length; i++) {
+		for (uint256 i = 0; i < config.poolKeys.length; ) {
 			if (address(Currency.unwrap(config.poolKeys[i].currency0)) == numeraireAddress || address(Currency.unwrap(config.poolKeys[i].currency1)) == numeraireAddress) {
 				// check that the hook in the pool matches the cpaAuctionHookAddr
 				if (address(config.poolKeys[i].hooks) != self.cpaAuctionHookAddr()) {
@@ -91,6 +91,7 @@ library CPASetup {
 			} else {
 				revert IErrorsAndEvents.MismatchedNumeraires();
 			}
+			unchecked { ++i; }
 		}
 
 		// set the auction info
@@ -233,7 +234,7 @@ library CPASetup {
         
         // Check that all asset pools have deposits
         PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-        for (uint256 i = 0; i < poolKeys.length; i++) {
+        for (uint256 i = 0; i < poolKeys.length; ) {
             PoolId poolId = poolKeys[i].toId();
             AuctionTypes.PoolInfo memory pool = poolInfo[poolId];
             
@@ -241,6 +242,7 @@ library CPASetup {
             if (pool.depositAmount == 0) {
                 return false;
             }
+            unchecked { ++i; }
         }
         
         return true;
@@ -272,14 +274,18 @@ library CPASetup {
 		address numeraireAddress = auctionInfo.commonNumeraire;
 		Currency[] memory itemCurrencies = new Currency[](poolKeys.length);
 		
-		for (uint256 i = 0; i < poolKeys.length; i++) {
+		for (uint256 i = 0; i < poolKeys.length; ) {
 			// Check that this pool is part of the auction
+			// Cache poolId conversion outside inner loop for gas efficiency
+			PoolId poolId = poolKeys[i].toId();
 			bool found = false;
-			for (uint256 j = 0; j < auctionInfo.poolKeys.length; j++) {
-				if (PoolId.unwrap(poolKeys[i].toId()) == PoolId.unwrap(auctionInfo.poolKeys[j].toId())) {
+			uint256 innerLen = auctionInfo.poolKeys.length; // Cache length
+			for (uint256 j = 0; j < innerLen; ) {
+				if (PoolId.unwrap(poolId) == PoolId.unwrap(auctionInfo.poolKeys[j].toId())) {
 					found = true;
 					break;
 				}
+				unchecked { ++j; } // Use unchecked increment for gas savings
 			}
 			if (!found) {
 				revert IErrorsAndEvents.InvalidPool();
@@ -298,6 +304,7 @@ library CPASetup {
 				type(uint256).max
 			);
 			self.permit2().approve(Currency.unwrap(itemCurrencies[i]), address(self.positionManager()), type(uint160).max, type(uint48).max);
+			unchecked { ++i; }
 		}
 
 		// Create callback data for batch deposit
