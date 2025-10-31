@@ -17,6 +17,7 @@ import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
+import { CPAComputationLibrary } from "./CPAComputationLibrary.sol";
 
 library CPAClockPhase {
 	using StateLibrary for IPoolManager;
@@ -69,7 +70,7 @@ library CPAClockPhase {
             if (requiredAdditionalStake > 0) {
                 // Update storage directly
                 bidderStake[bidder] += requiredAdditionalStake;
-                bidderBidPoints[bidder] = computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
+                bidderBidPoints[bidder] = CPAComputationLibrary.computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
 
                 // Account allocator reward now
                 auctionInfo.allocatorReward += allocatorRewardAmount;
@@ -102,10 +103,6 @@ library CPAClockPhase {
 		// would be useful if there are participant-limited auctions where more people want in than actually got in.
 	}
 
-	function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256 bidPoints) {
-		bidPoints = stakeAmount * 10**18 / (10**CurrencyDecimals.getDecimals(numeraire));
-	}
-    
 	/**
 	 * @notice Process clock round results
 	 * @param auctionId The auction ID
@@ -259,7 +256,8 @@ library CPAClockPhase {
 		// for now.
 		// EMA formula: R_t = alpha * r_t + (1 - alpha) * R_{t-1}
 		uint256 alpha = 5e17; // 1/2 in 1e18 precision
-		uint256 revenue = calculateBidValueWithMemoryDemands(totalDemands, auctionInfo, poolManager);
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		uint256 revenue = CPAComputationLibrary.calculateBidValueWithMemoryDemands(totalDemands, auctionInfo.commonNumeraire, poolManager, poolKeys);
 		uint256 R_t = _computeEMA(revenue, auctionInfo.lastRevenue, alpha);
 		// if (R_t < revenue * 0.005) {
 		if ((R_t * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
@@ -311,100 +309,15 @@ library CPAClockPhase {
 		AuctionId auctionId,
 		IPoolManager poolManager
 	) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
-		uint256 totalValueInNumeraire = calculateBidValue(demands, auctionInfo, poolManager);
-		uint256 requiredBidPoints = computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
+		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(demands, auctionInfo.commonNumeraire, poolManager, poolKeys);
+		uint256 requiredBidPoints = CPAComputationLibrary.computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
 		if (requiredBidPoints <= currentBidPoints) {
 			return (0, 0);
 		}
 		requiredAdditionalStake = totalValueInNumeraire - currentStake;
 		allocatorReward = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
 		if (maxStakeAmount < requiredAdditionalStake + allocatorReward) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
-	}
-
-	/**
-	 * @notice Calculate bid value (accepts calldata)
-	 * @param demands Array of demands
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolManager The pool manager instance
-	 * @return totalValue Total value of the bid
-	 */
-	function calculateBidValue(
-		uint256[] calldata demands,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		IPoolManager poolManager
-	) internal view returns (uint256 totalValue) {
-		// Delegate to internal implementation
-		return _calculateBidValueInternal(demands, auctionInfo, poolManager);
-	}
-
-	/**
-	 * @notice Calculate bid value using memory demands array
-	 * @param demands Array of demands (memory parameter - used when demands are already in memory)
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolManager The pool manager instance
-	 * @return totalValue Total value of the bid
-	 * @dev Used when demands are already loaded into memory (e.g., from totalDemands array in shouldEndClockPhase).
-	 */
-	function calculateBidValueWithMemoryDemands(
-		uint256[] memory demands,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		IPoolManager poolManager
-	) internal view returns (uint256 totalValue) {
-		// Delegate to internal implementation
-		return _calculateBidValueInternal(demands, auctionInfo, poolManager);
-	}
-
-	/**
-	 * @notice Internal implementation for calculating bid value
-	 * @param demands Array of demands (works with both calldata and memory)
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolManager The pool manager instance
-	 * @return totalValue Total value of the bid
-	 * @dev Consolidated implementation to avoid code duplication. Accepts both calldata and memory arrays.
-	 */
-	function _calculateBidValueInternal(
-		uint256[] memory demands,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		IPoolManager poolManager
-	) private view returns (uint256 totalValue) {
-		// Get all pool keys for this auction
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		
-		// Cache numeraire decimals and factor outside loop (HIGH priority optimization #5)
-		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire);
-		uint256 numeraireFactor = 10**numeraireDecimals;
-		
-		// Calculate inner product: sum(demands[i] * prices[i])
-		for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
-			uint256 itemValue;
-			{
-				(uint256 price, address assetCurrency) = _getPriceAndAssetCurrency(
-					poolKeys[i],
-					auctionInfo.commonNumeraire,
-					poolManager
-				);
-				uint8 assetDecimals = CurrencyDecimals.getDecimals(assetCurrency);
-				uint256 divisor = 10**(18 + assetDecimals);
-				itemValue = (demands[i] * price * numeraireFactor) / divisor;
-			}
-			totalValue += itemValue;
-		}
-	}
-
-	// Helper: price and asset currency for a poolKey given common numeraire
-	function _getPriceAndAssetCurrency(
-		PoolKey memory poolKey,
-		address commonNumeraire,
-		IPoolManager poolManager
-	) private view returns (uint256 price, address assetCurrency) {
-		bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == commonNumeraire);
-		if (numeraireIsCurrency0) {
-			price = poolManager.getPriceOfCurrency1(poolKey);
-			assetCurrency = Currency.unwrap(poolKey.currency1);
-		} else {
-			price = poolManager.getPriceOfCurrency0(poolKey);
-			assetCurrency = Currency.unwrap(poolKey.currency0);
-		}
 	}
 
 	/**

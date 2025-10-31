@@ -169,20 +169,20 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	function pause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
 		
+		// Cannot pause if already paused
+		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
+			revert IErrorsAndEvents.AuctionNotActive(auctionId, AuctionTypes.AuctionStatus.Paused);
+		}
+		
 		// Cannot pause in Settlement or Finished phases
 		if (auction.currentPhase == AuctionTypes.AuctionPhase.Settlement || 
 		    auction.currentPhase == AuctionTypes.AuctionPhase.Finished) {
 			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auction.currentPhase);
 		}
 		
-		// Check if total pause duration would exceed maximum
+		// Check if total pause duration would exceed maximum (only block when exceeded, not when equal)
 		uint256 currentPauseDuration = auction.totalPauseDuration;
-		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
-			// Add current pause duration to total
-			currentPauseDuration += block.timestamp - pauseStartTime[auctionId];
-		}
-		
-		if (currentPauseDuration >= AuctionTypes.MAX_PAUSE_DURATION) {
+		if (currentPauseDuration > AuctionTypes.MAX_PAUSE_DURATION) {
 			revert IErrorsAndEvents.MaxPauseDurationExceeded(currentPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
 		}
 		
@@ -202,8 +202,17 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			revert IErrorsAndEvents.AuctionNotActive(auctionId, auction.currentStatus);
 		}
 		
+		// Calculate what total pause duration would be after unpausing
+		uint256 newTotalPauseDuration = auction.totalPauseDuration + (block.timestamp - pauseStartTime[auctionId]);
+		
+		// Block unpause if total pause duration would be >= MAX_PAUSE_DURATION
+		// This enforces the hard limit: once you hit max, you must cancel
+		if (newTotalPauseDuration >= AuctionTypes.MAX_PAUSE_DURATION) {
+			revert IErrorsAndEvents.MaxPauseDurationExceeded(newTotalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
+		}
+		
 		// Update total pause duration
-		auction.totalPauseDuration += block.timestamp - pauseStartTime[auctionId];
+		auction.totalPauseDuration = newTotalPauseDuration;
 		pauseStartTime[auctionId] = 0;
 		
 		auction.currentStatus = AuctionTypes.AuctionStatus.Active;
