@@ -185,6 +185,40 @@ library StorageAccess {
         _sstoreUint256(slot, time);
     }
     
+    // AllocationPhaseStartTime
+    function getAllocationPhaseStartTime(AuctionId auctionId) internal view returns (uint256) {
+        bytes32 slot = StorageSlots.mappingSlot(
+            StorageSlots.SLOT_ALLOCATION_PHASE_START_TIME,
+            StorageSlots.encodeAuctionId(auctionId)
+        );
+        return _sloadUint256(slot);
+    }
+    
+    function setAllocationPhaseStartTime(AuctionId auctionId, uint256 time) internal {
+        bytes32 slot = StorageSlots.mappingSlot(
+            StorageSlots.SLOT_ALLOCATION_PHASE_START_TIME,
+            StorageSlots.encodeAuctionId(auctionId)
+        );
+        _sstoreUint256(slot, time);
+    }
+    
+    // SettlementPhaseStartTime
+    function getSettlementPhaseStartTime(AuctionId auctionId) internal view returns (uint256) {
+        bytes32 slot = StorageSlots.mappingSlot(
+            StorageSlots.SLOT_SETTLEMENT_PHASE_START_TIME,
+            StorageSlots.encodeAuctionId(auctionId)
+        );
+        return _sloadUint256(slot);
+    }
+    
+    function setSettlementPhaseStartTime(AuctionId auctionId, uint256 time) internal {
+        bytes32 slot = StorageSlots.mappingSlot(
+            StorageSlots.SLOT_SETTLEMENT_PHASE_START_TIME,
+            StorageSlots.encodeAuctionId(auctionId)
+        );
+        _sstoreUint256(slot, time);
+    }
+    
     // HasBundles
     function getHasBundles(AuctionId auctionId) internal view returns (bool) {
         bytes32 slot = StorageSlots.mappingSlot(
@@ -454,6 +488,31 @@ library StorageAccess {
         bytes32 baseSlot = getAuctionInfoBaseSlot(auctionId);
         bytes32 fieldSlot = StorageSlots.structFieldSlot(baseSlot, StorageSlots.AUCTION_INFO_FIELD_CURRENT_PHASE);
         _sstore(fieldSlot, bytes32(uint256(uint8(phase))));
+    }
+    
+    function getAuctionOwner(AuctionId auctionId) internal view returns (address) {
+        bytes32 baseSlot = getAuctionInfoBaseSlot(auctionId);
+        bytes32 fieldSlot = StorageSlots.structFieldSlot(baseSlot, StorageSlots.AUCTION_INFO_FIELD_AUCTION_OWNER);
+        return _sloadAddress(fieldSlot);
+    }
+    
+    function getAuctionCommonNumeraire(AuctionId auctionId) internal view returns (address) {
+        bytes32 baseSlot = getAuctionInfoBaseSlot(auctionId);
+        bytes32 fieldSlot = StorageSlots.structFieldSlot(baseSlot, StorageSlots.AUCTION_INFO_FIELD_COMMON_NUMERAIRE);
+        return _sloadAddress(fieldSlot);
+    }
+    
+    function getAuctionPhaseDurations(AuctionId auctionId) internal view returns (uint256[] memory) {
+        bytes32 baseSlot = getAuctionInfoBaseSlot(auctionId);
+        bytes32 configSlot = StorageSlots.structFieldSlot(baseSlot, StorageSlots.AUCTION_INFO_FIELD_CONFIG);
+        bytes32 arraySlot = StorageSlots.structFieldSlot(configSlot, StorageSlots.CONFIG_FIELD_PHASE_DURATIONS);
+        uint256 length = _sloadArrayLength(arraySlot);
+        uint256[] memory result = new uint256[](length);
+        for (uint256 i = 0; i < length; i++) {
+            bytes32 elementSlot = StorageSlots.arrayElementSlot(arraySlot, i);
+            result[i] = _sloadUint256(elementSlot);
+        }
+        return result;
     }
     
     function getAuctionStatus(AuctionId auctionId) internal view returns (AuctionTypes.AuctionStatus) {
