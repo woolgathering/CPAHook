@@ -12,7 +12,7 @@ import { AuctionId } from "../types/AuctionId.sol";
  * @notice Validation functions converted from modifiers using StorageAccess
  * @dev All functions operate via DELEGATECALL in CPAManager's storage context
  */
-library CPAValidation {
+contract CPAValidation {
     using StorageAccess for *;
 
     /**

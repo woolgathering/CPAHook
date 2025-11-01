@@ -12,7 +12,7 @@ import { AuctionId } from "../types/AuctionId.sol";
  * @notice Utility functions using StorageAccess
  * @dev All functions operate via DELEGATECALL in CPAManager's storage context
  */
-library CPAUtilities {
+contract CPAUtilities {
     using StorageAccess for *;
 
     /**

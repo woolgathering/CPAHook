@@ -12,6 +12,10 @@ import { CPASettlementPhase } from "../src/libraries/CPASettlementPhase.sol";
 import { CPAFinishedPhase } from "../src/libraries/CPAFinishedPhase.sol";
 import { CPAAuctionControl } from "../src/libraries/CPAAuctionControl.sol";
 import { CPACallbacks } from "../src/libraries/CPACallbacks.sol";
+import { CPAManagerHelpers } from "../src/libraries/CPAManagerHelpers.sol";
+import { CPAValidation } from "../src/libraries/CPAValidation.sol";
+import { CPATransitions } from "../src/libraries/CPATransitions.sol";
+import { CPAUtilities } from "../src/libraries/CPAUtilities.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
@@ -46,6 +50,12 @@ contract CPAManagerTest is Deployers {
 		address auctionControlLib = address(new CPAAuctionControl());
 		address callbackLib = address(new CPACallbacks());
 		
+		// Deploy new helper libraries
+		address helpersLib = address(new CPAManagerHelpers());
+		address validationLib = address(new CPAValidation());
+		address transitionsLib = address(new CPATransitions());
+		address utilitiesLib = address(new CPAUtilities());
+		
 		return new CPAManager(
 			_poolManager,
 			_owner,
@@ -59,7 +69,11 @@ contract CPAManagerTest is Deployers {
 			settlementPhaseLib,
 			finishedPhaseLib,
 			auctionControlLib,
-			callbackLib
+			callbackLib,
+			helpersLib,
+			validationLib,
+			transitionsLib,
+			utilitiesLib
 		);
 	}
 
@@ -75,6 +89,12 @@ contract CPAManagerTest is Deployers {
 		address auctionControlLib = address(new CPAAuctionControl());
 		address callbackLib = address(new CPACallbacks());
 		
+		// Deploy new helper libraries
+		address helpersLib = address(new CPAManagerHelpers());
+		address validationLib = address(new CPAValidation());
+		address transitionsLib = address(new CPATransitions());
+		address utilitiesLib = address(new CPAUtilities());
+		
 		return new CPAManager(
 			_poolManager,
 			_owner,
@@ -88,7 +108,11 @@ contract CPAManagerTest is Deployers {
 			settlementPhaseLib,
 			finishedPhaseLib,
 			auctionControlLib,
-			callbackLib
+			callbackLib,
+			helpersLib,
+			validationLib,
+			transitionsLib,
+			utilitiesLib
 		);
 	}
 

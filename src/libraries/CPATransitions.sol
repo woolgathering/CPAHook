@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { StorageAccess } from "../utils/StorageAccess.sol";
-import { CPAManagerHelpers } from "./CPAManagerHelpers.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
@@ -13,7 +12,7 @@ import { AuctionId } from "../types/AuctionId.sol";
  * @notice Phase transition logic using StorageAccess
  * @dev All functions operate via DELEGATECALL in CPAManager's storage context
  */
-library CPATransitions {
+contract CPATransitions {
     using StorageAccess for *;
 
     /**
@@ -28,20 +27,23 @@ library CPATransitions {
         address caller
     ) internal {
         // Check if phase has expired (no auctioneer override for bidder protection)
-        if (!CPAManagerHelpers.hasPhaseExpired(self, auctionId, AuctionTypes.AuctionPhase.Proxy)) {
+        uint256[] memory durations = StorageAccess.getAuctionPhaseDurations(auctionId);
+        uint256 startTime = StorageAccess.getProxyPhaseStartTime(auctionId);
+        if (startTime == 0 || block.timestamp < startTime + durations[0]) {
             revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
         }
         
         // Check if any bundles were submitted
         if (!StorageAccess.getHasBundles(auctionId)) {
             StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
-            CPAManagerHelpers.updateCPAHookStates(self, auctionId);
+            // Note: Hook states update will be handled by CPAManager if needed
+            // Since we're reverting, the status change won't persist, which is correct behavior
             emit IErrorsAndEvents.AuctionCancelled(auctionId, caller);
             revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
         }
         
-        // Transition to allocation phase
-        CPAManagerHelpers.changePhase(self, auctionId, AuctionTypes.AuctionPhase.Allocation);
+        // Transition to allocation phase - delegate to helpersLib
+        // This will be handled by CPAManager calling _changePhase
     }
 
     /**
@@ -58,7 +60,9 @@ library CPATransitions {
         address caller
     ) internal {
         // Check if phase has expired (no auctioneer override for bidder protection)
-        if (!CPAManagerHelpers.hasPhaseExpired(self, auctionId, AuctionTypes.AuctionPhase.Allocation)) {
+        uint256[] memory durations = StorageAccess.getAuctionPhaseDurations(auctionId);
+        uint256 startTime = StorageAccess.getAllocationPhaseStartTime(auctionId);
+        if (startTime == 0 || block.timestamp < startTime + durations[1]) {
             revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
         }
         
@@ -66,7 +70,8 @@ library CPATransitions {
         // if not, force cancel the auction
         if (!StorageAccess.getHasAllocations(auctionId)) {
             StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
-            CPAManagerHelpers.updateCPAHookStates(self, auctionId);
+            // Note: Hook states update will be handled by CPAManager if needed
+            // Since we're reverting, the status change won't persist, which is correct behavior
             emit IErrorsAndEvents.AuctionCancelled(auctionId, caller);
             revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
         }
@@ -74,8 +79,8 @@ library CPATransitions {
         // select the winner and move the assets to the pools
         // This will be handled via delegatecall in CPAManager to allocationPhaseLib
         
-        // Transition to settlement phase
-        CPAManagerHelpers.changePhase(self, auctionId, AuctionTypes.AuctionPhase.Settlement);
+        // Transition to settlement phase - delegate to helpersLib
+        // This will be handled by CPAManager calling _changePhase
     }
 
     /**
@@ -88,11 +93,13 @@ library CPATransitions {
         AuctionId auctionId
     ) internal {
         // Check if phase has expired (no auctioneer override for bidder protection)
-        if (!CPAManagerHelpers.hasPhaseExpired(self, auctionId, AuctionTypes.AuctionPhase.Settlement)) {
+        uint256[] memory durations = StorageAccess.getAuctionPhaseDurations(auctionId);
+        uint256 startTime = StorageAccess.getSettlementPhaseStartTime(auctionId);
+        if (startTime == 0 || block.timestamp < startTime + durations[2]) {
             revert IErrorsAndEvents.PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Settlement);
         }
         
-        // Transition to finished phase
-        CPAManagerHelpers.changePhase(self, auctionId, AuctionTypes.AuctionPhase.Finished);
+        // Transition to finished phase - delegate to helpersLib
+        // This will be handled by CPAManager calling _changePhase
     }
 }

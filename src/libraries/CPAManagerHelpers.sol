@@ -14,7 +14,7 @@ import { ICPAHook } from "../interfaces/ICPAHook.sol";
  * @notice Internal helper functions for CPAManager using StorageAccess
  * @dev All functions operate via DELEGATECALL in CPAManager's storage context
  */
-library CPAManagerHelpers {
+contract CPAManagerHelpers {
     using StorageAccess for *;
 
     /**

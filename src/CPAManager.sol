@@ -145,7 +145,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 
 	modifier onlyAuctionOwner(AuctionId auctionId) {
 		bytes memory result = _delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validateAuctionOwner(address,uint256,address)")),
 				address(this),
@@ -166,7 +166,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	modifier whenAuctionActive(AuctionId auctionId) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validateAuctionActive(address,uint256)")),
 				address(this),
@@ -178,7 +178,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 
 	modifier whenAuctionCancelled(AuctionId auctionId) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validateAuctionCancelled(address,uint256)")),
 				address(this),
@@ -193,7 +193,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	modifier onlyPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validatePhase(address,uint256,uint8)")),
 				address(this),
@@ -209,7 +209,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	modifier onlyWhenPhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validatePhaseExpired(address,uint256,uint8)")),
 				address(this),
@@ -225,7 +225,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	modifier onlyWhenPhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validatePhaseNotExpired(address,uint256,uint8)")),
 				address(this),
@@ -243,7 +243,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	modifier validateEthForNumeraire(AuctionId auctionId) {
 		_delegatecallLibrary(
-			validationLib,
+validationLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("validateEthForNumeraireValue(address,uint256,uint256)")),
 				address(this),
@@ -260,7 +260,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 
 	/// @notice Override getSetupLib to return the immutable library address
 	function getSetupLib() internal view override returns (address) {
-		return setupLib;
+		return libs.setupLib;
 	}
 
 
@@ -277,7 +277,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function pause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("pause(address,uint256,address,address)")),
 				address(this),
@@ -293,7 +293,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function unpause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("unpause(address,uint256,address,address)")),
 				address(this),
@@ -310,7 +310,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function cancelAuction(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("cancelAuction(address,uint256,address,address)")),
 				address(this),
@@ -327,7 +327,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function forceCancelAuction(AuctionId auctionId) external nonReentrant {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("forceCancelAuction(address,uint256,address,address)")),
 				address(this),
@@ -340,7 +340,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 
 	function reclaimStake(AuctionId auctionId) external {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("reclaimStake(address,uint256,address)")),
 				address(this),
@@ -358,7 +358,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function forfeit(AuctionId auctionId, address bidder) external onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("forfeit(address,uint256,address,address)")),
 				address(this),
@@ -380,8 +380,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		whenAuctionActive(auctionId) 
 		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) 
 	{
-	bytes memory result = _delegatecallLibrary(
-		finishedPhaseLib,
+	bytes memory result = 		_delegatecallLibrary(
+finishedPhaseLib,
 		abi.encodeWithSelector(
 			bytes4(keccak256("transferPositionsToAuctioneer(address,uint256)")),
 			address(this),
@@ -408,7 +408,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// DELEGATECALL to external library - storage mappings are accessible in library context
 		// We pass config and auctionOwner, but storage mappings are accessed directly by library
 		bytes memory result = _delegatecallLibrary(
-			setupLib,
+setupLib,
 			abi.encodeWithSelector(
 				CPASetup.createAuction.selector,
 				address(this),
@@ -433,7 +433,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		uint256 depositAmount
 	) external nonReentrant onlyAuctionOwner(auctionId) {
 		_delegatecallLibrary(
-			setupLib,
+setupLib,
 			abi.encodeWithSelector(
 				CPASetup.moveDeposit.selector,
 				address(this),
@@ -466,7 +466,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		uint256[] memory amounts
 	) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
 		_delegatecallLibrary(
-			setupLib,
+setupLib,
 			abi.encodeWithSelector(
 				CPASetup.depositAllAndStartClock.selector,
 				address(this),
@@ -488,7 +488,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// Handle first-time transition from Setup to Clock phase
 		if (StorageAccess.getAuctionPhase(auctionId) == AuctionTypes.AuctionPhase.Setup) {
 			bytes memory result = _delegatecallLibrary(
-				setupLib,
+setupLib,
 				abi.encodeWithSelector(
 					CPASetup.confirmSetupComplete.selector,
 					address(this),
@@ -498,18 +498,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			if (!abi.decode(result, (bool))) revert IErrorsAndEvents.SetupNotComplete();
 			// Transition to Clock phase via helpers
 			_delegatecallLibrary(
-				helpersLib,
+helpersLib,
 				abi.encodeWithSelector(
 					bytes4(keccak256("startClockRound(address,uint256,address,address)")),
 					address(this),
 					auctionId,
-					setupLib,
-					clockPhaseLib
+setupLib,
+clockPhaseLib
 				)
 			);
 		}
 		_delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("openClockRound(address,uint256)")),
 				address(this),
@@ -525,7 +525,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 function endClockRound(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Set the clock to closed
 		_delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("setClockOpen(address,uint256,uint256)")),
 				address(this),
@@ -536,7 +536,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Process round results (calculate excess demand and update prices)
 		bytes memory result = _delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("processClockRound(address,uint256)")),
 				address(this),
@@ -550,7 +550,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 
 		// Check if clock phase should end
 		bytes memory endResult = _delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("shouldEndClockPhase(address,uint256,uint256[],address)")),
 				address(this),
@@ -578,7 +578,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// Close the current clock round if it's still open
 		if (StorageAccess.getAuctionClockOpen(auctionId) == 2) {
 			_delegatecallLibrary(
-				clockPhaseLib,
+clockPhaseLib,
 				abi.encodeWithSelector(
 					bytes4(keccak256("setClockOpen(address,uint256,uint256)")),
 					address(this),
@@ -593,7 +593,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Handle undersell by reverting to last oversold prices
 		_delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("revertUndersoldPrices(address,uint256,address)")),
 				address(this),
@@ -604,12 +604,12 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Transition to proxy phase via helpers
 		_delegatecallLibrary(
-			helpersLib,
+helpersLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("endClockPhase(address,uint256,address,address)")),
 				address(this),
 				auctionId,
-				clockPhaseLib,
+clockPhaseLib,
 				address(manager)
 			)
 		);
@@ -636,7 +636,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) validateEthForNumeraire(auctionId) {
 		
 		_delegatecallLibrary(
-			clockPhaseLib,
+clockPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("processBid(address,uint256,uint256[],uint256)")),
 				address(this),
@@ -654,7 +654,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function commitToBidder(AuctionId auctionId, bytes32 commitHash) external {
 		_delegatecallLibrary(
-			utilitiesLib,
+utilitiesLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("commitToBidder(address,uint256,bytes32,address)")),
 				address(this),
@@ -671,7 +671,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("dropout(address,uint256,address)")),
 				address(this),
@@ -698,8 +698,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		AuctionTypes.Bundle calldata bundleData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
 		
-		bytes memory result = _delegatecallLibrary(
-			proxyPhaseLib,
+		bytes memory result = 		_delegatecallLibrary(
+proxyPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("submitBundle(address,bytes32,(uint256,bytes32,uint256[],uint256))")),
 				address(this),
@@ -727,7 +727,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized(); // cannot submit an allocation for someone else
 		
 		_delegatecallLibrary(
-			allocationPhaseLib,
+allocationPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("submitAllocation(address,(uint256,(uint256,bytes32,uint256[],uint256)[]))")),
 				address(this),
@@ -755,7 +755,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		bytes32 saltB
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		_delegatecallLibrary(
-			settlementPhaseLib,
+settlementPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("reveal(address,uint256,address,address,bytes32,bytes32)")),
 				address(this),
@@ -785,7 +785,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Call the settlement phase
 		_delegatecallLibrary(
-			settlementPhaseLib,
+settlementPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("claimToken(address,address,uint256,bytes32,uint256)")),
 				address(this),
@@ -804,7 +804,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		_delegatecallLibrary(
-			settlementPhaseLib,
+settlementPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("claimAllTokens(address,address,uint256,bytes32)")),
 				address(this),
@@ -826,7 +826,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function claimAllocatorReward(AuctionId auctionId) external {
 		_delegatecallLibrary(
-			auctionControlLib,
+auctionControlLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("claimAllocatorReward(address,uint256,address)")),
 				address(this),
@@ -846,7 +846,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function transitionToAllocation(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) {
 		_delegatecallLibrary(
-			transitionsLib,
+transitionsLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("transitionToAllocation(address,uint256,address)")),
 				address(this),
@@ -854,6 +854,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 				msg.sender
 			)
 		);
+		// Transition to allocation phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
 	}
 
 	/**
@@ -863,7 +865,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	function transitionToSettlement(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) {
 		// select the winner and move the assets to the pools
 		_delegatecallLibrary(
-			allocationPhaseLib,
+allocationPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("selectWinner(address,uint256)")),
 				address(this),
@@ -871,7 +873,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			)
 		);
 		_delegatecallLibrary(
-			allocationPhaseLib,
+allocationPhaseLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("transferAssetsToPools(address,uint256)")),
 				address(this),
@@ -881,15 +883,17 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Transition to settlement phase via transitions library
 		_delegatecallLibrary(
-			transitionsLib,
+transitionsLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("transitionToSettlement(address,uint256,address,address)")),
 				address(this),
 				auctionId,
-				allocationPhaseLib,
+allocationPhaseLib,
 				msg.sender
 			)
 		);
+		// Transition to settlement phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
 	}
 
 	/**
@@ -898,13 +902,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function transitionToFinished(AuctionId auctionId) external nonReentrant whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
 		_delegatecallLibrary(
-			transitionsLib,
+transitionsLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("transitionToFinished(address,uint256)")),
 				address(this),
 				auctionId
 			)
 		);
+		// Transition to finished phase
+		_changePhase(auctionId, AuctionTypes.AuctionPhase.Finished);
 	}
 
 	// ========================================
@@ -929,7 +935,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function registerCommit(AuctionId auctionId, bytes32 commitHash) external {
 		_delegatecallLibrary(
-			utilitiesLib,
+utilitiesLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("registerCommit(address,uint256,bytes32,address)")),
 				address(this),
@@ -952,7 +958,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
 		_delegatecallLibrary(
-			helpersLib,
+helpersLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("changePhase(address,uint256,uint8)")),
 				address(this),
@@ -999,7 +1005,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	function _updateCPAHookStates(AuctionId auctionId) internal {
 		_delegatecallLibrary(
-			helpersLib,
+helpersLib,
 			abi.encodeWithSelector(
 				bytes4(keccak256("updateCPAHookStates(address,uint256)")),
 				address(this),
@@ -1028,8 +1034,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// DELEGATECALL to external callback library
 		if (operationType == 0) {
 			// Bid as liquidity add
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleBid.selector,
 					CPAStorage(address(this)),
@@ -1041,8 +1047,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			return _handleDepositTransfer(operationData);
 		} else if (operationType == 2) {
 			// Price update swap
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handlePriceUpdateSwap.selector,
 					CPAStorage(address(this)),
@@ -1051,8 +1057,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 3) {
 			// Mint position after allocation
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleMintPosition.selector,
 					CPAStorage(address(this)),
@@ -1061,8 +1067,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 4) {
 			// Claim token settlement
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleClaimToken.selector,
 					CPAStorage(address(this)),
@@ -1071,8 +1077,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 5) {
 			// Refund stake
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.refundStake.selector,
 					CPAStorage(address(this)),
@@ -1081,8 +1087,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 6) {
 			// Claim allocator reward
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleClaimAllocatorReward.selector,
 					CPAStorage(address(this)),
@@ -1091,8 +1097,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 7) {
 			// Claim all tokens
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleClaimAllTokens.selector,
 					CPAStorage(address(this)),
@@ -1101,8 +1107,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 8) {
 			// Batch deposit transfer
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleBatchDepositTransfer.selector,
 					CPAStorage(address(this)),
@@ -1111,8 +1117,8 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 			);
 		} else if (operationType == 9) {
 			// Batch ERC6909 to ERC20 conversion for position minting
-			return _delegatecallLibrary(
-				callbackLib,
+			return 		_delegatecallLibrary(
+callbackLib,
 				abi.encodeWithSelector(
 					CPACallbacks.handleBatchERC6909ToERC20Conversion.selector,
 					CPAStorage(address(this)),
