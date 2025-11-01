@@ -4,6 +4,14 @@ pragma solidity ^0.8.24;
 import { Script, console } from "forge-std/Script.sol";
 import { CPAManager } from "../src/CPAManager.sol";
 import { CPAHook } from "../src/CPAHook.sol";
+import { CPASetup } from "../src/libraries/CPASetup.sol";
+import { CPAClockPhase } from "../src/libraries/CPAClockPhase.sol";
+import { CPAProxyPhase } from "../src/libraries/CPAProxyPhase.sol";
+import { CPAAllocationPhase } from "../src/libraries/CPAAllocationPhase.sol";
+import { CPASettlementPhase } from "../src/libraries/CPASettlementPhase.sol";
+import { CPAFinishedPhase } from "../src/libraries/CPAFinishedPhase.sol";
+import { CPAAuctionControl } from "../src/libraries/CPAAuctionControl.sol";
+import { CPACallbacks } from "../src/libraries/CPACallbacks.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -50,13 +58,31 @@ contract DeployCPA is Script {
         console.log("CPAHook deployed at:", address(cpaHook));
 
         // Deploy CPAManager with PoolManager, PositionManager, and CPAHook addresses
+        console.log("Deploying phase libraries...");
+        address setupLib = address(new CPASetup());
+        address clockPhaseLib = address(new CPAClockPhase());
+        address proxyPhaseLib = address(new CPAProxyPhase());
+        address allocationPhaseLib = address(new CPAAllocationPhase());
+        address settlementPhaseLib = address(new CPASettlementPhase());
+        address finishedPhaseLib = address(new CPAFinishedPhase());
+        address auctionControlLib = address(new CPAAuctionControl());
+        address callbackLib = address(new CPACallbacks());
+        
         console.log("Deploying CPAManager...");
         CPAManager cpaManager = new CPAManager(
             IPoolManager(poolManagerAddress),
             protocolOwner,
             address(cpaHook),
             IPositionManager(positionManagerAddress),
-            protocolOwner
+            protocolOwner,
+            setupLib,
+            clockPhaseLib,
+            proxyPhaseLib,
+            allocationPhaseLib,
+            settlementPhaseLib,
+            finishedPhaseLib,
+            auctionControlLib,
+            callbackLib
         );
         console.log("CPAManager deployed at:", address(cpaManager));
 

@@ -12,30 +12,27 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { StorageAccess } from "../utils/StorageAccess.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId, AuctionIdLibrary } from "../types/AuctionId.sol";
 
-library CPASetup {
+contract CPASetup {
 	using CurrencySettler for Currency;
+	using StorageAccess for *;
 
 	/**
 	 * @notice Create a new auction with the given configuration
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param config The auction configuration (includes pool keys, initial prices, and price increments)
 	 * @param auctionOwner The auction owner
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolToAuctionId Mapping for pool to auction ID
-	 * @param poolInfo Mapping for pool info
+	 * @dev Storage mappings are accessed directly via self since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function createAuction(
 		CPAStorage self,
 		AuctionTypes.AuctionConfig memory config, 
-		address auctionOwner,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionId) storage poolToAuctionId,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
-	) internal returns (AuctionId) {
+		address auctionOwner
+	) public returns (AuctionId) {
 		// we need to create the auction id
 		// then we need to check that all the pools have the same numeraire
 		// then we need to check that the hook in the pools matches the cpaAuctionHookAddr
@@ -67,13 +64,14 @@ library CPASetup {
 					revert IErrorsAndEvents.InvalidHook();
 				}
 				
-				poolToAuctionId[config.poolKeys[i].toId()] = auctionId; // set the auction id in poolToAuctionId
+				// Access storage via StorageAccess - DELEGATECALL executes in CPAManager's storage context
+				PoolId poolId = config.poolKeys[i].toId();
+				StorageAccess.setPoolToAuctionId(poolId, auctionId);
 				
 				// Convert sqrtPriceX96 to tick
 				int24 startingTick = TickMath.getTickAtSqrtPrice(config.initialSqrtPricesX96[i]);
 				
 				// Create and store PoolInfo for this pool
-				PoolId poolId = config.poolKeys[i].toId();
 				AuctionTypes.PoolInfo memory poolInfoData = AuctionTypes.PoolInfo({
 					key: config.poolKeys[i],
 					startingTick: startingTick,
@@ -84,7 +82,8 @@ library CPASetup {
 					auctionId: auctionId,
 					positionId: 0
 				});
-				poolInfo[poolId] = poolInfoData;
+				// Access poolInfo via StorageAccess - executes in CPAManager context via DELEGATECALL
+				StorageAccess.setPoolInfo(poolId, poolInfoData);
 				
 				// Create the pool with initial sqrtPriceX96
 				self.manager().initialize(config.poolKeys[i], config.initialSqrtPricesX96[i]);
@@ -95,7 +94,7 @@ library CPASetup {
 		}
 
 		// set the auction info
-		auctionInfo[auctionId] = AuctionTypes.AuctionInfo({
+		AuctionTypes.AuctionInfo memory auctionInfoData = AuctionTypes.AuctionInfo({
 			auctionOwner: auctionOwner,
 			commonNumeraire: numeraireAddress,
 			config: config,
@@ -110,6 +109,8 @@ library CPASetup {
 			lastRevenue: 0,
 			totalPauseDuration: 0
 		});
+		// Access auctionInfo via StorageAccess - executes in CPAManager context via DELEGATECALL
+		StorageAccess.setAuctionInfo(auctionId, auctionInfoData);
 
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
 
@@ -118,29 +119,31 @@ library CPASetup {
 
 	/**
 	 * @notice Move deposits from auction owner to a single pool, giving ERC6909 claims to CPAHook
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param auctionId The auction ID
 	 * @param poolKey The pool key to deposit to
 	 * @param depositAmount The amount to deposit
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function moveDeposit(
 		CPAStorage self, 
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey,
 		AuctionId auctionId, 
 		uint256 depositAmount
-	) internal {
+	) public {
+		// Get auctionInfo to check phase
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		
 		// confirm that the auction is in the Setup phase
-		if (auctionInfo.currentPhase != AuctionTypes.AuctionPhase.Setup) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfo.currentPhase);
+		if (auctionInfoData.currentPhase != AuctionTypes.AuctionPhase.Setup) {
+			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auctionInfoData.currentPhase);
 		}
 
 		// Update the deposit amount in poolInfo
-		poolInfo[poolKey.toId()].depositAmount = depositAmount;
+		StorageAccess.setPoolInfoDepositAmount(poolKey.toId(), depositAmount);
 		
 		// Determine which currency is the item (non-numeraire)
-		address numeraireAddress = auctionInfo.commonNumeraire;
+		address numeraireAddress = auctionInfoData.commonNumeraire;
 		Currency itemCurrency;
 		
 		if (address(Currency.unwrap(poolKey.currency0)) == numeraireAddress) {
@@ -179,22 +182,24 @@ library CPASetup {
 
 	/**
 	 * @notice Handle deposit transfer operation (setup)
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param operationData The encoded operation data
 	 * @return returnData The encoded balance deltas
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function handleDepositTransfer(
 		CPAStorage self, 
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		bytes memory operationData
-	) internal returns (bytes memory returnData) {
+	) public returns (bytes memory returnData) {
 		// Decode callback data
 		(PoolKey memory poolKey, Currency itemCurrency, uint256 depositAmount, AuctionId auctionId, address originalCaller) = 
 			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
 		
+		// Get auctionInfo to verify owner
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		
 		// Verify this is a legitimate auction owner (original caller, not msg.sender)
-		require(originalCaller == auctionInfo.auctionOwner, "Not auction owner");
+		require(originalCaller == auctionInfoData.auctionOwner, "Not auction owner");
 		
 		// Directly transfer assets using V4's settle/take mechanism
 		// This bypasses V4's native liquidity functionality
@@ -223,20 +228,21 @@ library CPASetup {
 
     function confirmSetupComplete(
 		CPAStorage self,
-		AuctionId auctionId,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
-	) internal view returns (bool) {
+		AuctionId auctionId
+	) public view returns (bool) {
+        // Get auctionInfo to check phase
+        AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+        
         // Check that auction is in Setup phase
-        if (auctionInfo.currentPhase != AuctionTypes.AuctionPhase.Setup) {
+        if (auctionInfoData.currentPhase != AuctionTypes.AuctionPhase.Setup) {
             return false;
         }
         
         // Check that all asset pools have deposits
-        PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+        PoolKey[] memory poolKeys = auctionInfoData.poolKeys;
         for (uint256 i = 0; i < poolKeys.length; ) {
             PoolId poolId = poolKeys[i].toId();
-            AuctionTypes.PoolInfo memory pool = poolInfo[poolId];
+            AuctionTypes.PoolInfo memory pool = StorageAccess.getPoolInfo(poolId);
             
             // Each asset pool must have some deposit amount
             if (pool.depositAmount == 0) {
@@ -250,28 +256,28 @@ library CPASetup {
 
 	/**
 	 * @notice Deposit to all pools and start clock phase in one transaction
-	 * @param self The contract instance
-	 * @param auctionInfo The auction info storage
-	 * @param poolInfo The pool info storage
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param poolKeys Array of pool keys to deposit to
 	 * @param amounts Array of deposit amounts
 	 * @param auctionId The auction ID
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function depositAllAndStartClock(
 		CPAStorage self,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey[] memory poolKeys,
 		uint256[] memory amounts,
 		AuctionId auctionId
-	) internal {
+	) public {
 		// Validate array lengths match
 		if (poolKeys.length != amounts.length) {
 			revert IErrorsAndEvents.InvalidBidsLength();
 		}
 
+		// Get auctionInfo to access auction data
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		
 		// Validate pools, determine currencies, and approve to PositionManager in single loop
-		address numeraireAddress = auctionInfo.commonNumeraire;
+		address numeraireAddress = auctionInfoData.commonNumeraire;
 		Currency[] memory itemCurrencies = new Currency[](poolKeys.length);
 		
 		for (uint256 i = 0; i < poolKeys.length; ) {
@@ -279,9 +285,9 @@ library CPASetup {
 			// Cache poolId conversion outside inner loop for gas efficiency
 			PoolId poolId = poolKeys[i].toId();
 			bool found = false;
-			uint256 innerLen = auctionInfo.poolKeys.length; // Cache length
+			uint256 innerLen = auctionInfoData.poolKeys.length; // Cache length
 			for (uint256 j = 0; j < innerLen; ) {
-				if (PoolId.unwrap(poolId) == PoolId.unwrap(auctionInfo.poolKeys[j].toId())) {
+				if (PoolId.unwrap(poolId) == PoolId.unwrap(auctionInfoData.poolKeys[j].toId())) {
 					found = true;
 					break;
 				}
@@ -326,11 +332,11 @@ library CPASetup {
 		
 		// After successful batch deposit, start the clock phase
 		// This is done here because we know all deposits succeeded
-		unchecked {
-			auctionInfo.currentPhase = AuctionTypes.AuctionPhase.Clock;
-			auctionInfo.clockOpen = 2; // Clock is now open
-			auctionInfo.currentRound = 1; // Initialize to round 1
-		}
+		// Update auctionInfo via StorageAccess
+		auctionInfoData.currentPhase = AuctionTypes.AuctionPhase.Clock;
+		auctionInfoData.clockOpen = 2; // Clock is now open
+		auctionInfoData.currentRound = 1; // Initialize to round 1
+		StorageAccess.setAuctionInfo(auctionId, auctionInfoData);
 		
 		// Emit phase change event
 		emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);

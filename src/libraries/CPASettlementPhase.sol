@@ -16,13 +16,15 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { StorageAccess } from "../utils/StorageAccess.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId } from "../types/BundleId.sol";
 
-library CPASettlementPhase {
+contract CPASettlementPhase {
+	using StorageAccess for *;
     using StateLibrary for IPoolManager;
     using SafeCast for *;
     using CurrencySettler for Currency;
@@ -33,20 +35,20 @@ library CPASettlementPhase {
         address bidder,
         address proxy,
         bytes32 saltA,
-        bytes32 saltB,
-        mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy,
-        mapping(AuctionId => mapping(bytes32 => address)) storage revealedMappings
-    ) internal {
+        bytes32 saltB
+    ) public {
         bytes32 computedCommitHash = CommitReveal.generateCommitHash(bidder, proxy, saltA, saltB);
 
         // now check if there exists a commit hash for this auction in the commit proxy mapping
-        if (commitProxy[auctionId][computedCommitHash] == address(0)) revert IErrorsAndEvents.NoSuchCommitHash(auctionId, computedCommitHash);
+        address commitProxyAddr = StorageAccess.getCommitProxy(auctionId, computedCommitHash);
+        if (commitProxyAddr == address(0)) revert IErrorsAndEvents.NoSuchCommitHash(auctionId, computedCommitHash);
 
         // now check if the commit hash has already been revealed
-        if (revealedMappings[auctionId][computedCommitHash] != address(0)) revert IErrorsAndEvents.DuplicateReveal(auctionId, computedCommitHash);
+        address revealedBidder = StorageAccess.getRevealedMapping(auctionId, computedCommitHash);
+        if (revealedBidder != address(0)) revert IErrorsAndEvents.DuplicateReveal(auctionId, computedCommitHash);
 
         // now set the revealed mapping
-        revealedMappings[auctionId][computedCommitHash] = bidder;
+        StorageAccess.setRevealedMapping(auctionId, computedCommitHash, bidder);
 
         emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
     }
@@ -55,27 +57,24 @@ library CPASettlementPhase {
         CPAStorage self,
         address bidder,
         AuctionId auctionId,
-        bytes32 commitHash,
-        AuctionTypes.AuctionInfo storage auctionInfo,
-        mapping(bytes32 => address) storage revealedMappings,
-        mapping(address => uint256) storage bidderStake,
-        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
-        mapping(bytes32 => BundleId) storage winningBundleIds,
-        mapping(AuctionId => uint256) storage protocolPenalties
-    ) internal {
+        bytes32 commitHash
+    ) public {
         // Validate bidder authorization
         {
-            address revealedBidder = revealedMappings[commitHash];
+            address revealedBidder = StorageAccess.getRevealedMapping(auctionId, commitHash);
             if (revealedBidder == address(0)) revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
         }
 
-        BundleId bundleId = winningBundleIds[commitHash];
+        BundleId bundleId = StorageAccess.getWinningBundleId(commitHash);
 
+        // Get auctionInfo
+        AuctionTypes.AuctionInfo memory auctionInfo = StorageAccess.getAuctionInfo(auctionId);
+        
         // Check if bidder was allocated
         if (BundleId.unwrap(bundleId) == 0) {
             // Non-allocated bidder - refund full stake (no penalty)
-            uint256 stake = bidderStake[bidder];
+            uint256 stake = StorageAccess.getBidderStake(auctionId, bidder);
             if (stake > 0) {
                 AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
                     numeraire: auctionInfo.commonNumeraire,
@@ -84,7 +83,7 @@ library CPASettlementPhase {
                 });
                 self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
                 
-                bidderStake[bidder] = 0;
+                StorageAccess.setBidderStake(auctionId, bidder, 0);
                 emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake);
             }
             return; // Exit early, no allocation to process
@@ -98,12 +97,12 @@ library CPASettlementPhase {
 			numeraire: auctionInfo.commonNumeraire,
 			auctionId: auctionId,
 			poolKeys: auctionInfo.poolKeys,
-			allocatedQuantities: bundles[bundleId].quantities
+			allocatedQuantities: StorageAccess.getBundle(auctionId, bundleId).quantities
 		}))));
 
         (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
 
-        bidderStake[bidder] = 0;
+        StorageAccess.setBidderStake(auctionId, bidder, 0);
     }
 
     function claimToken(
@@ -111,20 +110,17 @@ library CPASettlementPhase {
         address bidder,
         AuctionId auctionId,
         bytes32 commitHash,
-        PoolId poolId,
-        AuctionTypes.Allocation memory topAllocation,
-        AuctionTypes.AuctionInfo storage auctionInfo,
-        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
-        mapping(bytes32 => BundleId) storage winningBundleIds,
-        mapping(address => uint256) storage bidderStake,
-        mapping(bytes32 => address) storage revealedMappings
-    ) internal {
+        PoolId poolId
+    ) public {
         // Validate bidder authorization
         {
-            address revealedBidder = revealedMappings[commitHash];
+            address revealedBidder = StorageAccess.getRevealedMapping(auctionId, commitHash);
             if (revealedBidder == address(0)) revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
         }
+
+        // Get auctionInfo
+        AuctionTypes.AuctionInfo memory auctionInfo = StorageAccess.getAuctionInfo(auctionId);
 
         // Get amount owed and pool info
         uint256 amountOwed;
@@ -143,8 +139,8 @@ library CPASettlementPhase {
             }
 
             // Get bundle and amount owed
-            BundleId bundleId = winningBundleIds[commitHash];
-            AuctionTypes.Bundle memory bundle = bundles[bundleId];
+            BundleId bundleId = StorageAccess.getWinningBundleId(commitHash);
+            AuctionTypes.Bundle memory bundle = StorageAccess.getBundle(auctionId, bundleId);
             amountOwed = bundle.quantities[poolIndex];
             poolKey = auctionInfo.poolKeys[poolIndex];
         }
@@ -166,7 +162,8 @@ library CPASettlementPhase {
             (uint256 numerairePaidByManager, uint256 assetGained) = abi.decode(data, (uint256, uint256));
             
             // Update stake balance
-            bidderStake[bidder] -= numerairePaidByManager;
+            uint256 currentStake = StorageAccess.getBidderStake(auctionId, bidder);
+            StorageAccess.setBidderStake(auctionId, bidder, currentStake - numerairePaidByManager);
         }
     }
 
@@ -191,22 +188,22 @@ library CPASettlementPhase {
 
 	/**
 	 * @notice Check if settlement phase should end based on duration
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param auctionId The auction ID
-	 * @param auctionInfo The auction info mapping
 	 * @return true if settlement phase duration has expired
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function shouldSettlementPhaseEnd(
 		CPAStorage self, 
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal view returns (bool) {
+		AuctionId auctionId
+	) public view returns (bool) {
 		// Check if settlement phase duration has expired
 		uint256 startTime = self.settlementPhaseStartTime(auctionId);
 		if (startTime == 0) return false; // Phase not started yet
 		
-		// Get phase duration from auction config
-		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[2];
+		// Get auctionInfo and phase duration from auction config
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		return block.timestamp >= startTime + auctionInfoData.config.phaseDurations[2];
 	}
 
 }

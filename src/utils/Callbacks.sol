@@ -27,14 +27,63 @@ abstract contract Callbacks is CPAStorage {
 	using SafeCast for *;
 
 	/**
+	 * @notice Performs a DELEGATECALL to an external library
+	 * @param lib Address of the library contract
+	 * @param data Encoded function call data
+	 * @return result Return data from the library call
+	 * @dev Uses assembly for optimal gas efficiency and bytecode size
+	 *      Must be implemented by inheriting contract (CPAManager)
+	 */
+	function _delegatecallLibrary(address lib, bytes memory data) internal returns (bytes memory result) {
+		assembly {
+			result := mload(0x40)
+			let success := delegatecall(gas(), lib, add(data, 0x20), mload(data), codesize(), 0x00)
+			
+			if iszero(success) {
+				// Bubble up the revert if the delegatecall reverts
+				returndatacopy(result, 0x00, returndatasize())
+				revert(result, returndatasize())
+			}
+			
+			if iszero(returndatasize()) {
+				// Check if library is a contract
+				if iszero(extcodesize(lib)) {
+					mstore(0x00, 0x5a836a5f) // TargetIsNotContract() selector
+					revert(0x1c, 0x04)
+				}
+			}
+			
+			// Store return data length
+			mstore(result, returndatasize())
+			let o := add(result, 0x20)
+			returndatacopy(o, 0x00, returndatasize())
+			mstore(0x40, add(o, returndatasize()))
+		}
+	}
+
+	/**
 	 * @notice Handle deposit transfer operation (setup)
 	 * @param operationData The encoded operation data
 	 * @return returnData The encoded balance deltas
 	 */
+	/**
+	 * @notice Get setupLib address - must be implemented by inheriting contract
+	 */
+	function getSetupLib() internal view virtual returns (address);
+
 	function _handleDepositTransfer(bytes memory operationData) internal returns (bytes memory returnData) {
 		(, , , AuctionId auctionId, ) = 
 			abi.decode(operationData, (PoolKey, Currency, uint256, AuctionId, address));
-		return CPASetup.handleDepositTransfer(this, auctionInfo[auctionId], poolInfo, operationData);
+		// Call external library via DELEGATECALL
+		bytes memory result = _delegatecallLibrary(
+			getSetupLib(),
+			abi.encodeWithSelector(
+				CPASetup.handleDepositTransfer.selector,
+				address(this),
+				operationData
+			)
+		);
+		return abi.decode(result, (bytes));
 	}
 
 	/**

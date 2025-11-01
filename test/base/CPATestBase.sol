@@ -20,6 +20,14 @@ import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 
 import { CPAManager } from "../../src/CPAManager.sol";
 import { CPAHook } from "../../src/CPAHook.sol";
+import { CPASetup } from "../../src/libraries/CPASetup.sol";
+import { CPAClockPhase } from "../../src/libraries/CPAClockPhase.sol";
+import { CPAProxyPhase } from "../../src/libraries/CPAProxyPhase.sol";
+import { CPAAllocationPhase } from "../../src/libraries/CPAAllocationPhase.sol";
+import { CPASettlementPhase } from "../../src/libraries/CPASettlementPhase.sol";
+import { CPAFinishedPhase } from "../../src/libraries/CPAFinishedPhase.sol";
+import { CPAAuctionControl } from "../../src/libraries/CPAAuctionControl.sol";
+import { CPACallbacks } from "../../src/libraries/CPACallbacks.sol";
 import { AuctionTypes } from "../../src/types/AuctionTypes.sol";
 import { AuctionId } from "../../src/types/AuctionId.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -123,8 +131,32 @@ abstract contract CPATestBase is Deployers {
         // Deploy CPAHook with proper address mining
         cpaHook = deployCPAHook(poolManager);
         
-        // Deploy CPAManager (no longer a hook, simple deployment)
-        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), positionManager, address(this));
+        // Deploy phase libraries
+        address setupLib = address(new CPASetup());
+        address clockPhaseLib = address(new CPAClockPhase());
+        address proxyPhaseLib = address(new CPAProxyPhase());
+        address allocationPhaseLib = address(new CPAAllocationPhase());
+        address settlementPhaseLib = address(new CPASettlementPhase());
+        address finishedPhaseLib = address(new CPAFinishedPhase());
+        address auctionControlLib = address(new CPAAuctionControl());
+        address callbackLib = address(new CPACallbacks());
+        
+        // Deploy CPAManager with phase library addresses
+        cpaManager = new CPAManager(
+            poolManager,
+            protocolOwner,
+            address(cpaHook),
+            positionManager,
+            address(this),
+            setupLib,
+            clockPhaseLib,
+            proxyPhaseLib,
+            allocationPhaseLib,
+            settlementPhaseLib,
+            finishedPhaseLib,
+            auctionControlLib,
+            callbackLib
+        );
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));

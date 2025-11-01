@@ -27,10 +27,12 @@ import { CPAProxyPhase } from "./libraries/CPAProxyPhase.sol";
 import { CPAAllocationPhase } from "./libraries/CPAAllocationPhase.sol";
 import { CPASettlementPhase } from "./libraries/CPASettlementPhase.sol";
 import { CPAFinishedPhase } from "./libraries/CPAFinishedPhase.sol";
+import { CPACallbacks } from "./libraries/CPACallbacks.sol";
 
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
 import { CommitReveal } from "./utils/CommitReveal.sol";
 import { Callbacks } from "./utils/Callbacks.sol";
+import { StorageAccess } from "./utils/StorageAccess.sol";
 import { AuctionTypes } from "./types/AuctionTypes.sol";
 import { AuctionId } from "./types/AuctionId.sol";
 import { BundleId } from "./types/BundleId.sol";
@@ -50,6 +52,27 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	using SafeCast for *;
 
 	// ========================================
+	// EXTERNAL LIBRARY ADDRESSES
+	// ========================================
+
+	/// @notice Address of the CPASetup external library
+	address public immutable setupLib;
+	/// @notice Address of the CPAClockPhase external library
+	address public immutable clockPhaseLib;
+	/// @notice Address of the CPAProxyPhase external library
+	address public immutable proxyPhaseLib;
+	/// @notice Address of the CPAAllocationPhase external library
+	address public immutable allocationPhaseLib;
+	/// @notice Address of the CPASettlementPhase external library
+	address public immutable settlementPhaseLib;
+	/// @notice Address of the CPAFinishedPhase external library
+	address public immutable finishedPhaseLib;
+	/// @notice Address of the CPAAuctionControl external library
+	address public immutable auctionControlLib;
+	/// @notice Address of the CPACallbacks external library
+	address public immutable callbackLib;
+
+	// ========================================
 	// CONSTRUCTOR
 	// ========================================
 
@@ -60,16 +83,40 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
 	 * @param _positionManager The PositionManager address for NFT position creation
 	 * @param _protocolWallet The protocol wallet address for penalty collection
+	 * @param _setupLib Address of the CPASetup external library
+	 * @param _clockPhaseLib Address of the CPAClockPhase external library
+	 * @param _proxyPhaseLib Address of the CPAProxyPhase external library
+	 * @param _allocationPhaseLib Address of the CPAAllocationPhase external library
+	 * @param _settlementPhaseLib Address of the CPASettlementPhase external library
+	 * @param _finishedPhaseLib Address of the CPAFinishedPhase external library
+	 * @param _auctionControlLib Address of the CPAAuctionControl external library
+	 * @param _callbackLib Address of the CPACallbacks external library
 	 */
 	constructor(
 		IPoolManager _poolManager,
 		address _owner,
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
-		address _protocolWallet
+		address _protocolWallet,
+		address _setupLib,
+		address _clockPhaseLib,
+		address _proxyPhaseLib,
+		address _allocationPhaseLib,
+		address _settlementPhaseLib,
+		address _finishedPhaseLib,
+		address _auctionControlLib,
+		address _callbackLib
 	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr, _positionManager) {
 		manager = _poolManager;
 		protocolWallet = _protocolWallet;
+		setupLib = _setupLib;
+		clockPhaseLib = _clockPhaseLib;
+		proxyPhaseLib = _proxyPhaseLib;
+		allocationPhaseLib = _allocationPhaseLib;
+		settlementPhaseLib = _settlementPhaseLib;
+		finishedPhaseLib = _finishedPhaseLib;
+		auctionControlLib = _auctionControlLib;
+		callbackLib = _callbackLib;
 	}
 
 	// ========================================
@@ -156,6 +203,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	}
 
 	// ========================================
+	// CALLBACKS OVERRIDES
+	// ========================================
+
+	/// @notice Override getSetupLib to return the immutable library address
+	function getSetupLib() internal view override returns (address) {
+		return setupLib;
+	}
+
+
+	// ========================================
 	// AUCTION MANAGEMENT FUNCTIONS
 	// ========================================
 
@@ -167,57 +224,32 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @notice Pause the auction
 	 */
 	function pause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
-		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
-		
-		// Cannot pause if already paused
-		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
-			revert IErrorsAndEvents.AuctionNotActive(auctionId, AuctionTypes.AuctionStatus.Paused);
-		}
-		
-		// Cannot pause in Settlement or Finished phases
-		if (auction.currentPhase == AuctionTypes.AuctionPhase.Settlement || 
-		    auction.currentPhase == AuctionTypes.AuctionPhase.Finished) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Setup, auction.currentPhase);
-		}
-		
-		// Check if total pause duration would exceed maximum (only block when exceeded, not when equal)
-		uint256 currentPauseDuration = auction.totalPauseDuration;
-		if (currentPauseDuration > AuctionTypes.MAX_PAUSE_DURATION) {
-			revert IErrorsAndEvents.MaxPauseDurationExceeded(currentPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
-		}
-		
-		auction.currentStatus = AuctionTypes.AuctionStatus.Paused;
-		pauseStartTime[auctionId] = block.timestamp;
-		_updateCPAHookStates(auctionId);
-		emit IErrorsAndEvents.AuctionPaused(auctionId, msg.sender);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("pause(address,uint256,address,address)")),
+				address(this),
+				auctionId,
+				msg.sender,
+				cpaAuctionHookAddr
+			)
+		);
 	}
 
 	/**
 	 * @notice Unpause the auction
 	 */
 	function unpause(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
-		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
-		
-		if (auction.currentStatus != AuctionTypes.AuctionStatus.Paused) {
-			revert IErrorsAndEvents.AuctionNotActive(auctionId, auction.currentStatus);
-		}
-		
-		// Calculate what total pause duration would be after unpausing
-		uint256 newTotalPauseDuration = auction.totalPauseDuration + (block.timestamp - pauseStartTime[auctionId]);
-		
-		// Block unpause if total pause duration would be >= MAX_PAUSE_DURATION
-		// This enforces the hard limit: once you hit max, you must cancel
-		if (newTotalPauseDuration >= AuctionTypes.MAX_PAUSE_DURATION) {
-			revert IErrorsAndEvents.MaxPauseDurationExceeded(newTotalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
-		}
-		
-		// Update total pause duration
-		auction.totalPauseDuration = newTotalPauseDuration;
-		pauseStartTime[auctionId] = 0;
-		
-		auction.currentStatus = AuctionTypes.AuctionStatus.Active;
-		_updateCPAHookStates(auctionId);
-		emit IErrorsAndEvents.AuctionUnpaused(auctionId, msg.sender);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("unpause(address,uint256,address,address)")),
+				address(this),
+				auctionId,
+				msg.sender,
+				cpaAuctionHookAddr
+			)
+		);
 	}
 
 	/**
@@ -225,14 +257,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @dev Only allowed in Setup and Clock phases
 	 */
 	function cancelAuction(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) {
-		AuctionTypes.AuctionPhase phase = auctionInfo[auctionId].currentPhase;
-		if (phase != AuctionTypes.AuctionPhase.Setup && phase != AuctionTypes.AuctionPhase.Clock) {
-			revert IErrorsAndEvents.CannotCancelInThisPhase(auctionId, phase);
-		}
-		
-		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
-		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("cancelAuction(address,uint256,address,address)")),
+				address(this),
+				auctionId,
+				msg.sender,
+				cpaAuctionHookAddr
+			)
+		);
 	}
 
 	/**
@@ -240,68 +274,28 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @dev Anyone can call this after 72 hours of total pause time
 	 */
 	function forceCancelAuction(AuctionId auctionId) external nonReentrant {
-		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
-		
-		// Calculate total pause duration including current pause
-		uint256 totalPauseDuration = auction.totalPauseDuration;
-		if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused) {
-			totalPauseDuration += block.timestamp - pauseStartTime[auctionId];
-		}
-		
-		// Only allow force cancel if max pause duration exceeded
-		if (totalPauseDuration < AuctionTypes.MAX_PAUSE_DURATION) {
-			revert IErrorsAndEvents.PauseDurationNotExceeded(totalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
-		}
-		
-		auction.currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
-		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("forceCancelAuction(address,uint256,address,address)")),
+				address(this),
+				auctionId,
+				msg.sender,
+				cpaAuctionHookAddr
+			)
+		);
 	}
 
 	function reclaimStake(AuctionId auctionId) external {
-		uint256 stake = bidderStake[auctionId][msg.sender];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount();
-		
-		AuctionTypes.AuctionStatus status = auctionInfo[auctionId].currentStatus;
-		
-		// If cancelled: full refund, no penalties
-		if (status == AuctionTypes.AuctionStatus.Cancelled) {
-			bidderStake[auctionId][msg.sender] = 0;
-			bidderBidPoints[auctionId][msg.sender] = 0;
-			
-			AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-				numeraire: auctionInfo[auctionId].commonNumeraire,
-				recipient: msg.sender,
-				amount: stake
-			});
-			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
-			emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, stake);
-			return;
-		}
-		
-		// Otherwise: only allow in Finished phase (prevent loophole during Settlement)
-		if (auctionInfo[auctionId].currentPhase != AuctionTypes.AuctionPhase.Finished) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Finished, auctionInfo[auctionId].currentPhase);
-		}
-		
-		// Apply minSpendRatio penalty for bidders who didn't claim during Settlement OR particpated in the Clock but did not continue
-		uint256 penaltyRate = auctionInfo[auctionId].config.minSpendRatio;
-		protocolPenalties[auctionId] += stake * penaltyRate / 10000;
-		
-		// Clear bidder state
-		bidderStake[auctionId][msg.sender] = 0;
-		bidderBidPoints[auctionId][msg.sender] = 0;
-		
-		// Transfer refund
-		AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
-			numeraire: auctionInfo[auctionId].commonNumeraire,
-			recipient: msg.sender,
-			amount: stake - (stake * penaltyRate / 10000)
-		});
-		manager.unlock(abi.encode(uint8(5), abi.encode(data)));
-		
-		emit IErrorsAndEvents.PenaltyApplied(auctionId, msg.sender, stake * penaltyRate / 10000);
-		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, stake - (stake * penaltyRate / 10000));
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("reclaimStake(address,uint256,address)")),
+				address(this),
+				auctionId,
+				msg.sender
+			)
+		);
 	}
 
 	/**
@@ -311,44 +305,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param bidder The bidder address to forfeit
 	 */
 	function forfeit(AuctionId auctionId, address bidder) external onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) {
-		uint256 stake = bidderStake[auctionId][bidder];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // No stake to forfeit
-		
-		// Calculate penalty and reward amounts
-		uint256 penaltyRate = auctionInfo[auctionId].config.minSpendRatio;
-		
-		// Transfer penalty to protocol
-		protocolPenalties[auctionId] += stake * penaltyRate / 10000;
-		
-		// Transfer reward to caller
-		uint256 callerReward = stake * FORFEITURE_REWARD_RATE / 10000;
-		if (callerReward > 0) {
-			AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
-				numeraire: auctionInfo[auctionId].commonNumeraire,
-				recipient: msg.sender,
-				amount: callerReward
-			});
-			manager.unlock(abi.encode(uint8(5), abi.encode(data)));
-			
-			emit IErrorsAndEvents.ForfeitureRewardTransferred(auctionId, msg.sender, callerReward);
-		}
-		
-		// Transfer remaining stake back to bidder
-		uint256 remaining = stake - (stake * (penaltyRate + FORFEITURE_REWARD_RATE) / 10000);
-		if (remaining > 0) {
-			AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-				numeraire: auctionInfo[auctionId].commonNumeraire,
-				recipient: bidder,
-				amount: remaining
-			});
-			manager.unlock(abi.encode(uint8(5), abi.encode(refundData)));
-		}
-		
-		// Zero out bidder state
-		bidderStake[auctionId][bidder] = 0;
-		bidderBidPoints[auctionId][bidder] = 0;
-		
-		emit IErrorsAndEvents.BundleForfeited(auctionId, bidder, stake * penaltyRate / 10000);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("forfeit(address,uint256,address,address)")),
+				address(this),
+				auctionId,
+				bidder,
+				msg.sender
+			)
+		);
 	}
 
 	/**
@@ -362,12 +328,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		whenAuctionActive(auctionId) 
 		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished) 
 	{
-		CPAFinishedPhase.transferPositionsToAuctioneer(
-			this, 
-			auctionId, 
-			auctionInfo[auctionId], 
-			poolInfo
-		);
+	bytes memory result = _delegatecallLibrary(
+		finishedPhaseLib,
+		abi.encodeWithSelector(
+			bytes4(keccak256("transferPositionsToAuctioneer(address,uint256)")),
+			address(this),
+			auctionId
+		)
+	);
+	// No return value to decode
 	}
 
 	// ========================================
@@ -384,7 +353,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		AuctionTypes.AuctionConfig memory config, 
 		address auctionOwner
 	) external nonReentrant returns (AuctionId) {
-		AuctionId auctionId = CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
+		// DELEGATECALL to external library - storage mappings are accessible in library context
+		// We pass config and auctionOwner, but storage mappings are accessed directly by library
+		bytes memory result = _delegatecallLibrary(
+			setupLib,
+			abi.encodeWithSelector(
+				CPASetup.createAuction.selector,
+				address(this),
+				config,
+				auctionOwner
+			)
+		);
+		AuctionId auctionId = abi.decode(result, (AuctionId));
 		_updateCPAHookStates(auctionId);
 		return auctionId;
 	}
@@ -400,7 +380,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		PoolKey memory poolKey,
 		uint256 depositAmount
 	) external nonReentrant onlyAuctionOwner(auctionId) {
-		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
+		_delegatecallLibrary(
+			setupLib,
+			abi.encodeWithSelector(
+				CPASetup.moveDeposit.selector,
+				address(this),
+				poolKey,
+				auctionId,
+				depositAmount
+			)
+		);
 		_updateCPAHookStates(auctionId);
 	}
 
@@ -424,7 +413,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		PoolKey[] memory poolKeys,
 		uint256[] memory amounts
 	) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
-		CPASetup.depositAllAndStartClock(this, auctionInfo[auctionId], poolInfo, poolKeys, amounts, auctionId);
+		_delegatecallLibrary(
+			setupLib,
+			abi.encodeWithSelector(
+				CPASetup.depositAllAndStartClock.selector,
+				address(this),
+				poolKeys,
+				amounts,
+				auctionId
+			)
+		);
 
 		// Update CPAHook states for all pools
 		_updateCPAHookStates(auctionId);
@@ -437,13 +435,28 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 function _startClockRound(AuctionId auctionId) internal {
 		// Handle first-time transition from Setup to Clock phase
 		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Setup) {
-			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo)) revert IErrorsAndEvents.SetupNotComplete();
+			bytes memory result = _delegatecallLibrary(
+				setupLib,
+				abi.encodeWithSelector(
+					CPASetup.confirmSetupComplete.selector,
+					address(this),
+					auctionId
+				)
+			);
+			if (!abi.decode(result, (bool))) revert IErrorsAndEvents.SetupNotComplete();
 			// Transition to Clock phase
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
 			_updateCPAHookStates(auctionId);
 			emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 		}
-		CPAClockPhase.openClockRound(auctionId, auctionInfo);
+		_delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("openClockRound(address,uint256)")),
+				address(this),
+				auctionId
+			)
+		);
 	}
 
 	/**
@@ -452,15 +465,43 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 */
 	 function endClockRound(AuctionId auctionId) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) {
 		// Set the clock to closed
-		CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+		_delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("setClockOpen(address,uint256,uint256)")),
+				address(this),
+				auctionId,
+				1
+			)
+		);
 		
 		// Process round results (calculate excess demand and update prices)
-		uint256[] memory totalDemands = CPAClockPhase.processClockRound(this, auctionId, auctionInfo[auctionId], poolInfo, bids[auctionId], activeBidders);
+		bytes memory result = _delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("processClockRound(address,uint256)")),
+				address(this),
+				auctionId
+			)
+		);
+		uint256[] memory totalDemands = abi.decode(result, (uint256[]));
 		
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 
-		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo[auctionId], poolInfo, totalDemands, manager)) {
+		// Check if clock phase should end
+		bytes memory endResult = _delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("shouldEndClockPhase(address,uint256,uint256[],address)")),
+				address(this),
+				auctionId,
+				totalDemands,
+				address(manager)
+			)
+		);
+		bool shouldEnd = abi.decode(endResult, (bool));
+		if (shouldEnd) {
 			_endClockPhase(auctionId);
 		} else {
 			_startClockRound(auctionId);
@@ -477,14 +518,30 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	function _endClockPhase(AuctionId auctionId) internal {
 		// Close the current clock round if it's still open
 		if (auctionInfo[auctionId].clockOpen == 2) {
-			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
+			_delegatecallLibrary(
+				clockPhaseLib,
+				abi.encodeWithSelector(
+					bytes4(keccak256("setClockOpen(address,uint256,uint256)")),
+					address(this),
+					auctionId,
+					1
+				)
+			);
 			
 			// Emit event for round closure
 			emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 		}
 		
 		// Handle undersell by reverting to last oversold prices
-		CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], poolInfo, manager);
+		_delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("revertUndersoldPrices(address,uint256,address)")),
+				address(this),
+				auctionId,
+				address(manager)
+			)
+		);
 		
 		// Transition to proxy phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
@@ -510,16 +567,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		uint256 maxStakeAmount
 	) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) validateEthForNumeraire(auctionId) {
 		
-		CPAClockPhase.processBid(
-			this,
-			auctionId,
-			demands,
-			maxStakeAmount,
-			auctionInfo[auctionId],
-			bidderStake[auctionId],
-			bidderBidPoints[auctionId],
-			bids[auctionId],
-			activeBidders[auctionId]
+		_delegatecallLibrary(
+			clockPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("processBid(address,uint256,uint256[],uint256)")),
+				address(this),
+				auctionId,
+				demands,
+				maxStakeAmount
+			)
 		);
 	}
 
@@ -537,34 +593,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param auctionId The auction ID
 	 */
 	function dropout(AuctionId auctionId) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock) {
-		
-		uint256 stake = bidderStake[auctionId][msg.sender];
-		if (stake == 0) revert IErrorsAndEvents.InvalidStakeAmount(); // this also covers the case where the bidder is not in the auction
-		
-		uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
-		uint256 refund = stake - penalty;
-		
-		// Clear bidder data
-		bidderStake[auctionId][msg.sender] = 0;
-		bidderBidPoints[auctionId][msg.sender] = 0;
-		removeBidder(auctionId, msg.sender);
-		
-		// Set dropped bidder status
-		droppedBidders[auctionId][msg.sender] = true;
-		
-		// Accumulate penalty for protocol
-		protocolPenalties[auctionId] += penalty;
-		
-		// Transfer refund to bidder
-		AuctionTypes.CallbackDataRefundStake memory data = AuctionTypes.CallbackDataRefundStake({
-			numeraire: auctionInfo[auctionId].commonNumeraire,
-			recipient: msg.sender,
-			amount: refund
-		});
-		manager.unlock(abi.encode(uint8(5), abi.encode(data)));
-		
-		emit IErrorsAndEvents.PenaltyApplied(auctionId, msg.sender, penalty);
-		emit IErrorsAndEvents.StakeRefunded(auctionId, msg.sender, refund);
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("dropout(address,uint256,address)")),
+				address(this),
+				auctionId,
+				msg.sender
+			)
+		);
 	}
 
 	// ========================================
@@ -584,7 +621,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		AuctionTypes.Bundle calldata bundleData
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy) returns (BundleId bundleId) {
 		
-		bundleId = CPAProxyPhase.submitBundle(this, commitHash, bundles[auctionId], commitProxy[auctionId], bundleData, hasBundles);
+		bytes memory result = _delegatecallLibrary(
+			proxyPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("submitBundle(address,bytes32,(uint256,bytes32,uint256[],uint256))")),
+				address(this),
+				commitHash,
+				bundleData
+			)
+		);
+		bundleId = abi.decode(result, (BundleId));
 	}
 
 	// ========================================
@@ -603,7 +649,14 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation) onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation) {
 		if (msg.sender != allocationData.allocator) revert IErrorsAndEvents.Unauthorized(); // cannot submit an allocation for someone else
 		
-		CPAAllocationPhase.submitAllocation(this, allocationData, topAllocation, auctionInfo[auctionId], poolInfo, bundles[auctionId], hasAllocations);
+		_delegatecallLibrary(
+			allocationPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("submitAllocation(address,(uint256,(uint256,bytes32,uint256[],uint256)[]))")),
+				address(this),
+				allocationData
+			)
+		);
 	}
 
 	// ========================================
@@ -624,7 +677,18 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		bytes32 saltA,
 		bytes32 saltB
 	) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		CPASettlementPhase.reveal(this, auctionId, msg.sender, proxy, saltA, saltB, commitProxy, revealedMappings);
+		_delegatecallLibrary(
+			settlementPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("reveal(address,uint256,address,address,bytes32,bytes32)")),
+				address(this),
+				auctionId,
+				msg.sender,
+				proxy,
+				saltA,
+				saltB
+			)
+		);
 	}
 
 	// ========================================
@@ -643,18 +707,16 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// the owner here is NOT the auction owner, but the owner of the CPA protocol itself.
 		
 		// Call the settlement phase
-		CPASettlementPhase.claimToken(
-			this,
-			msg.sender,
-			auctionId,
-			commitHash,
-			poolId,
-			topAllocation[auctionId].allocation,
-			auctionInfo[auctionId],
-			bundles[auctionId],
-			winningBundleIds,
-			bidderStake[auctionId],
-			revealedMappings[auctionId]
+		_delegatecallLibrary(
+			settlementPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("claimToken(address,address,uint256,bytes32,uint256)")),
+				address(this),
+				msg.sender,
+				auctionId,
+				commitHash,
+				PoolId.unwrap(poolId)
+			)
 		);
 	}
 
@@ -664,17 +726,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param commitHash The commit hash for the bidder
 	 */
 	function claimAllTokens(AuctionId auctionId, bytes32 commitHash) external payable whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
-		CPASettlementPhase.claimAllTokens(
-			this,
-			msg.sender,
-			auctionId,
-			commitHash,
-			auctionInfo[auctionId],
-			revealedMappings[auctionId],
-			bidderStake[auctionId],
-			bundles[auctionId],
-			winningBundleIds,
-			protocolPenalties
+		_delegatecallLibrary(
+			settlementPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("claimAllTokens(address,address,uint256,bytes32)")),
+				address(this),
+				msg.sender,
+				auctionId,
+				commitHash
+			)
 		);
 
 		// now that they've claimed all their tokens, delete the bundle at the commit hash from the winning bundle ids
@@ -688,27 +748,15 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param auctionId The auction ID
 	 */
 	function claimAllocatorReward(AuctionId auctionId) external {
-		// AuctionTypes.TopAllocation storage topAlloc = topAllocation[auctionId];
-		address winningAllocator = topAllocation[auctionId].allocation.allocator;
-		if (msg.sender != winningAllocator) revert Unauthorized();
-
-		AuctionTypes.AuctionPhase phase = auctionInfo[auctionId].currentPhase;
-		if (
-			phase != AuctionTypes.AuctionPhase.Settlement &&
-			phase != AuctionTypes.AuctionPhase.Finished
-		) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Settlement, phase);
-		}
-
-		// Call the settlement phase to handle the actual reward transfer (callback will be implemented separately)
-		AuctionTypes.CallbackDataClaimAllocatorReward memory data = AuctionTypes.CallbackDataClaimAllocatorReward({
-			allocator: winningAllocator,
-			reward: auctionInfo[auctionId].allocatorReward,
-			numeraire: auctionInfo[auctionId].commonNumeraire
-		});
-		emit IErrorsAndEvents.AllocatorRewardClaimed(auctionId, winningAllocator, auctionInfo[auctionId].allocatorReward);
-		manager.unlock(abi.encode(uint8(6), abi.encode(data)));
-		auctionInfo[auctionId].allocatorReward = 0; // update their reward to 0 since it was claimed
+		_delegatecallLibrary(
+			auctionControlLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("claimAllocatorReward(address,uint256,address)")),
+				address(this),
+				auctionId,
+				msg.sender
+			)
+		);
 	}
 
 	// ========================================
@@ -726,8 +774,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		}
 		
 		// Check if any bundles were submitted
-		if (!hasBundles[auctionId]) {
-			_cancelAuction(auctionId);
+		if (!StorageAccess.getHasBundles(auctionId)) {
+			StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
+			_updateCPAHookStates(auctionId);
+			emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 			revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
 		}
 		
@@ -747,14 +797,30 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		
 		// Check if any allocations were submitted
 		// if not, force cancel the auction
-		if (!hasAllocations[auctionId]) {
-			_cancelAuction(auctionId);
+		if (!StorageAccess.getHasAllocations(auctionId)) {
+			StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
+			_updateCPAHookStates(auctionId);
+			emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 			revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
 		}
 
 		// select the winner and move the assets to the pools
-		CPAAllocationPhase.selectWinner(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles[auctionId], winningBundleIds);
-		CPAAllocationPhase.transferAssetsToPools(this, auctionId, auctionInfo, poolInfo);
+		_delegatecallLibrary(
+			allocationPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("selectWinner(address,uint256)")),
+				address(this),
+				auctionId
+			)
+		);
+		_delegatecallLibrary(
+			allocationPhaseLib,
+			abi.encodeWithSelector(
+				bytes4(keccak256("transferAssetsToPools(address,uint256)")),
+				address(this),
+				auctionId
+			)
+		);
 		
 		// Transition to settlement phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
@@ -799,15 +865,6 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		commitProxy[auctionId][commitHash] = msg.sender;
 	}
 
-	function removeBidder(AuctionId auctionId, address bidder) internal {
-		address[] storage activeBiddersInThisAuction = activeBidders[auctionId];
-		for (uint256 i = 0; i < activeBiddersInThisAuction.length; i++) {
-			if (activeBiddersInThisAuction[i] == bidder) {
-				activeBiddersInThisAuction[i] = address(0); // just leave it as 0, it's fine
-				break;
-			}
-		}
-	}
 
 	// ========================================
 	// INTERNAL FUNCTIONS
@@ -874,23 +931,11 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param auctionId The auction ID
 	 */
 	function _updateCPAHookStates(AuctionId auctionId) internal {
-		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
+		AuctionTypes.AuctionInfo memory auction = StorageAccess.getAuctionInfo(auctionId);
+		PoolKey[] memory poolKeys = auction.poolKeys;
 		for (uint256 i = 0; i < poolKeys.length; i++) {
-			// Get the pool hook address from the pool key
-			// address cpaHookAddress = address(poolKeys[i].hooks);
-			
-			// Update the pool hook state
-			ICPAHook(cpaAuctionHookAddr).setPoolState(
-				poolKeys[i],
-				auctionInfo[auctionId].currentPhase
-			);
+			ICPAHook(cpaAuctionHookAddr).setPoolState(poolKeys[i], auction.currentPhase);
 		}
-	}
-
-	function _cancelAuction(AuctionId auctionId) internal {
-		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
-		emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
 	}
 
 	// ========================================
@@ -910,36 +955,100 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// Decode the operation type and operation-specific data
 		(uint8 operationType, bytes memory operationData) = abi.decode(rawData, (uint8, bytes));
 		
+		// DELEGATECALL to external callback library
 		if (operationType == 0) {
 			// Bid as liquidity add
-			return _handleBid(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleBid.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 1) {
-			// Deposit transfer (setup)
+			// Deposit transfer (setup) - still uses setupLib via _handleDepositTransfer
 			return _handleDepositTransfer(operationData);
 		} else if (operationType == 2) {
 			// Price update swap
-			return _handlePriceUpdateSwap(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handlePriceUpdateSwap.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 3) {
 			// Mint position after allocation
-			return _handleMintPosition(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleMintPosition.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 4) {
 			// Claim token settlement
-			return _handleClaimToken(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleClaimToken.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 5) {
-			// Simulate swap
-			return _refundStake(operationData);
+			// Refund stake
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.refundStake.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 6) {
 			// Claim allocator reward
-			return _handleClaimAllocatorReward(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleClaimAllocatorReward.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 7) {
 			// Claim all tokens
-			return _handleClaimAllTokens(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleClaimAllTokens.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 8) {
 			// Batch deposit transfer
-			return _handleBatchDepositTransfer(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleBatchDepositTransfer.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else if (operationType == 9) {
 			// Batch ERC6909 to ERC20 conversion for position minting
-			return _handleBatchERC6909ToERC20Conversion(operationData);
+			return _delegatecallLibrary(
+				callbackLib,
+				abi.encodeWithSelector(
+					CPACallbacks.handleBatchERC6909ToERC20Conversion.selector,
+					CPAStorage(address(this)),
+					operationData
+				)
+			);
 		} else {
 			revert("Invalid operation type");
 		}

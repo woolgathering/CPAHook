@@ -173,4 +173,5 @@ abstract contract CPAStorage {
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;
 		positionManager = _positionManager;
 	}
+
 }

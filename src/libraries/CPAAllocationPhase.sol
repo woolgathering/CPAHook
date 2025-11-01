@@ -20,13 +20,15 @@ import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencyS
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { StorageAccess } from "../utils/StorageAccess.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId } from "../types/BundleId.sol";
 
-library CPAAllocationPhase {
+contract CPAAllocationPhase {
+	using StorageAccess for *;
 	using PriceUtils for IPoolManager;
 	using StateLibrary for IPoolManager;
 	using SafeCast for uint256;
@@ -34,35 +36,32 @@ library CPAAllocationPhase {
 
     /**
 	 * @notice Submit allocation during allocation phase
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param allocationData The allocation data
-	 * @param topAllocation The top allocation mapping
-	 * @param auctionInfo The auction info mapping
-	 * @param poolInfo The pool info mapping
-	 * @param auctionBundles The auction-specific bundles mapping (bundles[auctionId])
-	 * @param hasAllocations The hasAllocations mapping
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function submitAllocation(
 		CPAStorage self,
-		AuctionTypes.Allocation calldata allocationData,
-		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
-		mapping(AuctionId => bool) storage hasAllocations
-	) external {
+		AuctionTypes.Allocation calldata allocationData
+	) public {
 		AuctionId auctionId = allocationData.auctionId;
 
+		// Get current top allocation
+		AuctionTypes.TopAllocation memory currentTop = StorageAccess.getTopAllocation(auctionId);
+
 		// check if the submitted allocation outscores the existing top allocation
-		(uint256 score, uint256 totalValue) = _scoreAllocation(self, auctionId, allocationData, auctionInfo, poolInfo, auctionBundles);
-		if (score > topAllocation[auctionId].score) {
-			topAllocation[auctionId].allocation = allocationData;
-			topAllocation[auctionId].score = score;
-			topAllocation[auctionId].totalValue = totalValue; // in this case, the total value is the same as the score
+		(uint256 score, uint256 totalValue) = _scoreAllocation(self, auctionId, allocationData);
+		if (score > currentTop.score) {
+			AuctionTypes.TopAllocation memory newTop = AuctionTypes.TopAllocation({
+				allocation: allocationData,
+				score: score,
+				totalValue: totalValue
+			});
+			StorageAccess.setTopAllocation(auctionId, newTop);
 		}
 
 		// mark that allocations have been submitted for this auction
-		hasAllocations[allocationData.auctionId] = true;
+		StorageAccess.setHasAllocations(allocationData.auctionId, true);
 
 		// emit a allocation submitted event
 		emit IErrorsAndEvents.AllocationSubmitted(allocationData.auctionId, allocationData.allocator, score);
@@ -71,10 +70,7 @@ library CPAAllocationPhase {
 	function _scoreAllocation(
 		CPAStorage self,
 		AuctionId auctionId,
-		AuctionTypes.Allocation calldata allocationData,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles
+		AuctionTypes.Allocation calldata allocationData
 	) internal view returns (uint256, uint256) {
 		/* 
 			This is where it gets interesting:
@@ -105,8 +101,9 @@ library CPAAllocationPhase {
 		// Check that allocation is not empty
 		if (allocationData.bundleIds.length == 0) revert IErrorsAndEvents.EmptyAllocation(auctionId);
 
-		// (, address commonNumeraire, , , , , , , PoolKey[] memory poolKeys) = self.getAuctionInfo(auctionId);
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+		// Get auctionInfo via helper
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		PoolKey[] memory poolKeys = auctionInfoData.poolKeys;
 		uint256 totalValue = 0;
 		uint256[] memory quantities = new uint256[](poolKeys.length);
 		bytes32[] memory existingCommitHashes = new bytes32[](allocationData.bundleIds.length);
@@ -117,40 +114,45 @@ library CPAAllocationPhase {
 		for (uint256 i = 0; i < allocationData.bundleIds.length; ) {
 			BundleId bundleId = allocationData.bundleIds[i];
 			
+			// Get bundle via helper
+			AuctionTypes.Bundle memory bundle = StorageAccess.getBundle(auctionId, bundleId);
+			
 			// check that the bundle exists
-			if (auctionBundles[bundleId].commitHash == bytes32(0)) revert IErrorsAndEvents.InvalidBundle(auctionId, bundleId);
+			if (bundle.commitHash == bytes32(0)) revert IErrorsAndEvents.InvalidBundle(auctionId, bundleId);
 
 			// check that no bidder (commitHash) has been allocated more than one bundle
-			if (_checkIfDuplicateAllocation(auctionBundles[bundleId].commitHash, existingCommitHashes, i)) revert IErrorsAndEvents.DuplicateAllocation(auctionId, auctionBundles[bundleId].commitHash);
+			if (_checkIfDuplicateAllocation(bundle.commitHash, existingCommitHashes, i)) revert IErrorsAndEvents.DuplicateAllocation(auctionId, bundle.commitHash);
 
 			// update the quantities
-			AuctionTypes.Bundle memory bundle = auctionBundles[bundleId];
 			for (uint256 j = 0; j < bundle.quantities.length; ) {
 				quantities[j] += bundle.quantities[j];
 				unchecked { ++j; }
 			}
 
 			// update the existing commit hashes
-			existingCommitHashes[i] = auctionBundles[bundleId].commitHash;
+			existingCommitHashes[i] = bundle.commitHash;
 			unchecked { ++i; }
 		}
 
 		// Get numeraire decimals once for efficiency
-		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfo.commonNumeraire);
+		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(auctionInfoData.commonNumeraire);
 		
 		// Validate quantities and compute total value in a single loop
 		for (uint256 i = 0; i < poolKeys.length; ) {
 			PoolKey memory poolKey = poolKeys[i];
 			PoolId poolId = poolKey.toId();
 			
+			// Get poolInfo via helper
+			AuctionTypes.PoolInfo memory pool = StorageAccess.getPoolInfo(poolId);
+			
 			// Check if the requested quantity exceeds the available deposit
-			if (quantities[i] > poolInfo[poolId].depositAmount) {
+			if (quantities[i] > pool.depositAmount) {
 				revert IErrorsAndEvents.InvalidQuantities(auctionId, quantities[i]);
 			}
 			
 			// Determine which currency is the asset (not the numeraire)
 			address assetCurrency;
-			if (Currency.unwrap(poolKey.currency0) == auctionInfo.commonNumeraire) {
+			if (Currency.unwrap(poolKey.currency0) == auctionInfoData.commonNumeraire) {
 				// currency0 is numeraire, currency1 is the asset
 				assetCurrency = Currency.unwrap(poolKey.currency1);
 			} else {
@@ -186,38 +188,36 @@ library CPAAllocationPhase {
 
 	function selectWinner(
 		CPAStorage self,
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
-		mapping(bytes32 => BundleId) storage winningBundleIds
-	) internal {
+		AuctionId auctionId
+	) public {
+		// Get top allocation
+		AuctionTypes.TopAllocation memory top = StorageAccess.getTopAllocation(auctionId);
+		
 		// whatever allocation is the top one is the winner
 		// we check if the window has passed in the function that calls this
-		AuctionTypes.Allocation memory winner = topAllocation[auctionId].allocation;
+		AuctionTypes.Allocation memory winner = top.allocation;
 
 		// store the winning bundle ids
 		for (uint256 i = 0; i < winner.bundleIds.length; ) {
-			winningBundleIds[auctionBundles[winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
+			BundleId bundleId = winner.bundleIds[i];
+			AuctionTypes.Bundle memory bundle = StorageAccess.getBundle(auctionId, bundleId);
+			StorageAccess.setWinningBundleId(bundle.commitHash, bundleId);
 			unchecked { ++i; }
 		}
 	}
 	
 	/**
 	 * @notice Transfer full deposit amounts of assets to pools at final prices
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param auctionId The auction ID
-	 * @param auctionInfo The auction info mapping
-	 * @param poolInfo The pool info mapping
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function transferAssetsToPools(
 		CPAStorage self,
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
-	) internal {
-		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		AuctionId auctionId
+	) public {
+		// Get auctionInfo via helper
+		AuctionTypes.AuctionInfo memory auction = StorageAccess.getAuctionInfo(auctionId);
 		PoolKey[] memory poolKeys = auction.poolKeys;
 		uint256 numPools = poolKeys.length;
 
@@ -233,7 +233,8 @@ library CPAAllocationPhase {
 		for (uint256 i = 0; i < numPools; ) {
 			// Collect asset currencies and amounts for ERC6909→ERC20 conversion
 			assetCurrencies[i] = _getAssetCurrency(poolKeys[i], auction.commonNumeraire);
-			amounts[i] = poolInfo[poolKeys[i].toId()].depositAmount;
+			AuctionTypes.PoolInfo memory pool = StorageAccess.getPoolInfo(poolKeys[i].toId());
+			amounts[i] = pool.depositAmount;
 			
 			// Build actions array (MINT_POSITION + SETTLE_PAIR pattern)
 			actions = bytes.concat(
@@ -243,12 +244,12 @@ library CPAAllocationPhase {
 			
 			// Calculate liquidity parameters
 			(int24 tickLower, int24 tickUpper, uint128 liquidity) = _calculateLiquidityParams(
-				self, auctionId, auctionInfo, poolInfo, poolKeys[i]
+				self, auctionId, poolKeys[i]
 			);
 			
 			// Calculate amount maxes with 1% buffer
 			(uint128 amount0Max, uint128 amount1Max) = _calculateAmountMaxes(
-				poolKeys[i], poolInfo[poolKeys[i].toId()].depositAmount, auction.commonNumeraire
+				poolKeys[i], pool.depositAmount, auction.commonNumeraire
 			);
 			
 			// MINT_POSITION params at index i*2
@@ -261,7 +262,7 @@ library CPAAllocationPhase {
 			params[i * 2 + 1] = abi.encode(poolKeys[i].currency0, poolKeys[i].currency1);
 			
 			// Pre-store tokenId (will be startTokenId + i after minting)
-			poolInfo[poolKeys[i].toId()].positionId = startTokenId + i;
+			StorageAccess.setPoolInfoPositionId(poolKeys[i].toId(), startTokenId + i);
 			unchecked { ++i; }
 		}
 		
@@ -283,19 +284,21 @@ library CPAAllocationPhase {
 	function _calculateLiquidityParams(
 		CPAStorage self,
 		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		PoolKey memory poolKey
 	) internal view returns (int24 tickLower, int24 tickUpper, uint128 liquidity) {
 		PoolId poolId = poolKey.toId();
-		AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
+		// Get poolInfo via helper
+		AuctionTypes.PoolInfo memory pool = StorageAccess.getPoolInfo(poolId);
+		
+		// Get auctionInfo via helper
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
 		
 		// Get the final price from the pool (set during clock phase)
 		(uint160 sqrtPriceX96, , , ) = self.manager().getSlot0(poolId);
 		int24 tick = TickMath.getTickAtSqrtPrice(sqrtPriceX96);
 		
 		// Determine currency order and calculate parameters
-		bool assetIsCurrency0 = auctionInfo[auctionId].commonNumeraire != address(Currency.unwrap(poolKey.currency0));
+		bool assetIsCurrency0 = auctionInfoData.commonNumeraire != address(Currency.unwrap(poolKey.currency0));
 		
 		if (assetIsCurrency0) {
 			// Asset is currency0
@@ -351,22 +354,22 @@ library CPAAllocationPhase {
 
 	/**
 	 * @notice Check if allocation phase should end based on duration
-	 * @param self The contract instance
+	 * @param self The contract instance (CPAManager via DELEGATECALL)
 	 * @param auctionId The auction ID
-	 * @param auctionInfo The auction info mapping
 	 * @return true if allocation phase duration has expired
+	 * @dev Storage mappings are accessed via helpers since DELEGATECALL executes in CPAManager's storage context
 	 */
 	function shouldAllocationPhaseEnd(
 		CPAStorage self, 
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal view returns (bool) {
+		AuctionId auctionId
+	) public view returns (bool) {
 		// Check if allocation phase duration has expired
 		uint256 startTime = self.allocationPhaseStartTime(auctionId);
 		if (startTime == 0) return false; // Phase not started yet
 		
-		// Get phase duration from auction config
-		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[1];
+		// Get auctionInfo and phase duration from auction config
+		AuctionTypes.AuctionInfo memory auctionInfoData = StorageAccess.getAuctionInfo(auctionId);
+		return block.timestamp >= startTime + auctionInfoData.config.phaseDurations[1];
 	}
 
 	/**
