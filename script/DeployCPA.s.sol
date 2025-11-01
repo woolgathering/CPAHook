@@ -85,21 +85,26 @@ contract DeployCPA is Script {
             protocolOwner,
             address(cpaHook),
             IPositionManager(positionManagerAddress),
-            protocolOwner,
-            setupLib,
-            clockPhaseLib,
-            proxyPhaseLib,
-            allocationPhaseLib,
-            settlementPhaseLib,
-            finishedPhaseLib,
-            auctionControlLib,
-            callbackLib,
-            helpersLib,
-            validationLib,
-            transitionsLib,
-            utilitiesLib
+            protocolOwner
         );
         console.log("CPAManager deployed at:", address(cpaManager));
+
+        // Set all library addresses
+        console.log("Setting library addresses...");
+        cpaManager.setLibraries(CPAManager.LibraryAddresses({
+            setupLib: setupLib,
+            clockPhaseLib: clockPhaseLib,
+            proxyPhaseLib: proxyPhaseLib,
+            allocationPhaseLib: allocationPhaseLib,
+            settlementPhaseLib: settlementPhaseLib,
+            finishedPhaseLib: finishedPhaseLib,
+            auctionControlLib: auctionControlLib,
+            callbackLib: callbackLib,
+            helpersLib: helpersLib,
+            validationLib: validationLib,
+            transitionsLib: transitionsLib,
+            utilitiesLib: utilitiesLib
+        }));
 
         // Set auction manager in CPAHook
         console.log("Setting auction manager in CPAHook...");

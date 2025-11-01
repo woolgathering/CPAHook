@@ -151,26 +151,31 @@ abstract contract CPATestBase is Deployers {
         address transitionsLib = address(new CPATransitions());
         address utilitiesLib = address(new CPAUtilities());
         
-        // Deploy CPAManager with phase library addresses
+        // Deploy CPAManager (libraries will be set separately)
         cpaManager = new CPAManager(
             poolManager,
             protocolOwner,
             address(cpaHook),
             positionManager,
-            address(this),
-            setupLib,
-            clockPhaseLib,
-            proxyPhaseLib,
-            allocationPhaseLib,
-            settlementPhaseLib,
-            finishedPhaseLib,
-            auctionControlLib,
-            callbackLib,
-            helpersLib,
-            validationLib,
-            transitionsLib,
-            utilitiesLib
+            address(this)
         );
+        
+        // Set all library addresses
+        vm.prank(protocolOwner);
+        cpaManager.setLibraries(CPAManager.LibraryAddresses({
+            setupLib: setupLib,
+            clockPhaseLib: clockPhaseLib,
+            proxyPhaseLib: proxyPhaseLib,
+            allocationPhaseLib: allocationPhaseLib,
+            settlementPhaseLib: settlementPhaseLib,
+            finishedPhaseLib: finishedPhaseLib,
+            auctionControlLib: auctionControlLib,
+            callbackLib: callbackLib,
+            helpersLib: helpersLib,
+            validationLib: validationLib,
+            transitionsLib: transitionsLib,
+            utilitiesLib: utilitiesLib
+        }));
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));

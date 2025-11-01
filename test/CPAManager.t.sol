@@ -56,25 +56,32 @@ contract CPAManagerTest is Deployers {
 		address transitionsLib = address(new CPATransitions());
 		address utilitiesLib = address(new CPAUtilities());
 		
-		return new CPAManager(
+		CPAManager manager = new CPAManager(
 			_poolManager,
 			_owner,
 			_cpaHook,
 			positionManager,
-			_owner,
-			setupLib,
-			clockPhaseLib,
-			proxyPhaseLib,
-			allocationPhaseLib,
-			settlementPhaseLib,
-			finishedPhaseLib,
-			auctionControlLib,
-			callbackLib,
-			helpersLib,
-			validationLib,
-			transitionsLib,
-			utilitiesLib
+			_owner
 		);
+		
+		// Set all library addresses
+		vm.prank(_owner);
+		manager.setLibraries(CPAManager.LibraryAddresses({
+			setupLib: setupLib,
+			clockPhaseLib: clockPhaseLib,
+			proxyPhaseLib: proxyPhaseLib,
+			allocationPhaseLib: allocationPhaseLib,
+			settlementPhaseLib: settlementPhaseLib,
+			finishedPhaseLib: finishedPhaseLib,
+			auctionControlLib: auctionControlLib,
+			callbackLib: callbackLib,
+			helpersLib: helpersLib,
+			validationLib: validationLib,
+			transitionsLib: transitionsLib,
+			utilitiesLib: utilitiesLib
+		}));
+		
+		return manager;
 	}
 
 	/// @notice Deploy CPAManager with fallback (same as regular deployment now)
@@ -95,25 +102,32 @@ contract CPAManagerTest is Deployers {
 		address transitionsLib = address(new CPATransitions());
 		address utilitiesLib = address(new CPAUtilities());
 		
-		return new CPAManager(
+		CPAManager manager = new CPAManager(
 			_poolManager,
 			_owner,
 			_cpaHook,
 			positionManager,
-			_owner,
-			setupLib,
-			clockPhaseLib,
-			proxyPhaseLib,
-			allocationPhaseLib,
-			settlementPhaseLib,
-			finishedPhaseLib,
-			auctionControlLib,
-			callbackLib,
-			helpersLib,
-			validationLib,
-			transitionsLib,
-			utilitiesLib
+			_owner
 		);
+		
+		// Set all library addresses
+		vm.prank(_owner);
+		manager.setLibraries(CPAManager.LibraryAddresses({
+			setupLib: setupLib,
+			clockPhaseLib: clockPhaseLib,
+			proxyPhaseLib: proxyPhaseLib,
+			allocationPhaseLib: allocationPhaseLib,
+			settlementPhaseLib: settlementPhaseLib,
+			finishedPhaseLib: finishedPhaseLib,
+			auctionControlLib: auctionControlLib,
+			callbackLib: callbackLib,
+			helpersLib: helpersLib,
+			validationLib: validationLib,
+			transitionsLib: transitionsLib,
+			utilitiesLib: utilitiesLib
+		}));
+		
+		return manager;
 	}
 
 	function test_Constructor_Success() public {

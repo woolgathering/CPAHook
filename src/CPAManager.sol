@@ -56,29 +56,48 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	// ========================================
 
 	/// @notice Address of the CPASetup external library
-	address public immutable setupLib;
+	address public setupLib;
 	/// @notice Address of the CPAClockPhase external library
-	address public immutable clockPhaseLib;
+	address public clockPhaseLib;
 	/// @notice Address of the CPAProxyPhase external library
-	address public immutable proxyPhaseLib;
+	address public proxyPhaseLib;
 	/// @notice Address of the CPAAllocationPhase external library
-	address public immutable allocationPhaseLib;
+	address public allocationPhaseLib;
 	/// @notice Address of the CPASettlementPhase external library
-	address public immutable settlementPhaseLib;
+	address public settlementPhaseLib;
 	/// @notice Address of the CPAFinishedPhase external library
-	address public immutable finishedPhaseLib;
+	address public finishedPhaseLib;
 	/// @notice Address of the CPAAuctionControl external library
-	address public immutable auctionControlLib;
+	address public auctionControlLib;
 	/// @notice Address of the CPACallbacks external library
-	address public immutable callbackLib;
+	address public callbackLib;
 	/// @notice Address of the CPAManagerHelpers external library
-	address public immutable helpersLib;
+	address public helpersLib;
 	/// @notice Address of the CPAValidation external library
-	address public immutable validationLib;
+	address public validationLib;
 	/// @notice Address of the CPATransitions external library
-	address public immutable transitionsLib;
+	address public transitionsLib;
 	/// @notice Address of the CPAUtilities external library
-	address public immutable utilitiesLib;
+	address public utilitiesLib;
+	
+	/// @notice Track if libraries have been initialized
+	bool private librariesInitialized;
+
+	/// @notice Struct to hold all library addresses for setter
+	struct LibraryAddresses {
+		address setupLib;
+		address clockPhaseLib;
+		address proxyPhaseLib;
+		address allocationPhaseLib;
+		address settlementPhaseLib;
+		address finishedPhaseLib;
+		address auctionControlLib;
+		address callbackLib;
+		address helpersLib;
+		address validationLib;
+		address transitionsLib;
+		address utilitiesLib;
+	}
 
 	// ========================================
 	// CONSTRUCTOR
@@ -91,52 +110,43 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
 	 * @param _positionManager The PositionManager address for NFT position creation
 	 * @param _protocolWallet The protocol wallet address for penalty collection
-	 * @param _setupLib Address of the CPASetup external library
-	 * @param _clockPhaseLib Address of the CPAClockPhase external library
-	 * @param _proxyPhaseLib Address of the CPAProxyPhase external library
-	 * @param _allocationPhaseLib Address of the CPAAllocationPhase external library
-	 * @param _settlementPhaseLib Address of the CPASettlementPhase external library
-	 * @param _finishedPhaseLib Address of the CPAFinishedPhase external library
-	 * @param _auctionControlLib Address of the CPAAuctionControl external library
-	 * @param _callbackLib Address of the CPACallbacks external library
-	 * @param _helpersLib Address of the CPAManagerHelpers external library
-	 * @param _validationLib Address of the CPAValidation external library
-	 * @param _transitionsLib Address of the CPATransitions external library
-	 * @param _utilitiesLib Address of the CPAUtilities external library
 	 */
 	constructor(
 		IPoolManager _poolManager,
 		address _owner,
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
-		address _protocolWallet,
-		address _setupLib,
-		address _clockPhaseLib,
-		address _proxyPhaseLib,
-		address _allocationPhaseLib,
-		address _settlementPhaseLib,
-		address _finishedPhaseLib,
-		address _auctionControlLib,
-		address _callbackLib,
-		address _helpersLib,
-		address _validationLib,
-		address _transitionsLib,
-		address _utilitiesLib
+		address _protocolWallet
 	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr, _positionManager) {
 		manager = _poolManager;
 		protocolWallet = _protocolWallet;
-		setupLib = _setupLib;
-		clockPhaseLib = _clockPhaseLib;
-		proxyPhaseLib = _proxyPhaseLib;
-		allocationPhaseLib = _allocationPhaseLib;
-		settlementPhaseLib = _settlementPhaseLib;
-		finishedPhaseLib = _finishedPhaseLib;
-		auctionControlLib = _auctionControlLib;
-		callbackLib = _callbackLib;
-		helpersLib = _helpersLib;
-		validationLib = _validationLib;
-		transitionsLib = _transitionsLib;
-		utilitiesLib = _utilitiesLib;
+	}
+
+	/**
+	 * @notice Set all library addresses (can only be called once by owner)
+	 * @param _libs Struct containing all library addresses
+	 */
+	function setLibraries(LibraryAddresses calldata _libs) external onlyOwner {
+		require(!librariesInitialized, "Libraries already initialized");
+		require(_libs.setupLib != address(0) && _libs.clockPhaseLib != address(0) && 
+		        _libs.proxyPhaseLib != address(0) && _libs.allocationPhaseLib != address(0) &&
+		        _libs.settlementPhaseLib != address(0) && _libs.finishedPhaseLib != address(0) &&
+		        _libs.auctionControlLib != address(0) && _libs.callbackLib != address(0) &&
+		        _libs.helpersLib != address(0) && _libs.validationLib != address(0) &&
+		        _libs.transitionsLib != address(0) && _libs.utilitiesLib != address(0), "Invalid library address");
+		setupLib = _libs.setupLib;
+		clockPhaseLib = _libs.clockPhaseLib;
+		proxyPhaseLib = _libs.proxyPhaseLib;
+		allocationPhaseLib = _libs.allocationPhaseLib;
+		settlementPhaseLib = _libs.settlementPhaseLib;
+		finishedPhaseLib = _libs.finishedPhaseLib;
+		auctionControlLib = _libs.auctionControlLib;
+		callbackLib = _libs.callbackLib;
+		helpersLib = _libs.helpersLib;
+		validationLib = _libs.validationLib;
+		transitionsLib = _libs.transitionsLib;
+		utilitiesLib = _libs.utilitiesLib;
+		librariesInitialized = true;
 	}
 
 	// ========================================
@@ -260,7 +270,7 @@ validationLib,
 
 	/// @notice Override getSetupLib to return the immutable library address
 	function getSetupLib() internal view override returns (address) {
-		return libs.setupLib;
+		return setupLib;
 	}
 
 
