@@ -20,10 +20,12 @@ library CPATransitions {
      * @notice Transition from Proxy to Allocation phase (callable by anyone)
      * @param self The contract instance (CPAManager via DELEGATECALL)
      * @param auctionId The auction ID
+     * @param caller The address calling the function (msg.sender from CPAManager)
      */
     function transitionToAllocation(
         CPAStorage self,
-        AuctionId auctionId
+        AuctionId auctionId,
+        address caller
     ) internal {
         // Check if phase has expired (no auctioneer override for bidder protection)
         if (!CPAManagerHelpers.hasPhaseExpired(self, auctionId, AuctionTypes.AuctionPhase.Proxy)) {
@@ -34,7 +36,7 @@ library CPATransitions {
         if (!StorageAccess.getHasBundles(auctionId)) {
             StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
             CPAManagerHelpers.updateCPAHookStates(self, auctionId);
-            emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+            emit IErrorsAndEvents.AuctionCancelled(auctionId, caller);
             revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
         }
         
@@ -47,11 +49,13 @@ library CPATransitions {
      * @param self The contract instance (CPAManager via DELEGATECALL)
      * @param auctionId The auction ID
      * @param allocationPhaseLib Address of the allocation phase library
+     * @param caller The address calling the function (msg.sender from CPAManager)
      */
     function transitionToSettlement(
         CPAStorage self,
         AuctionId auctionId,
-        address allocationPhaseLib
+        address allocationPhaseLib,
+        address caller
     ) internal {
         // Check if phase has expired (no auctioneer override for bidder protection)
         if (!CPAManagerHelpers.hasPhaseExpired(self, auctionId, AuctionTypes.AuctionPhase.Allocation)) {
@@ -63,7 +67,7 @@ library CPATransitions {
         if (!StorageAccess.getHasAllocations(auctionId)) {
             StorageAccess.setAuctionStatus(auctionId, AuctionTypes.AuctionStatus.Cancelled);
             CPAManagerHelpers.updateCPAHookStates(self, auctionId);
-            emit IErrorsAndEvents.AuctionCancelled(auctionId, msg.sender);
+            emit IErrorsAndEvents.AuctionCancelled(auctionId, caller);
             revert IErrorsAndEvents.NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
         }
 

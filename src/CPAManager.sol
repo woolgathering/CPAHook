@@ -848,9 +848,10 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		_delegatecallLibrary(
 			transitionsLib,
 			abi.encodeWithSelector(
-				bytes4(keccak256("transitionToAllocation(address,uint256)")),
+				bytes4(keccak256("transitionToAllocation(address,uint256,address)")),
 				address(this),
-				auctionId
+				auctionId,
+				msg.sender
 			)
 		);
 	}
@@ -882,10 +883,11 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		_delegatecallLibrary(
 			transitionsLib,
 			abi.encodeWithSelector(
-				bytes4(keccak256("transitionToSettlement(address,uint256,address)")),
+				bytes4(keccak256("transitionToSettlement(address,uint256,address,address)")),
 				address(this),
 				auctionId,
-				allocationPhaseLib
+				allocationPhaseLib,
+				msg.sender
 			)
 		);
 	}
