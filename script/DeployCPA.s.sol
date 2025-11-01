@@ -12,6 +12,10 @@ import { CPASettlementPhase } from "../src/libraries/CPASettlementPhase.sol";
 import { CPAFinishedPhase } from "../src/libraries/CPAFinishedPhase.sol";
 import { CPAAuctionControl } from "../src/libraries/CPAAuctionControl.sol";
 import { CPACallbacks } from "../src/libraries/CPACallbacks.sol";
+import { CPAManagerHelpers } from "../src/libraries/CPAManagerHelpers.sol";
+import { CPAValidation } from "../src/libraries/CPAValidation.sol";
+import { CPATransitions } from "../src/libraries/CPATransitions.sol";
+import { CPAUtilities } from "../src/libraries/CPAUtilities.sol";
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -68,23 +72,39 @@ contract DeployCPA is Script {
         address auctionControlLib = address(new CPAAuctionControl());
         address callbackLib = address(new CPACallbacks());
         
+        // Deploy new helper libraries
+        console.log("Deploying helper libraries...");
+        address helpersLib = address(new CPAManagerHelpers());
+        address validationLib = address(new CPAValidation());
+        address transitionsLib = address(new CPATransitions());
+        address utilitiesLib = address(new CPAUtilities());
+        
         console.log("Deploying CPAManager...");
         CPAManager cpaManager = new CPAManager(
             IPoolManager(poolManagerAddress),
             protocolOwner,
             address(cpaHook),
             IPositionManager(positionManagerAddress),
-            protocolOwner,
-            setupLib,
-            clockPhaseLib,
-            proxyPhaseLib,
-            allocationPhaseLib,
-            settlementPhaseLib,
-            finishedPhaseLib,
-            auctionControlLib,
-            callbackLib
+            protocolOwner
         );
         console.log("CPAManager deployed at:", address(cpaManager));
+
+        // Set all library addresses
+        console.log("Setting library addresses...");
+        cpaManager.setLibraries(CPAManager.LibraryAddresses({
+            setupLib: setupLib,
+            clockPhaseLib: clockPhaseLib,
+            proxyPhaseLib: proxyPhaseLib,
+            allocationPhaseLib: allocationPhaseLib,
+            settlementPhaseLib: settlementPhaseLib,
+            finishedPhaseLib: finishedPhaseLib,
+            auctionControlLib: auctionControlLib,
+            callbackLib: callbackLib,
+            helpersLib: helpersLib,
+            validationLib: validationLib,
+            transitionsLib: transitionsLib,
+            utilitiesLib: utilitiesLib
+        }));
 
         // Set auction manager in CPAHook
         console.log("Setting auction manager in CPAHook...");

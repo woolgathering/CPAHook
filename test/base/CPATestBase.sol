@@ -28,6 +28,10 @@ import { CPASettlementPhase } from "../../src/libraries/CPASettlementPhase.sol";
 import { CPAFinishedPhase } from "../../src/libraries/CPAFinishedPhase.sol";
 import { CPAAuctionControl } from "../../src/libraries/CPAAuctionControl.sol";
 import { CPACallbacks } from "../../src/libraries/CPACallbacks.sol";
+import { CPAManagerHelpers } from "../../src/libraries/CPAManagerHelpers.sol";
+import { CPAValidation } from "../../src/libraries/CPAValidation.sol";
+import { CPATransitions } from "../../src/libraries/CPATransitions.sol";
+import { CPAUtilities } from "../../src/libraries/CPAUtilities.sol";
 import { AuctionTypes } from "../../src/types/AuctionTypes.sol";
 import { AuctionId } from "../../src/types/AuctionId.sol";
 import { MockERC20 } from "solmate/src/test/utils/mocks/MockERC20.sol";
@@ -141,22 +145,37 @@ abstract contract CPATestBase is Deployers {
         address auctionControlLib = address(new CPAAuctionControl());
         address callbackLib = address(new CPACallbacks());
         
-        // Deploy CPAManager with phase library addresses
+        // Deploy new helper libraries
+        address helpersLib = address(new CPAManagerHelpers());
+        address validationLib = address(new CPAValidation());
+        address transitionsLib = address(new CPATransitions());
+        address utilitiesLib = address(new CPAUtilities());
+        
+        // Deploy CPAManager (libraries will be set separately)
         cpaManager = new CPAManager(
             poolManager,
             protocolOwner,
             address(cpaHook),
             positionManager,
-            address(this),
-            setupLib,
-            clockPhaseLib,
-            proxyPhaseLib,
-            allocationPhaseLib,
-            settlementPhaseLib,
-            finishedPhaseLib,
-            auctionControlLib,
-            callbackLib
+            address(this)
         );
+        
+        // Set all library addresses
+        vm.prank(protocolOwner);
+        cpaManager.setLibraries(CPAManager.LibraryAddresses({
+            setupLib: setupLib,
+            clockPhaseLib: clockPhaseLib,
+            proxyPhaseLib: proxyPhaseLib,
+            allocationPhaseLib: allocationPhaseLib,
+            settlementPhaseLib: settlementPhaseLib,
+            finishedPhaseLib: finishedPhaseLib,
+            auctionControlLib: auctionControlLib,
+            callbackLib: callbackLib,
+            helpersLib: helpersLib,
+            validationLib: validationLib,
+            transitionsLib: transitionsLib,
+            utilitiesLib: utilitiesLib
+        }));
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));

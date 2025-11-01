@@ -198,7 +198,7 @@ contract CPASettlementPhase {
 		AuctionId auctionId
 	) public view returns (bool) {
 		// Check if settlement phase duration has expired
-		uint256 startTime = self.settlementPhaseStartTime(auctionId);
+		uint256 startTime = StorageAccess.getSettlementPhaseStartTime(auctionId);
 		if (startTime == 0) return false; // Phase not started yet
 		
 		// Get auctionInfo and phase duration from auction config
