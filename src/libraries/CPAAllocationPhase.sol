@@ -50,7 +50,7 @@ library CPAAllocationPhase {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
 		mapping(AuctionId => bool) storage hasAllocations
-	) external {
+	) internal {
 		AuctionId auctionId = allocationData.auctionId;
 
 		// check if the submitted allocation outscores the existing top allocation
