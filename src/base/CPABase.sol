@@ -8,8 +8,6 @@ import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPosition
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 import { CPAStorage } from "./CPAStorage.sol";
-import { CPASetup } from "../libraries/CPASetup.sol";
-import { CPAClockPhase } from "../libraries/CPAClockPhase.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { ICPAHook } from "../interfaces/ICPAHook.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
@@ -22,8 +20,9 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 		address _owner,
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
-		address _protocolWallet
-	) CPAStorage(_cpaAuctionHookAddr, _positionManager) Ownable(_owner) {
+		address _protocolWallet,
+		address _mathFacet
+	) CPAStorage(_mathFacet, _cpaAuctionHookAddr, _positionManager) Ownable(_owner) {
 		manager = _poolManager;
 		protocolWallet = _protocolWallet;
 	}
@@ -61,28 +60,6 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 		_;
 	}
 
-	modifier onlyWhenPhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
-		uint256[] memory durations = auctionInfo[auctionId].config.phaseDurations;
-		uint256 startTime;
-
-		if (phase == AuctionTypes.AuctionPhase.Proxy) {
-			startTime = proxyPhaseStartTime[auctionId];
-			if (startTime == 0) revert PhaseNotStarted(auctionId);
-			if (block.timestamp < startTime + durations[0]) revert PhaseNotExpired(auctionId, phase);
-		} else if (phase == AuctionTypes.AuctionPhase.Allocation) {
-			startTime = allocationPhaseStartTime[auctionId];
-			if (startTime == 0) revert PhaseNotStarted(auctionId);
-			if (block.timestamp < startTime + durations[1]) revert PhaseNotExpired(auctionId, phase);
-		} else if (phase == AuctionTypes.AuctionPhase.Settlement) {
-			startTime = settlementPhaseStartTime[auctionId];
-			if (startTime == 0) revert PhaseNotStarted(auctionId);
-			if (block.timestamp < startTime + durations[2]) revert PhaseNotExpired(auctionId, phase);
-		} else {
-			revert PhaseNotExpired(auctionId, phase);
-		}
-		_;
-	}
-
 	modifier onlyWhenPhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
 		if (_hasPhaseExpired(auctionId, phase)) revert PhaseExpired(auctionId, phase);
 		_;
@@ -98,36 +75,6 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 	// ========================================
 	// INTERNAL HELPERS
 	// ========================================
-
-	function _startClockRound(AuctionId auctionId) internal {
-		if (auctionInfo[auctionId].currentPhase == AuctionTypes.AuctionPhase.Setup) {
-			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo))
-				revert SetupNotComplete();
-			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
-			_updateCPAHookStates(auctionId);
-			emit AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
-		}
-		CPAClockPhase.openClockRound(auctionId, auctionInfo);
-	}
-
-	function _endClockPhase(AuctionId auctionId) internal {
-		if (auctionInfo[auctionId].clockOpen == 2) {
-			CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
-			emit ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
-		}
-		CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], poolInfo, manager);
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
-	}
-
-	function removeBidder(AuctionId auctionId, address bidder) internal {
-		address[] storage activeBiddersInThisAuction = activeBidders[auctionId];
-		for (uint256 i = 0; i < activeBiddersInThisAuction.length; i++) {
-			if (activeBiddersInThisAuction[i] == bidder) {
-				activeBiddersInThisAuction[i] = address(0);
-				break;
-			}
-		}
-	}
 
 	function _changePhase(AuctionId auctionId, AuctionTypes.AuctionPhase newPhase) internal {
 		auctionInfo[auctionId].currentPhase = newPhase;

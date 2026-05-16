@@ -16,8 +16,9 @@ contract FinishedPhaseFacet is CPABase {
 		address _owner,
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
-		address _protocolWallet
-	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet) {}
+		address _protocolWallet,
+		address _mathFacet
+	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
 	function transferPositionsToAuctioneer(AuctionId auctionId)
 		external

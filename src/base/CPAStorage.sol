@@ -38,6 +38,9 @@ abstract contract CPAStorage {
 	// this is the hook that all auction item pools share
 	address public cpaAuctionHookAddr;
 
+	/// @notice MathFacet address for external math library calls
+	address public mathFacet;
+
 	/// @notice Pool manager
 	IPoolManager public immutable manager;
 	
@@ -169,7 +172,8 @@ abstract contract CPAStorage {
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
 	 * @param _positionManager The PositionManager address for NFT position creation
 	 */
-	constructor(address _cpaAuctionHookAddr, IPositionManager _positionManager) {
+	constructor(address _mathFacet, address _cpaAuctionHookAddr, IPositionManager _positionManager) {
+		mathFacet = _mathFacet;
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;
 		positionManager = _positionManager;
 	}

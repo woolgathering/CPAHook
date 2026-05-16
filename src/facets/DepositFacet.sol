@@ -10,7 +10,7 @@ import { CPASetup } from "../libraries/CPASetup.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
-contract SetupFacet is CPABase {
+contract DepositFacet is CPABase {
 
 	constructor(
 		IPoolManager _poolManager,
@@ -21,13 +21,21 @@ contract SetupFacet is CPABase {
 		address _mathFacet
 	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function createAuction(
-		AuctionTypes.AuctionConfig memory config,
-		address auctionOwner
-	) external nonReentrant returns (AuctionId) {
-		AuctionId auctionId = CPASetup.createAuction(this, config, auctionOwner, auctionInfo, poolToAuctionId, poolInfo);
+	function moveDeposit(
+		AuctionId auctionId,
+		PoolKey memory poolKey,
+		uint256 depositAmount
+	) external nonReentrant onlyAuctionOwner(auctionId) {
+		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
 		_updateCPAHookStates(auctionId);
-		return auctionId;
 	}
 
+	function depositAllAndStartClock(
+		AuctionId auctionId,
+		PoolKey[] memory poolKeys,
+		uint256[] memory amounts
+	) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
+		CPASetup.depositAllAndStartClock(this, auctionInfo[auctionId], poolInfo, poolKeys, amounts, auctionId);
+		_updateCPAHookStates(auctionId);
+	}
 }

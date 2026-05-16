@@ -5,10 +5,11 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 import { CPABaseClock } from "../base/CPABaseClock.sol";
+import { CPAClockPhase } from "../libraries/CPAClockPhase.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
-contract ClockAdminFacet is CPABaseClock {
+contract ClockBidFacet is CPABaseClock {
 
 	constructor(
 		IPoolManager _poolManager,
@@ -19,21 +20,28 @@ contract ClockAdminFacet is CPABaseClock {
 		address _mathFacet
 	) CPABaseClock(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function startClockPhase(AuctionId auctionId)
+	function submitBid(
+		AuctionId auctionId,
+		uint256[] calldata demands,
+		uint256 maxStakeAmount
+	)
 		external
-		nonReentrant
-		onlyAuctionOwner(auctionId)
-		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup)
-	{
-		_startClockRound(auctionId);
-	}
-
-	function endClockPhase(AuctionId auctionId)
-		external
-		nonReentrant
-		onlyAuctionOwner(auctionId)
+		payable
+		whenAuctionActive(auctionId)
 		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
+		onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock)
+		validateEthForNumeraire(auctionId)
 	{
-		_endClockPhase(auctionId);
+		CPAClockPhase.processBid(
+			this,
+			auctionId,
+			demands,
+			maxStakeAmount,
+			auctionInfo[auctionId],
+			bidderStake[auctionId],
+			bidderBidPoints[auctionId],
+			bids[auctionId],
+			activeBidders[auctionId]
+		);
 	}
 }

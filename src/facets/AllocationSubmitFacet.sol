@@ -5,10 +5,11 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 import { CPABase } from "../base/CPABase.sol";
+import { CPAAllocationPhase } from "../libraries/CPAAllocationPhase.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
-contract AllocationTransitionFacet is CPABase {
+contract AllocationSubmitFacet is CPABase {
 
 	constructor(
 		IPoolManager _poolManager,
@@ -19,20 +20,19 @@ contract AllocationTransitionFacet is CPABase {
 		address _mathFacet
 	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function transitionToAllocation(AuctionId auctionId)
+	function submitAllocation(
+		AuctionId auctionId,
+		AuctionTypes.Allocation calldata allocationData
+	)
 		external
-		nonReentrant
 		whenAuctionActive(auctionId)
-		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Proxy)
+		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Allocation)
+		onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation)
 	{
-		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Proxy))
-			revert PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
+		if (msg.sender != allocationData.allocator) revert Unauthorized();
 
-		if (!hasBundles[auctionId]) {
-			_cancelAuction(auctionId);
-			revert NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
-		}
-
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Allocation);
+		CPAAllocationPhase.submitAllocation(
+			this, allocationData, topAllocation, auctionInfo[auctionId], poolInfo, bundles[auctionId], hasAllocations
+		);
 	}
 }

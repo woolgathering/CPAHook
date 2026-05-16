@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import { IMathFacet } from "../interfaces/IMathFacet.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
