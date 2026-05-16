@@ -109,8 +109,8 @@ Finished Stage (not fully implemented)
 ### Setup
 ```bash
 # Clone repository
-git clone https://github.com/woolgathering/CPAHook/tree/clock-proxy-auction
-cd clock-proxy-auction
+git clone <repo-url>
+cd v4-template
 
 # Install dependencies
 forge install
@@ -145,7 +145,7 @@ AuctionTypes.AuctionConfig memory config = AuctionTypes.AuctionConfig({
 });
 
 // Create auction
-AuctionId auctionId = manager.createAuction(poolKeys, config, auctionOwner);
+AuctionId auctionId = manager.createAuction(config, auctionOwner);
 ```
 
 ### Bidding Process
@@ -359,11 +359,13 @@ forge test --match-path test/CPASettlementPhase.t.sol
 
 ## Documentation
 
-High-level documentation is available in the `docs/` directory. It is not technical and is not guarenteed to be up-to-date.:
+High-level documentation is available in the `docs/` directory. Note: These docs are not technical and may be out of date.
 
 - Implementation Specification: `docs/productAndIdeas/clockProxyHookImplementation.md`
 - Logic Flow: `docs/productAndIdeas/mainLogicFlow.md`
 - V4 Analysis: `docs/productAndIdeas/clockProxyV4Analysis.md`
+
+For the most accurate information, refer to code comments and test files.
 
 ## Partner Integrations
 
@@ -378,22 +380,30 @@ src/
 ├── CPAManager.sol              # Main auction manager
 ├── CPAHook.sol                # V4 hook for pool control
 ├── base/
-│   └── CPAStorage.sol         # Storage patterns
+│   └── CPAStorage.sol         # Auction state storage
 ├── libraries/
 │   ├── CPASetup.sol           # Setup phase logic
-│   ├── CPAClockPhase.sol      # Bidding logic
-│   ├── CPAProxyPhase.sol      # Bundle submission
-│   ├── CPAAllocationPhase.sol # Allocator competition
-│   └── CPASettlementPhase.sol # Token claiming
+│   ├── CPAClockPhase.sol      # Clock phase (bidding) logic
+│   ├── CPAProxyPhase.sol      # Proxy phase (bundle submission) logic
+│   ├── CPAAllocationPhase.sol # Allocation phase (competitive allocation) logic
+│   ├── CPASettlementPhase.sol # Settlement phase (token claiming) logic
+│   ├── CPAFinishedPhase.sol   # Finished phase logic
+│   ├── CPAComputationLibrary.sol # Shared computation utilities
+│   └── CPALibraryUtils.sol    # Library-level utilities
 ├── types/
-│   ├── AllocationId.sol       # Allocation ID type
 │   ├── AuctionId.sol          # Auction ID type
-│   ├── AuctionTypes.sol       # Type definitions
+│   ├── AuctionTypes.sol       # Core type definitions
+│   ├── AllocationId.sol       # Allocation ID type
 │   └── BundleId.sol           # Bundle ID type
+├── interfaces/
+│   ├── ICPAManager.sol        # CPAManager interface
+│   └── ICPAHook.sol           # CPAHook interface
 └── utils/
-    ├── CommitReveal.sol       # Commit-reveal utilities
-    ├── IErrorsAndEvents.sol   # Interface for errors and events
-    ├── PoolUtils.sol          # Pool management utilities
+    ├── IErrorsAndEvents.sol   # Centralized errors and events
+    ├── CommitReveal.sol       # Commit-reveal privacy utilities
+    ├── Callbacks.sol          # Uniswap callback handling
+    ├── CPAIntegratorUtils.sol # Integration utilities
+    ├── CurrencyDecimals.sol   # Currency decimal handling
     └── PriceUtils.sol         # Price calculation utilities
 ```
 
@@ -403,7 +413,7 @@ src/
 - Privacy System: Two-salt commit-reveal for bidder-proxy anonymity
 - Allocator Rewards: 1% fee system with on-chain claiming
 - Batch Operations: Efficient settlement with `claimAllTokens()`
-- Gas Optimization: Library-based architecture for efficiency
+- Phase-Based Architecture: Organized into sequential, non-overlapping phases
 
 ### Known Issues
 
