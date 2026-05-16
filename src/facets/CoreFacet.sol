@@ -16,10 +16,7 @@ contract CoreFacet is CPABase {
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
 		address _protocolWallet
-	) CPAStorage(_cpaAuctionHookAddr, _positionManager) Ownable(_owner) {
-		manager = _poolManager;
-		protocolWallet = _protocolWallet;
-	}
+	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet) {}
 
 	function setCpaAuctionHookAddr(address _cpaAuctionHookAddr) external onlyOwner {
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;

@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
+import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 
 import { CPAStorage } from "./CPAStorage.sol";
@@ -14,6 +16,17 @@ import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
 abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard {
+
+	constructor(
+		IPoolManager _poolManager,
+		address _owner,
+		address _cpaAuctionHookAddr,
+		IPositionManager _positionManager,
+		address _protocolWallet
+	) CPAStorage(_cpaAuctionHookAddr, _positionManager) Ownable(_owner) {
+		manager = _poolManager;
+		protocolWallet = _protocolWallet;
+	}
 
 	// ========================================
 	// MODIFIERS

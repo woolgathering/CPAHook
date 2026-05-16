@@ -28,10 +28,7 @@ contract CallbacksFacet is CPABase {
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
 		address _protocolWallet
-	) CPAStorage(_cpaAuctionHookAddr, _positionManager) Ownable(_owner) {
-		manager = _poolManager;
-		protocolWallet = _protocolWallet;
-	}
+	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet) {}
 
 	function unlockCallback(bytes calldata rawData)
 		external
