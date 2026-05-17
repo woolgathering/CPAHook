@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
@@ -12,6 +11,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CurrencySettler} from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { IMathFacet } from "../interfaces/IMathFacet.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId, AuctionIdLibrary } from "../types/AuctionId.sol";
@@ -70,7 +70,7 @@ library CPASetup {
 				poolToAuctionId[config.poolKeys[i].toId()] = auctionId; // set the auction id in poolToAuctionId
 				
 				// Convert sqrtPriceX96 to tick
-				int24 startingTick = TickMath.getTickAtSqrtPrice(config.initialSqrtPricesX96[i]);
+				int24 startingTick = IMathFacet(self.mathFacet()).getTickAtSqrtPrice(config.initialSqrtPricesX96[i]);
 				
 				// Create and store PoolInfo for this pool
 				PoolId poolId = config.poolKeys[i].toId();
@@ -114,6 +114,77 @@ library CPASetup {
 		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
 
 		return auctionId;
+	}
+
+	/**
+	 * @notice Register pools for a new auction (step 1 of 2-step createAuction split)
+	 * @dev Validates pools, writes poolInfo and poolToAuctionId, initializes pools in manager.
+	 *      Call finalizeAuctionCreation as step 2 to complete the auction creation.
+	 */
+	function registerPoolsForAuction(
+		CPAStorage self,
+		AuctionTypes.AuctionConfig memory config,
+		mapping(PoolId => AuctionId) storage poolToAuctionId,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+	) internal returns (AuctionId auctionId) {
+		auctionId = AuctionIdLibrary.createId(config.poolKeys);
+		address numeraireAddress = config.commonNumeraire;
+
+		if (config.poolKeys.length != config.initialSqrtPricesX96.length || config.poolKeys.length != config.priceIncrements.length) {
+			revert IErrorsAndEvents.InvalidBidsLength();
+		}
+
+		for (uint256 i = 0; i < config.poolKeys.length; ) {
+			if (address(Currency.unwrap(config.poolKeys[i].currency0)) == numeraireAddress || address(Currency.unwrap(config.poolKeys[i].currency1)) == numeraireAddress) {
+				if (address(config.poolKeys[i].hooks) != self.cpaAuctionHookAddr()) {
+					revert IErrorsAndEvents.InvalidHook();
+				}
+				poolToAuctionId[config.poolKeys[i].toId()] = auctionId;
+				int24 startingTick = IMathFacet(self.mathFacet()).getTickAtSqrtPrice(config.initialSqrtPricesX96[i]);
+				PoolId poolId = config.poolKeys[i].toId();
+				poolInfo[poolId] = AuctionTypes.PoolInfo({
+					key: config.poolKeys[i],
+					startingTick: startingTick,
+					priceIncrement: config.priceIncrements[i],
+					depositAmount: 0,
+					excessDemand: 0,
+					lastOversoldTick: 0,
+					auctionId: auctionId,
+					positionId: 0
+				});
+				self.manager().initialize(config.poolKeys[i], config.initialSqrtPricesX96[i]);
+			} else {
+				revert IErrorsAndEvents.MismatchedNumeraires();
+			}
+			unchecked { ++i; }
+		}
+	}
+
+	/**
+	 * @notice Write auctionInfo and emit AuctionCreated (step 2 of 2-step createAuction split)
+	 * @dev Requires registerPoolsForAuction to have been called first.
+	 */
+	function finalizeAuctionCreation(
+		AuctionTypes.AuctionConfig memory config,
+		AuctionId auctionId,
+		address auctionOwner,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+	) internal {
+		auctionInfo[auctionId] = AuctionTypes.AuctionInfo({
+			auctionOwner: auctionOwner,
+			commonNumeraire: config.commonNumeraire,
+			config: config,
+			currentPhase: AuctionTypes.AuctionPhase.Setup,
+			currentStatus: AuctionTypes.AuctionStatus.Active,
+			clockOpen: 1,
+			currentRound: 0,
+			poolKeys: config.poolKeys,
+			allocatorReward: 0,
+			changedPrices: new bool[](config.poolKeys.length),
+			lastRevenue: 0,
+			totalPauseDuration: 0
+		});
+		emit IErrorsAndEvents.AuctionCreated(auctionId, auctionOwner);
 	}
 
 	/**

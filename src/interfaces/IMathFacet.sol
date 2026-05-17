@@ -8,4 +8,12 @@ interface IMathFacet {
     function getLiquidityForAmount1(uint160 sqrtRatioAX96, uint160 sqrtRatioBX96, uint256 amount1) external pure returns (uint128);
     function mulDiv(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256);
     function mulDivRoundingUp(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256);
+    function calculateBidValueFromPools(
+        uint256[] calldata demands,
+        address numeraire,
+        address poolManagerAddr,
+        bytes32[] calldata poolIds,
+        address[] calldata currency0s,
+        address[] calldata currency1s
+    ) external view returns (uint256 totalValue);
 }

@@ -19,7 +19,7 @@ contract SettlementTransitionFacet is CPABase {
 		address _mathFacet
 	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function transitionToSettlement(AuctionId auctionId)
+	function selectAuctionWinner(AuctionId auctionId)
 		external
 		nonReentrant
 		whenAuctionActive(auctionId)
@@ -27,16 +27,12 @@ contract SettlementTransitionFacet is CPABase {
 	{
 		if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Allocation))
 			revert PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
-
+		require(!winnerSelected[auctionId], "Winner already selected");
 		if (!hasAllocations[auctionId]) {
 			_cancelAuction(auctionId);
 			revert NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
 		}
-
 		CPAAllocationPhase.selectWinner(this, auctionId, topAllocation, auctionInfo, poolInfo, bundles[auctionId], winningBundleIds);
-		CPAAllocationPhase.transferAssetsToPools(this, auctionId, auctionInfo, poolInfo);
-
-		_changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
+		winnerSelected[auctionId] = true;
 	}
-
 }

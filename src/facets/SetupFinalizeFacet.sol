@@ -10,7 +10,7 @@ import { CPASetup } from "../libraries/CPASetup.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
-contract SetupFacet is CPABase {
+contract SetupFinalizeFacet is CPABase {
 
 	constructor(
 		IPoolManager _poolManager,
@@ -21,12 +21,15 @@ contract SetupFacet is CPABase {
 		address _mathFacet
 	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function initAuction(
+	function finalizeAuction(
+		AuctionId auctionId,
 		AuctionTypes.AuctionConfig memory config,
 		address auctionOwner
 	) external nonReentrant returns (AuctionId) {
-		AuctionId auctionId = CPASetup.registerPoolsForAuction(this, config, poolToAuctionId, poolInfo);
-		poolsRegistered[auctionId] = true;
+		require(poolsRegistered[auctionId], "Pools not registered");
+		poolsRegistered[auctionId] = false;
+		CPASetup.finalizeAuctionCreation(config, auctionId, auctionOwner, auctionInfo);
+		_updateCPAHookStates(auctionId);
 		return auctionId;
 	}
 }
