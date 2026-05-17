@@ -19,6 +19,7 @@ import { FixedPointMathLib } from "solmate/src/utils/FixedPointMathLib.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol"; 
 
 import { CPAManager } from "../../src/CPAManager.sol";
+import { MathFacet } from "../../src/facets/MathFacet.sol";
 import { CPAHook } from "../../src/CPAHook.sol";
 import { AuctionTypes } from "../../src/types/AuctionTypes.sol";
 import { AuctionId } from "../../src/types/AuctionId.sol";
@@ -40,6 +41,7 @@ abstract contract CPATestBase is Deployers {
     
     // Core contracts
     CPAManager public cpaManager;
+    MathFacet public mathFacet;
     CPAHook public cpaHook;
     
     // Test tokens
@@ -123,8 +125,11 @@ abstract contract CPATestBase is Deployers {
         // Deploy CPAHook with proper address mining
         cpaHook = deployCPAHook(poolManager);
         
+        // Deploy MathFacet (standalone pure-math helper)
+        mathFacet = new MathFacet();
+
         // Deploy CPAManager (no longer a hook, simple deployment)
-        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), positionManager, address(this));
+        cpaManager = new CPAManager(poolManager, protocolOwner, address(cpaHook), positionManager, address(this), address(mathFacet));
         
         // Set auction manager in pool hook
         cpaHook.setAuctionManager(address(cpaManager));
@@ -442,9 +447,9 @@ abstract contract CPATestBase is Deployers {
         for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
             uint256 price;
             if (Currency.unwrap(poolKeys[i].currency0) == address(numeraireToken)) {
-                price = poolManager.getPriceOfCurrency1(poolKeys[i]);
+                price = poolManager.getPriceOfCurrency1(poolKeys[i], address(mathFacet));
             } else {
-                price = poolManager.getPriceOfCurrency0(poolKeys[i]);
+                price = poolManager.getPriceOfCurrency0(poolKeys[i], address(mathFacet));
             }
             
             // Get asset decimals for this pool

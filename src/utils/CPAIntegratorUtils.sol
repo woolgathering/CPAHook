@@ -45,15 +45,15 @@ library CPAIntegratorUtils {
         uint256 allocatorRewardPct,
         uint256 existingStake,
         IPoolManager poolManager,
-        PoolKey[] memory poolKeys
+        PoolKey[] memory poolKeys,
+        address mathFacetAddr
     ) internal view returns (
         uint256 additionalRequired,
         uint256 totalRequired,
         uint256 bidValue,
         uint256 allocatorFee
     ) {
-        // Calculate bid value using the shared computation library (same logic as CPAClockPhase)
-        bidValue = CPAComputationLibrary.calculateBidValue(demands, numeraire, poolManager, poolKeys);
+        bidValue = CPAComputationLibrary.calculateBidValue(demands, numeraire, poolManager, poolKeys, mathFacetAddr);
         
         // Calculate allocator fee
         allocatorFee = (bidValue * allocatorRewardPct) / 10000;
@@ -78,9 +78,10 @@ library CPAIntegratorUtils {
         uint256[] calldata demands,
         address numeraire,
         IPoolManager poolManager,
-        PoolKey[] memory poolKeys
+        PoolKey[] memory poolKeys,
+        address mathFacetAddr
     ) internal view returns (uint256 totalValue) {
-        return CPAComputationLibrary.calculateBidValue(demands, numeraire, poolManager, poolKeys);
+        return CPAComputationLibrary.calculateBidValue(demands, numeraire, poolManager, poolKeys, mathFacetAddr);
     }
 
     /**
@@ -102,7 +103,8 @@ library CPAIntegratorUtils {
         uint256 allocatorRewardPct,
         uint256 existingStake,
         IPoolManager poolManager,
-        PoolKey[] memory poolKeys
+        PoolKey[] memory poolKeys,
+        address mathFacetAddr
     ) internal view returns (
         bool hasSufficientStake,
         uint256 requiredStake,
@@ -114,7 +116,8 @@ library CPAIntegratorUtils {
             allocatorRewardPct,
             existingStake,
             poolManager,
-            poolKeys
+            poolKeys,
+            mathFacetAddr
         );
         
         hasSufficientStake = (additionalNeeded == 0);

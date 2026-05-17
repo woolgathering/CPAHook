@@ -7,7 +7,6 @@ import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { Currency, CurrencyLibrary } from "@uniswap/v4-core/src/types/Currency.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 
@@ -35,51 +34,11 @@ contract CallbacksSettlementFacet is CPABase {
 	{
 		(uint8 operationType, bytes memory operationData) = abi.decode(rawData, (uint8, bytes));
 
-		if (operationType == 4) {
-			return _handleClaimToken(operationData);
-		} else if (operationType == 7) {
+		if (operationType == 7) {
 			return _handleClaimAllTokens(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
-	}
-
-	function _handleClaimToken(bytes memory operationData) internal returns (bytes memory) {
-		AuctionTypes.CallbackDataClaimToken memory callbackData = abi.decode(operationData, (AuctionTypes.CallbackDataClaimToken));
-
-		BalanceDelta delta = manager.swap(callbackData.poolKey, callbackData.swapParams, "");
-
-		Currency numeraire = Currency.wrap(callbackData.numeraire);
-		uint256 numeraireOwed;
-		uint256 assetGained;
-		{
-			Currency asset;
-			if (callbackData.swapParams.zeroForOne) {
-				if (delta.amount1() < 0) revert("Should not owe asset");
-				numeraireOwed = uint256((-delta.amount0()).toUint128());
-				assetGained = uint256((delta.amount1()).toUint128());
-				asset = callbackData.poolKey.currency1;
-			} else {
-				if (delta.amount0() < 0) revert("Should not owe asset");
-				numeraireOwed = uint256((-delta.amount1()).toUint128());
-				assetGained = uint256((delta.amount0()).toUint128());
-				asset = callbackData.poolKey.currency0;
-			}
-			asset.take(manager, callbackData.bidder, assetGained, false);
-		}
-
-		uint256 stake = bidderStake[callbackData.auctionId][callbackData.bidder];
-		uint256 numerairePaidByManager = 0;
-		if (stake >= numeraireOwed) {
-			numeraire.settle(manager, address(this), numeraireOwed, true);
-			numerairePaidByManager = numeraireOwed;
-		} else {
-			numeraire.settle(manager, address(this), stake, true);
-			numeraire.settle(manager, callbackData.bidder, numeraireOwed - stake, false);
-			numerairePaidByManager = stake;
-		}
-
-		return abi.encode(numerairePaidByManager, assetGained);
 	}
 
 	function _handleClaimAllTokens(bytes memory operationData) internal returns (bytes memory) {
@@ -98,8 +57,8 @@ contract CallbacksSettlementFacet is CPABase {
 					zeroForOne: numeraireIsCurrency0,
 					amountSpecified: (amountOwed.toInt256()),
 					sqrtPriceLimitX96: numeraireIsCurrency0
-						? TickMath.MIN_SQRT_PRICE + 1
-						: TickMath.MAX_SQRT_PRICE - 1
+						? uint160(4295128739) + 1
+						: uint160(1461446703485210103287273052203988822378723970342) - 1
 				});
 
 				BalanceDelta delta = manager.swap(poolKey, params, "");

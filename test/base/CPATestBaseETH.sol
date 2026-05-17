@@ -53,9 +53,9 @@ abstract contract CPATestBaseETH is CPATestBase {
         for (uint256 i = 0; i < demands.length && i < poolKeys.length; i++) {
             uint256 price;
             if (Currency.unwrap(poolKeys[i].currency0) == address(0)) {
-                price = PriceUtils.getPriceOfCurrency1(poolManager, poolKeys[i]);
+                price = PriceUtils.getPriceOfCurrency1(poolManager, poolKeys[i], address(mathFacet));
             } else {
-                price = PriceUtils.getPriceOfCurrency0(poolManager, poolKeys[i]);
+                price = PriceUtils.getPriceOfCurrency0(poolManager, poolKeys[i], address(mathFacet));
             }
             
             // Get asset decimals for this pool

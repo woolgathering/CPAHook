@@ -56,7 +56,8 @@ contract DeployCPA is Script {
             protocolOwner,
             address(cpaHook),
             IPositionManager(positionManagerAddress),
-            protocolOwner
+            protocolOwner,
+            address(0) // mathFacet: set after deployment if needed
         );
         console.log("CPAManager deployed at:", address(cpaManager));
 

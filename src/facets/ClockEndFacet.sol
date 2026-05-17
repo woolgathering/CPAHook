@@ -8,7 +8,7 @@ import { CPABaseClock } from "../base/CPABaseClock.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
-contract ClockStartFacet is CPABaseClock {
+contract ClockEndFacet is CPABaseClock {
 
 	constructor(
 		IPoolManager _poolManager,
@@ -19,12 +19,12 @@ contract ClockStartFacet is CPABaseClock {
 		address _mathFacet
 	) CPABaseClock(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
-	function startClockPhase(AuctionId auctionId)
+	function endClockPhase(AuctionId auctionId)
 		external
 		nonReentrant
 		onlyAuctionOwner(auctionId)
-		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup)
+		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
 	{
-		_startClockRound(auctionId);
+		_endClockPhase(auctionId);
 	}
 }
