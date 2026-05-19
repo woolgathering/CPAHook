@@ -3,10 +3,13 @@ pragma solidity ^0.8.24;
 
 import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
+import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId } from "../types/BundleId.sol";
+import { IDiamondCut } from "./IDiamondCut.sol";
+import { IDiamondLoupe } from "./IDiamondLoupe.sol";
 
 /**
  * @title ICPAManager
@@ -14,7 +17,7 @@ import { BundleId } from "../types/BundleId.sol";
  * @dev This interface defines all public and external functions of the CPAManager contract
  * @author notthatintodefi.eth
  */
-interface ICPAManager {
+interface ICPAManager is IDiamondCut, IDiamondLoupe {
     // ========================================
     // ADMIN FUNCTIONS
     // ========================================
@@ -38,6 +41,14 @@ interface ICPAManager {
      * @return The unique auction identifier
      */
     function createAuction(
+        AuctionTypes.AuctionConfig memory config,
+        address auctionOwner
+    ) external returns (AuctionId);
+
+    /**
+     * @notice Initialize a new auction (new name for createAuction in SetupFacet)
+     */
+    function initAuction(
         AuctionTypes.AuctionConfig memory config,
         address auctionOwner
     ) external returns (AuctionId);
@@ -143,7 +154,7 @@ interface ICPAManager {
         AuctionId auctionId,
         uint256[] calldata demands,
         uint256 maxStakeAmount
-    ) external;
+    ) external payable;
     
     /**
      * @notice Commit to a bidder (proxy function)
@@ -312,7 +323,7 @@ interface ICPAManager {
      * @return Array of demand quantities for each asset
      */
     function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory);
-    
+
     /**
      * @notice Get top allocation for an auction
      * @dev Returns the winning allocation and its score
@@ -344,4 +355,32 @@ interface ICPAManager {
      * @return The revealed bidder address
      */
     function revealedMappings(AuctionId auctionId, bytes32 commitHash) external view returns (address);
+
+    // ========================================
+    // STORAGE GETTERS (auto-generated from CPAStorage public mappings)
+    // ========================================
+
+    function poolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, uint256);
+    function poolToAuctionId(PoolId poolId) external view returns (AuctionId);
+    function bidderBidPoints(AuctionId auctionId, address bidder) external view returns (uint256);
+    function protocolPenalties(AuctionId auctionId) external view returns (uint256);
+    function winningBundleIds(bytes32 commitHash) external view returns (BundleId);
+    function activeBidders(AuctionId auctionId, uint256 index) external view returns (address);
+
+    // Explicit view functions defined in CPAStorage
+    function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, uint256);
+    function getBundle(AuctionId auctionId, BundleId bundleId)
+        external view returns (AuctionId, bytes32, BundleId, uint256[] memory, uint256, uint256);
+    function getNumItems(AuctionId auctionId) external view returns (uint256);
+    function getTopAllocation(AuctionId auctionId) external view returns (AuctionTypes.TopAllocation memory);
+
+    // ========================================
+    // DIAMOND MANAGEMENT
+    // ========================================
+
+    // Register callback op-type to sub-facet mapping (used by CallbackRouterFacet)
+    function setCallbackFacets(uint8[] calldata opTypes, address[] calldata facets_) external;
+
+    // ERC-165
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
 }
