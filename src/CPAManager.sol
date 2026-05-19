@@ -66,8 +66,9 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		address _owner,
 		address _cpaAuctionHookAddr,
 		IPositionManager _positionManager,
-		address _protocolWallet
-	) Ownable(_owner) CPAStorage(_cpaAuctionHookAddr, _positionManager) {
+		address _protocolWallet,
+		address _mathFacet
+	) Ownable(_owner) CPAStorage(_mathFacet, _cpaAuctionHookAddr, _positionManager) {
 		manager = _poolManager;
 		protocolWallet = _protocolWallet;
 	}
@@ -460,7 +461,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		// Emit event for round closure
 		emit IErrorsAndEvents.ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
 
-		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo[auctionId], poolInfo, totalDemands, manager)) {
+		if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo[auctionId], poolInfo, totalDemands, manager, mathFacet)) {
 			_endClockPhase(auctionId);
 		} else {
 			_startClockRound(auctionId);
@@ -484,7 +485,7 @@ contract CPAManager is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGuard, C
 		}
 		
 		// Handle undersell by reverting to last oversold prices
-		CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], poolInfo, manager);
+		CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], poolInfo, manager, mathFacet);
 		
 		// Transition to proxy phase
 		_changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);

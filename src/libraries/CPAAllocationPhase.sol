@@ -5,8 +5,6 @@ pragma solidity ^0.8.24;
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
-import { LiquidityAmounts } from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import { Position } from "@uniswap/v4-core/src/libraries/Position.sol";
@@ -20,6 +18,7 @@ import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencyS
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
+import { IMathFacet } from "../interfaces/IMathFacet.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
@@ -50,7 +49,7 @@ library CPAAllocationPhase {
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
 		mapping(AuctionId => bool) storage hasAllocations
-	) external {
+	) internal {
 		AuctionId auctionId = allocationData.auctionId;
 
 		// check if the submitted allocation outscores the existing top allocation
@@ -159,7 +158,7 @@ library CPAAllocationPhase {
 			}
 			
 			// Get the price of the asset in terms of numeraire
-			uint256 price = self.manager().getPriceOfCurrency(poolKey, assetCurrency);
+			uint256 price = self.manager().getPriceOfCurrency(poolKey, assetCurrency, self.mathFacet());
 			
 			// Get asset decimals for this pool
 			uint8 assetDecimals = CurrencyDecimals.getDecimals(assetCurrency);
@@ -280,6 +279,85 @@ library CPAAllocationPhase {
 		self.positionManager().modifyLiquidities(abi.encode(actions, params), deadline);
 	}
 
+	/**
+	 * @notice Step 1 of 2-step settlement: convert ERC6909 auction assets to ERC20.
+	 * @dev Returns the nextTokenId captured before conversion (to pre-store position IDs in step 2).
+	 */
+	function convertAssetsToERC20(
+		CPAStorage self,
+		AuctionId auctionId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+	) internal returns (uint256 startTokenId) {
+		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		PoolKey[] memory poolKeys = auction.poolKeys;
+		uint256 numPools = poolKeys.length;
+
+		Currency[] memory assetCurrencies = new Currency[](numPools);
+		uint256[] memory amounts = new uint256[](numPools);
+		for (uint256 i = 0; i < numPools; ) {
+			assetCurrencies[i] = _getAssetCurrency(poolKeys[i], auction.commonNumeraire);
+			amounts[i] = poolInfo[poolKeys[i].toId()].depositAmount;
+			unchecked { ++i; }
+		}
+
+		startTokenId = self.positionManager().nextTokenId();
+
+		bytes memory callbackData = abi.encode(
+			uint8(9),
+			abi.encode(AuctionTypes.CallbackDataBatchERC6909ToERC20({
+				assetCurrencies: assetCurrencies,
+				amounts: amounts
+			}))
+		);
+		self.manager().unlock(callbackData);
+	}
+
+	/**
+	 * @notice Step 2 of 2-step settlement: mint Uniswap V4 positions for each pool.
+	 * @dev Requires convertAssetsToERC20 to have been called first.
+	 *      startTokenId must be the value returned by convertAssetsToERC20.
+	 */
+	function mintPositionsForAuction(
+		CPAStorage self,
+		AuctionId auctionId,
+		uint256 startTokenId,
+		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo,
+		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo
+	) internal {
+		AuctionTypes.AuctionInfo storage auction = auctionInfo[auctionId];
+		PoolKey[] memory poolKeys = auction.poolKeys;
+		uint256 numPools = poolKeys.length;
+
+		bytes memory actions;
+		bytes[] memory params = new bytes[](numPools * 2);
+
+		for (uint256 i = 0; i < numPools; ) {
+			actions = bytes.concat(
+				actions,
+				abi.encodePacked(uint8(Actions.MINT_POSITION), uint8(Actions.SETTLE_PAIR))
+			);
+
+			(int24 tickLower, int24 tickUpper, uint128 liquidity) = _calculateLiquidityParams(
+				self, auctionId, auctionInfo, poolInfo, poolKeys[i]
+			);
+			(uint128 amount0Max, uint128 amount1Max) = _calculateAmountMaxes(
+				poolKeys[i], poolInfo[poolKeys[i].toId()].depositAmount, auction.commonNumeraire
+			);
+
+			params[i * 2] = abi.encode(
+				poolKeys[i], tickLower, tickUpper, liquidity,
+				amount0Max, amount1Max, address(self), ""
+			);
+			params[i * 2 + 1] = abi.encode(poolKeys[i].currency0, poolKeys[i].currency1);
+
+			poolInfo[poolKeys[i].toId()].positionId = startTokenId + i;
+			unchecked { ++i; }
+		}
+
+		self.positionManager().modifyLiquidities(abi.encode(actions, params), block.timestamp + 60);
+	}
+
 	function _calculateLiquidityParams(
 		CPAStorage self,
 		AuctionId auctionId,
@@ -292,27 +370,28 @@ library CPAAllocationPhase {
 		
 		// Get the final price from the pool (set during clock phase)
 		(uint160 sqrtPriceX96, , , ) = self.manager().getSlot0(poolId);
-		int24 tick = TickMath.getTickAtSqrtPrice(sqrtPriceX96);
-		
+		IMathFacet math = IMathFacet(self.mathFacet());
+		int24 tick = math.getTickAtSqrtPrice(sqrtPriceX96);
+
 		// Determine currency order and calculate parameters
 		bool assetIsCurrency0 = auctionInfo[auctionId].commonNumeraire != address(Currency.unwrap(poolKey.currency0));
-		
+
 		if (assetIsCurrency0) {
 			// Asset is currency0
 			tickLower = _alignComputedTickWithTickSpacing(false, tick, poolKey.tickSpacing);
 			tickUpper = tickLower + poolKey.tickSpacing;
-			liquidity = LiquidityAmounts.getLiquidityForAmount0(
-				TickMath.getSqrtPriceAtTick(tickLower), 
-				TickMath.getSqrtPriceAtTick(tickUpper), 
+			liquidity = math.getLiquidityForAmount0(
+				math.getSqrtPriceAtTick(tickLower),
+				math.getSqrtPriceAtTick(tickUpper),
 				pool.depositAmount
 			);
 		} else {
 			// Asset is currency1
 			tickUpper = _alignComputedTickWithTickSpacing(true, tick, poolKey.tickSpacing);
 			tickLower = tickUpper - poolKey.tickSpacing;
-			liquidity = LiquidityAmounts.getLiquidityForAmount1(
-				TickMath.getSqrtPriceAtTick(tickLower), 
-				TickMath.getSqrtPriceAtTick(tickUpper), 
+			liquidity = math.getLiquidityForAmount1(
+				math.getSqrtPriceAtTick(tickLower),
+				math.getSqrtPriceAtTick(tickUpper),
 				pool.depositAmount
 			);
 		}

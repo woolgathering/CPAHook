@@ -38,6 +38,9 @@ abstract contract CPAStorage {
 	// this is the hook that all auction item pools share
 	address public cpaAuctionHookAddr;
 
+	/// @notice MathFacet address for external math library calls
+	address public mathFacet;
+
 	/// @notice Pool manager
 	IPoolManager public immutable manager;
 	
@@ -89,6 +92,12 @@ abstract contract CPAStorage {
     /// @notice Dropped bidders (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => bool)) public droppedBidders;
 
+	/// @notice Pending total demands stored between processClockRoundStep and finalizeClockRound
+	mapping(AuctionId => uint256[]) internal pendingRoundDemands;
+
+	/// @notice Flag indicating a clock round has been processed and is awaiting finalization
+	mapping(AuctionId => bool) internal roundPendingFinalize;
+
     /// @notice Bidder stake mapping (not stored in AuctionInfo)
 	mapping(AuctionId => mapping(address => uint256)) public bidderStake;
 
@@ -121,6 +130,18 @@ abstract contract CPAStorage {
 
 	/// @notice Track if at least one allocation was submitted
 	mapping(AuctionId => bool) public hasAllocations;
+
+	/// @notice Flag set after selectAuctionWinner runs, allowing transferToSettlement to proceed
+	mapping(AuctionId => bool) internal winnerSelected;
+
+	/// @notice Flag set after initAuction registers pools, cleared after finalizeAuction completes
+	mapping(AuctionId => bool) internal poolsRegistered;
+
+	/// @notice Set after convertAuctionAssets completes ERC6909→ERC20 conversion
+	mapping(AuctionId => bool) internal assetsConverted;
+
+	/// @notice Position manager nextTokenId captured before minting (for positionId pre-storage)
+	mapping(AuctionId => uint256) internal settleStartTokenId;
 	
 	/// @notice Accumulated penalties per auction (for protocol collection)
 	mapping(AuctionId => uint256) public protocolPenalties;
@@ -169,7 +190,8 @@ abstract contract CPAStorage {
 	 * @param _cpaAuctionHookAddr The CPA auction hook address
 	 * @param _positionManager The PositionManager address for NFT position creation
 	 */
-	constructor(address _cpaAuctionHookAddr, IPositionManager _positionManager) {
+	constructor(address _mathFacet, address _cpaAuctionHookAddr, IPositionManager _positionManager) {
+		mathFacet = _mathFacet;
 		cpaAuctionHookAddr = _cpaAuctionHookAddr;
 		positionManager = _positionManager;
 	}

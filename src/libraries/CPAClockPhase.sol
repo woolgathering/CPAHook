@@ -2,8 +2,8 @@
 pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
+import { IMathFacet } from "../interfaces/IMathFacet.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
@@ -64,7 +64,8 @@ library CPAClockPhase {
                 bidderBidPoints[bidder],
                 maxStakeAmount,
                 auctionId,
-                self.manager()
+                self.manager(),
+                self.mathFacet()
             );
 
             if (requiredAdditionalStake > 0) {
@@ -152,8 +153,8 @@ library CPAClockPhase {
 				// Track last oversold tick BEFORE updating price
 				(, int24 currentTick, , ) = StateLibrary.getSlot0(self.manager(), poolId);
 				poolInfo[poolId].lastOversoldTick = currentTick;
-				
-				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auctionInfo.commonNumeraire);
+
+				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auctionInfo.commonNumeraire, self.mathFacet());
 				auctionInfo.changedPrices[i] = true; // Mark this price as changed
 			} else {
 				auctionInfo.changedPrices[i] = false; // Mark this price as not changed
@@ -175,7 +176,8 @@ library CPAClockPhase {
 		PoolKey memory poolKey,
 		int24 priceIncrement,
 		IPoolManager poolManager,
-		address commonNumeraire
+		address commonNumeraire,
+		address mathFacetAddr
 	) internal {
 		// Doppler-style price manipulation: perform a swap on a pool with no liquidity
 		// to move the price by the specified tick increment
@@ -199,9 +201,9 @@ library CPAClockPhase {
 		SwapParams memory swapParams = SwapParams({
 			zeroForOne: zeroForOne,
 			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tick) // target price
+			sqrtPriceLimitX96: IMathFacet(mathFacetAddr).getSqrtPriceAtTick(tick) // target price
 		});
-		
+
 		// Perform the swap to update the price using callback approach
 		// Encode the operation type (2) and the swap parameters
 		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
@@ -220,7 +222,8 @@ library CPAClockPhase {
 		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
 		uint256[] memory totalDemands,
-		IPoolManager poolManager
+		IPoolManager poolManager,
+		address mathFacetAddr
 	) internal returns (bool) {
 		// For now, clock phase does not end automatically
 		// It must be manually ended by the auctioneer
@@ -257,7 +260,19 @@ library CPAClockPhase {
 		// EMA formula: R_t = alpha * r_t + (1 - alpha) * R_{t-1}
 		uint256 alpha = 5e17; // 1/2 in 1e18 precision
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		uint256 revenue = CPAComputationLibrary.calculateBidValueWithMemoryDemands(totalDemands, auctionInfo.commonNumeraire, poolManager, poolKeys);
+		uint256 numPools = poolKeys.length;
+		bytes32[] memory poolIds = new bytes32[](numPools);
+		address[] memory currency0s = new address[](numPools);
+		address[] memory currency1s = new address[](numPools);
+		for (uint256 i = 0; i < numPools; ) {
+			poolIds[i] = PoolId.unwrap(poolKeys[i].toId());
+			currency0s[i] = Currency.unwrap(poolKeys[i].currency0);
+			currency1s[i] = Currency.unwrap(poolKeys[i].currency1);
+			unchecked { ++i; }
+		}
+		uint256 revenue = IMathFacet(mathFacetAddr).calculateBidValueFromPools(
+			totalDemands, auctionInfo.commonNumeraire, address(poolManager), poolIds, currency0s, currency1s
+		);
 		uint256 R_t = _computeEMA(revenue, auctionInfo.lastRevenue, alpha);
 		// if (R_t < revenue * 0.005) {
 		if ((R_t * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
@@ -307,10 +322,11 @@ library CPAClockPhase {
 		uint256 currentBidPoints,
 		uint256 maxStakeAmount,
 		AuctionId auctionId,
-		IPoolManager poolManager
+		IPoolManager poolManager,
+		address mathFacetAddr
 	) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(demands, auctionInfo.commonNumeraire, poolManager, poolKeys);
+		uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(demands, auctionInfo.commonNumeraire, poolManager, poolKeys, mathFacetAddr);
 		uint256 requiredBidPoints = CPAComputationLibrary.computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
 		if (requiredBidPoints <= currentBidPoints) {
 			return (0, 0);
@@ -399,23 +415,23 @@ library CPAClockPhase {
 	function revertUndersoldPrices(
 		AuctionTypes.AuctionInfo storage auctionInfo,
 		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		IPoolManager poolManager
+		IPoolManager poolManager,
+		address mathFacetAddr
 	) internal {
 		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		
+
 		for (uint256 i = 0; i < poolKeys.length; ) {
 			PoolId poolId = poolKeys[i].toId();
 			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
-			
+
 			// Check if this item is undersold (excessDemand < 0)
 			if (pool.excessDemand < 0 && pool.lastOversoldTick != 0) {
 				// Revert to last oversold tick
 				(, int24 currentTick, , ) = StateLibrary.getSlot0(poolManager, poolId);
-				// int24 tickDelta = pool.lastOversoldTick - currentTick;
-				
+
 				if (pool.lastOversoldTick != currentTick) {
 					// Use existing price update logic with negative tick delta for price decrease
-					_updatePoolPriceByTick(pool.key, pool.lastOversoldTick, poolManager, auctionInfo.commonNumeraire);
+					_updatePoolPriceByTick(pool.key, pool.lastOversoldTick, poolManager, auctionInfo.commonNumeraire, mathFacetAddr);
 				}
 			}
 			unchecked { ++i; }
@@ -433,21 +449,16 @@ library CPAClockPhase {
 		PoolKey memory poolKey,
 		int24 tickTarget,
 		IPoolManager poolManager,
-		address commonNumeraire
+		address commonNumeraire,
+		address mathFacetAddr
 	) internal {
-		// Calculate new sqrt price from tick
-		// uint160 newSqrtPriceX96 = TickMath.getSqrtPriceAtTick(tickTarget);
-		
-		// Determine swap direction based on numeraire position
-		// bool zeroForOne = Currency.unwrap(poolKey.currency0) != commonNumeraire;
-		
 		// Create swap parameters for minimal swap
 		SwapParams memory swapParams = SwapParams({
 			zeroForOne: Currency.unwrap(poolKey.currency0) != commonNumeraire,
 			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: TickMath.getSqrtPriceAtTick(tickTarget) // target price
+			sqrtPriceLimitX96: IMathFacet(mathFacetAddr).getSqrtPriceAtTick(tickTarget) // target price
 		});
-		
+
 		// Perform the swap to update the price using callback approach
 		// Encode the operation type (2) and the swap parameters
 		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
