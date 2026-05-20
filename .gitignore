@@ -21,3 +21,4 @@ docs/papers/
 node_modules/
 
 lib/dopper/lib/docs/doppler/
+.claude/
