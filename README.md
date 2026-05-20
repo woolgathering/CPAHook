@@ -449,12 +449,7 @@ script/
 
 ### Known Issues
 
-These issues will be mitigated in future versions. There is nothing in the architecture that precludes solutions.
-
-- The numeraire is currently required to be in 18-decimal precision. Future versions will eliminate this requirement.
-- Bidder dropout is partially implemented: if a proxy does not submit a bundle or the bidder is not included in the final allocation, their stake is subject to the `minSpendRatio` penalty.
-- The auction owner must manually advance most phase transitions (except `transitionToAllocation`, `transitionToSettlement`, and `transitionToFinished` which are permissionless).
-- Stakes are unrefundable if an auction is cancelled (full refund via `reclaimStake` is a planned addition).
+- The auction owner must manually advance Clock phase transitions (`startClockPhase`, `endClockRound`, `endClockPhase`). The later transitions — `transitionToAllocation`, `transitionToSettlement`, and `transitionToFinished` — are permissionless.
 
 ## License
 
