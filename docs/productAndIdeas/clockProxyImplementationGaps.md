@@ -1,6 +1,6 @@
 # Clock-Proxy Auction Implementation Gaps
 
-## Academic Clock-Proxy Auction vs CPAManager Implementation Analysis
+## Academic Clock-Proxy Auction vs Diamond Implementation Analysis
 
 ### What's Correctly Implemented
 
@@ -42,11 +42,11 @@ where:
 
 The paper states "A sincere bidder prefers $x^s$ to $x^t$ when prices are $p^s$" and "prefers $x^t$ to $x^s$ when prices are $p^t$". Adding these inequalities yields the revealed preference constraint. The revealed preference activity rule eliminates "parking" strategies where bidders bid on underpriced items to maintain activity, prevents demand reduction and collusive strategies, and works for both substitutes and complements as described in Section 2.2 of the paper.
 
-**✅ IMPLEMENTED**: Activity rule enforcement in CPAManager. Bidders cannot increase demand when prices have increased.
+**✅ IMPLEMENTED**: Activity rule enforcement in `CPAClockPhase.sol` (called via `ClockBidFacet`). Bidders cannot increase demand when prices have increased.
 
 **Implementation Details:**
-- ✅ Activity rule validation in `processBid()` function (CPAClockPhase.sol lines 58-63)
-- ✅ Historical bid tracking via `bids[msg.sender]` mapping
+- ✅ Activity rule validation in `processBid()` function (CPAClockPhase.sol line 50 call site; `_validateActivityRule` helper at lines 309–313)
+- ✅ Historical bid tracking via `bids[bidder]` mapping
 - ✅ Price change tracking via `changedPrices[]` array
 - ✅ Cross-round constraint validation with `ActivityRuleViolation` error
 - ✅ Comprehensive test coverage in `test_ActivityRule_ViolationOnPriceIncrease()` and `test_ActivityRule_ValidDemandReduction()`
@@ -82,21 +82,16 @@ I don't think we will implement this in this version. The purpose is to increase
 
 Academic Requirement: Clock phase should end when "there is no excess demand on any item" OR when "revenue improvements are less than ½ percent for two consecutive rounds."
 
-**✅ IMPLEMENTED**: Automatic termination detection with three conditions implemented in `shouldEndClockPhase()`.
-
-Missing:
-- Automatic termination detection
-- Revenue improvement tracking
-- Early termination logic
+**✅ IMPLEMENTED**: Automatic termination detection with three conditions implemented in `shouldEndClockPhase()` (`CPAClockPhase.sol`), called from `ClockFinalizeRoundFacet.finalizeClockRound()`.
 
 ### Discussion
 
-This will be important to implement. There will be three conditions under which clock phase termination occurs:
+This has been implemented. Three conditions trigger clock phase termination:
 1. No excess demand on any item (natural rule)
 2. Max clock rounds exceeded (Rok-specific)
 3. Revenue improvement is less than 1/2 percent for two consecutive rounds
 
-The first two are easy. The last can be simplified using an Exponential Moving Average (EMA) approach that requires only 1 storage slot instead of 2.
+The third condition uses an Exponential Moving Average (EMA) approach requiring only 1 storage slot instead of 2.
 
 #### Proposition: Simplified Revenue Tracking Implementation
 
@@ -195,24 +190,24 @@ For now, we accept suboptimality by using final prices as a reasonable approxima
 
 Both approaches represent significant implementation complexity beyond the current scope, making the suboptimal final-price approach a pragmatic interim solution.
 
-## 7. Missing Undersell Handling
+## 7. ✅ IMPLEMENTED: Undersell Handling
 
 Academic Requirement: Handle cases where "demand is less than supply" (undersell) in clock phase.
 
-Current Implementation: No undersell detection or handling.
+**✅ IMPLEMENTED**: Signed excess demand tracking and automatic price reversion on clock phase end.
 
-Missing:
-- Undersell detection logic
-- Supply-demand balance checking
-- Undersell resolution mechanism
+**Implementation details:**
+- `AuctionTypes.PoolInfo.excessDemand` is `int256` (negative = undersell, zero = exact clearing, positive = oversell) — `src/types/AuctionTypes.sol`
+- `AuctionTypes.PoolInfo.lastOversoldTick` tracks the tick at each oversell round — `src/types/AuctionTypes.sol`
+- `processClockRound` in `CPAClockPhase.sol` uses `int256(totalDemands[i]) - int256(pool.depositAmount)` and updates `lastOversoldTick` when `excessDemand > 0`
+- `revertUndersoldPrices()` in `CPAClockPhase.sol` iterates pools and reverts any undersold pool's price to its `lastOversoldTick`
+- `_endClockPhase` in `CPABaseClock.sol` calls `CPAClockPhase.revertUndersoldPrices(...)` before transitioning to Proxy phase
 
 ### Discussion
 
-The academic paper requires undersell detection as a signal to transition from clock phase to proxy phase, not as a problem to solve within the clock phase. When undersell occurs (demand < supply), the auction should use the last valid prices that caused oversell (demand > supply) as the final prices for the proxy phase.
+When undersell occurs (demand < supply), the auction reverts each undersold pool's sqrtPrice to the last tick at which it was oversold, ensuring the Proxy phase operates at economically valid market-clearing prices rather than the over-raised prices that caused undersell. Items that were exactly cleared (excessDemand == 0) or still oversold are left at their current prices.
 
-The mechanism works as follows: during normal clock phase operation, track the last prices that caused oversell. At auction close, if the current prices caused undersell, revert to the stored last oversell prices and use these as fixed prices for the proxy phase. This ensures the proxy phase operates at economically sensible prices rather than the failed high prices that caused undersell.
-
-Implementation requires updating the `endClockRound` function to track the last oversell prices during normal operation and checking for undersell at auction close. This approach maintains the normal clock phase flow while cleanly handling the undersell case at the end, requiring minimal changes to the existing codebase while providing the economic benefits of proper undersell handling.
+See `docs/productAndIdeas/specs/gap-7-undersell-handling.md` for the original design rationale (note: the "Current State" and implementation checklist in that spec are now stale — all items are complete).
 
 ## 8. Missing Price Increment Strategy
 
@@ -359,7 +354,7 @@ External trading during Settlement compounds the non-uniformity arbitrarily: an 
 
 ### Affected code
 
-- `src/CPAHook.sol` line ~148: `allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement || state == AuctionTypes.AuctionPhase.Finished)`
+- `src/CPAHook.sol` line 170: `allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement || state == AuctionTypes.AuctionPhase.Finished)`
 - `src/libraries/CPAAllocationPhase.sol` lines ~376–389: `_calculateLiquidityParams` tick range calculation (part B, lower priority)
 
 ### Tests needed (Part A — fix external trading gate)
@@ -371,34 +366,38 @@ External trading during Settlement compounds the non-uniformity arbitrarily: an 
 
 ---
 
-## Summary of Missing Features
+## Summary of Missing / Open Items
 
-1. Activity Rules: Both strict (clock) and relaxed (proxy) revealed preference rules
-2. Intra-Round Bidding: Multi-point demand expression within rounds
-3. Automatic Termination: Revenue-based and excess demand-based termination
-4. Revenue Maximization: Optimal price selection from historical bids
-5. Undersell Handling: Supply-demand imbalance resolution
-6. Dynamic Pricing: Excess demand-based price increments
-7. Collusion Prevention: Anti-gaming and anti-collusion measures
-8. Multi-Round Proxy: Ascending proxy auction mechanics
-9. Cross-Phase Consistency: Bundle validation against clock bids (superseded by deposit mechanism)
-10. Live Bid Maintenance: Keeping all clock bids active in proxy phase (superseded by deposit mechanism)
-11. Stuck Auctioneer Deposit on Cancellation: no refund path for deposited items if auction is cancelled post-deposit
-12. Settlement Pool External Trading + Non-Uniform Claim Price: pool opens to external traders during Settlement; intra-tick price drift means later claimers pay slightly more
+✅ = implemented; no marker = not yet implemented
+
+1. Proxy Phase Activity Rule: relaxed revealed-preference rule (clock phase strict rule ✅ implemented)
+2. Intra-Round Bidding: multi-point demand expression within rounds
+3. Revenue Maximization: optimal price selection from historical bids
+4. Dynamic Pricing: excess demand-based price increments
+5. Collusion Prevention: anti-gaming and anti-collusion measures
+6. Multi-Round Proxy: ascending proxy auction mechanics
+7. Cross-Phase Consistency: bundle validation against clock bids (superseded by deposit mechanism)
+8. Live Bid Maintenance: keeping all clock bids active in proxy phase (superseded by deposit mechanism)
+9. Stuck Auctioneer Deposit on Cancellation: no refund path for deposited items if auction is cancelled post-deposit
+10. Settlement Pool External Trading: pool opens to external traders during Settlement; fix is to gate on Finished only (Part B: intra-tick price drift accepted as minor/bounded)
 
 ## Implementation Priority
 
 ### High Priority (Core Economic Mechanisms)
 1. ✅ COMPLETED: Revealed Preference Activity Rule
 2. ✅ COMPLETED: Clock Phase Termination Logic
-3. Revenue Maximization
-4. Undersell Handling
+3. ✅ COMPLETED: Undersell Handling
+4. Revenue Maximization
 
 ### Medium Priority (Enhanced Functionality)
 5. Intra-Round Bidding
 6. Dynamic Price Increments
 7. Proxy Phase Activity Rule
 
+### Engineering Correctness (Near-Term)
+8. Stuck Auctioneer Deposit on Cancellation (Gap #11)
+9. Settlement Pool External Trading Gate (Gap #12 Part A)
+
 ### Low Priority (Advanced Features)
-8. Collusion Prevention
-9. Multi-Round Proxy Phase
+10. Collusion Prevention
+11. Multi-Round Proxy Phase
