@@ -23,7 +23,7 @@ contract ClockEndRoundFacet is CPABase {
 	function processClockRoundStep(AuctionId auctionId)
 		external
 		nonReentrant
-		onlyAuctionOwner(auctionId)
+		onlyAuctionOwnerOrSelf(auctionId)
 		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
 	{
 		require(!roundPendingFinalize[auctionId], "Round already processed - finalize first");

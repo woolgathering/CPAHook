@@ -23,7 +23,7 @@ contract ClockFinalizeRoundFacet is CPABaseClock {
 	function finalizeClockRound(AuctionId auctionId)
 		external
 		nonReentrant
-		onlyAuctionOwner(auctionId)
+		onlyAuctionOwnerOrSelf(auctionId)
 		onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
 	{
 		require(roundPendingFinalize[auctionId], "No round pending finalization");

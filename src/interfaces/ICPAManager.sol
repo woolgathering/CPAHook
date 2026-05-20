@@ -32,10 +32,18 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     // ========================================
     // AUCTION CREATION AND SETUP
     // ========================================
-    
+
+    /**
+     * @notice Create a new auction in one call (permissionless — auctionOwner is a parameter).
+     */
+    function createAuction(
+        AuctionTypes.AuctionConfig memory config,
+        address auctionOwner
+    ) external returns (AuctionId);
+
     /**
      * @notice Initialize a new auction — registers pools and returns the auction ID.
-     * @dev Step 1 of 2 for auction creation. Must be followed by finalizeAuction.
+     * @dev Step 1 of 2 for auction creation. Use createAuction for the single-call version.
      */
     function initAuction(
         AuctionTypes.AuctionConfig memory config,
@@ -44,7 +52,7 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
 
     /**
      * @notice Finalize auction setup — writes AuctionInfo and activates CPAHook state.
-     * @dev Step 2 of 2 for auction creation. Call after initAuction.
+     * @dev Step 2 of 2 for auction creation. Use createAuction for the single-call version.
      */
     function finalizeAuction(
         AuctionId auctionId,
@@ -129,16 +137,19 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     function startClockPhase(AuctionId auctionId) external;
     
     /**
-     * @notice Process one step of the current clock round
-     * @dev Advances round computation; must be followed by finalizeClockRound
-     * @param auctionId The auction identifier
+     * @notice End the current clock round in one call (onlyAuctionOwner).
+     */
+    function endClockRound(AuctionId auctionId) external;
+
+    /**
+     * @notice Process one step of the current clock round.
+     * @dev Use endClockRound for the single-call version.
      */
     function processClockRoundStep(AuctionId auctionId) external;
 
     /**
-     * @notice Finalize the current clock round
-     * @dev Commits round results; updates prices and determines if clock phase continues
-     * @param auctionId The auction identifier
+     * @notice Finalize the current clock round.
+     * @dev Use endClockRound for the single-call version.
      */
     function finalizeClockRound(AuctionId auctionId) external;
 
@@ -277,23 +288,25 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     function transitionToAllocation(AuctionId auctionId) external;
     
     /**
-     * @notice Select the winning allocator bundle
-     * @dev Step 1 of 3 for settlement transition — permissionless
-     * @param auctionId The auction identifier
+     * @notice Transition from Allocation to Settlement phase in one call (permissionless).
+     */
+    function transitionToSettlement(AuctionId auctionId) external;
+
+    /**
+     * @notice Select the winning allocator bundle.
+     * @dev Step 1 of 3. Use transitionToSettlement for the single-call version.
      */
     function selectAuctionWinner(AuctionId auctionId) external;
 
     /**
-     * @notice Convert auction assets for settlement
-     * @dev Step 2 of 3 for settlement transition — permissionless
-     * @param auctionId The auction identifier
+     * @notice Convert auction assets for settlement.
+     * @dev Step 2 of 3. Use transitionToSettlement for the single-call version.
      */
     function convertAuctionAssets(AuctionId auctionId) external;
 
     /**
-     * @notice Mint settlement positions for winning bidders
-     * @dev Step 3 of 3 for settlement transition — permissionless
-     * @param auctionId The auction identifier
+     * @notice Mint settlement positions for winning bidders.
+     * @dev Step 3 of 3. Use transitionToSettlement for the single-call version.
      */
     function mintSettlementPositions(AuctionId auctionId) external;
 

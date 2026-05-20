@@ -37,6 +37,15 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 		_;
 	}
 
+	// Allows the diamond to call onlyAuctionOwner-gated sub-steps from an orchestrating function
+	// that has already verified the real caller is the auction owner.
+	modifier onlyAuctionOwnerOrSelf(AuctionId auctionId) {
+		if (auctionInfo[auctionId].auctionOwner == address(0)) revert AuctionNotFound();
+		if (auctionInfo[auctionId].auctionOwner != msg.sender && msg.sender != address(this))
+			revert Unauthorized();
+		_;
+	}
+
 	modifier onlyPoolManager() {
 		if (msg.sender != address(manager)) revert Unauthorized();
 		_;
