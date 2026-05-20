@@ -130,19 +130,21 @@ Rationale: Phases are sequential, non-overlapping, and map cleanly to responsibi
 - [x] Add `IDiamondCut` and `IDiamondLoupe` standard interfaces
 - [x] CPAManager shell < 10 KB; all 25 facets still under 24 KB
 
-### Phase D: Testing & Validation (COMPLETE — branch `claude/phase-d-test-updates`)
-- [x] Update `ICPAManager` interface: remove old names (`createAuction`, `endClockRound`, `transitionToSettlement`, `getBidderDemands`), add new facet function declarations
-- [x] Update `CPATestBase` helpers: `createAuction` (adds `finalizeAuction` call), `endClockRound`, `transitionToSettlement`, `getBidderDemands`
+### Phase D: Testing & Validation (COMPLETE — merged to `diamond_standard` via PR #4)
+- [x] Update `ICPAManager` interface: remove old monolith names, add new facet function declarations (`initAuction`, `finalizeAuction`, `processClockRoundStep`, `finalizeClockRound`, `selectAuctionWinner`, `convertAuctionAssets`, `mintSettlementPositions`)
+- [x] Update `CPATestBase` helpers: `createAuction`, `endClockRound`, `transitionToSettlement`, `getBidderDemands`
 - [x] Update 9 test files: replace 58 old-name calls with helpers (CPASetupPhase, CPAClockPhase, CPACompleteFlow, CPAFinishedPhase, CPAAllocationPhase, CPAPhaseTransition, CPASettlementPhase, CPAClockETH, CPAClock6Decimals)
 - [x] Fix storage layout mismatch: `CPAManager` inheritance reordered (`Ownable` before `CPAStorage`) so slots align with all facets
-- [x] All test cases pass (`forge test` green)
-- [x] Storage layout verified via `forge inspect` (slots 0/7/8/30 match between diamond and facets)
+- [x] Fix `getBidderDemands`: nested mapping auto-getter returns single element by index; added explicit getter directly to `CPAManager` (native, not routed through fallback) to keep all facets under EIP-170
+- [x] Add `AuctionFlowFacet` with single-call orchestrators: `createAuction`, `endClockRound`, `transitionToSettlement`; add `onlyAuctionOwnerOrSelf` modifier to `CPABase` to allow diamond self-calls for owner-gated sub-steps
+- [x] All 187 tests pass (`forge test` green); all facets under 24,576 bytes
 
-### Phase E: Integration & Deployment (Plan to be created)
-- [ ] Integrate with CPAHook
-- [ ] Set auctionManager in CPAHook
-- [ ] Deploy to testnet
-- [ ] Deploy to mainnet (or final network)
+### Phase E: Deployment (Plan to be created)
+- [x] ~~Integrate with CPAHook~~ — already complete as part of Phases C/D; `CPABase._updateCPAHookStates` calls `ICPAHook(cpaAuctionHookAddr).setPoolState(...)` and all tests pass with a live CPAHook
+- [ ] Write `script/DeployDiamond.s.sol` — production Foundry deployment script; the selector table currently lives only in `CPATestBase._registerProtocolFacets` and needs a production equivalent
+- [ ] Set `auctionManager` in CPAHook to the deployed diamond address (deployment-time step)
+- [ ] Deploy to testnet and verify
+- [ ] Deploy to mainnet (or final target network)
 
 ### Phase F: Documentation (Plan to be created)
 - [ ] Update README.md with new architecture
