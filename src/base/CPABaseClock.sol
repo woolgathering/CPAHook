@@ -52,7 +52,7 @@ abstract contract CPABaseClock is CPABase {
 			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo))
 				revert SetupNotComplete();
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
-			_updateCPAHookStates(auctionId);
+			_updateCpaHookStates(auctionId);
 			emit AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 		}
 		CPAClockPhase.openClockRound(auctionId, auctionInfo);

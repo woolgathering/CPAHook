@@ -40,7 +40,7 @@ contract CoreFacet is CPABase {
 
 		auction.currentStatus = AuctionTypes.AuctionStatus.Paused;
 		pauseStartTime[auctionId] = block.timestamp;
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionPaused(auctionId, msg.sender);
 	}
 
@@ -58,7 +58,7 @@ contract CoreFacet is CPABase {
 		auction.totalPauseDuration = newTotalPauseDuration;
 		pauseStartTime[auctionId] = 0;
 		auction.currentStatus = AuctionTypes.AuctionStatus.Active;
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionUnpaused(auctionId, msg.sender);
 	}
 
@@ -68,7 +68,7 @@ contract CoreFacet is CPABase {
 			revert CannotCancelInThisPhase(auctionId, phase);
 
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionCancelled(auctionId, msg.sender);
 	}
 
@@ -83,7 +83,7 @@ contract CoreFacet is CPABase {
 			revert PauseDurationNotExceeded(totalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
 
 		auction.currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionCancelled(auctionId, msg.sender);
 	}
 }
