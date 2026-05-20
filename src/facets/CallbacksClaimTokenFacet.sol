@@ -10,7 +10,6 @@ import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencyS
 
 import { CPABase } from "../base/CPABase.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
-import { AuctionId } from "../types/AuctionId.sol";
 
 contract CallbacksClaimTokenFacet is CPABase {
 	using CurrencySettler for Currency;

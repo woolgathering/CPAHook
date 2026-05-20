@@ -6,7 +6,6 @@ import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId } from "../types/BundleId.sol";
-import { AllocationId } from "../types/AllocationId.sol";
 
 /**
  * @title IClockProxyAuction

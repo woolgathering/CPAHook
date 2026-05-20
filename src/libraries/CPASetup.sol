@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import {BalanceDelta, toBalanceDelta, BalanceDeltaLibrary} from "v4-core/src/types/BalanceDelta.sol";
 
@@ -284,8 +283,12 @@ library CPASetup {
 		
 		// Determine which currency changed and set the appropriate delta
 		if (address(Currency.unwrap(poolKey.currency0)) == address(Currency.unwrap(itemCurrency))) {
+			// casting to 'uint128' and 'int128' is safe because depositAmount is bounded by ERC20 token supply, far below int128 max
+			// forge-lint: disable-next-line(unsafe-typecast)
 			amount0 = int128(uint128(depositAmount)); // Positive because CPAHook received claims
 		} else {
+			// casting to 'uint128' and 'int128' is safe because depositAmount is bounded by ERC20 token supply, far below int128 max
+			// forge-lint: disable-next-line(unsafe-typecast)
 			amount1 = int128(uint128(depositAmount)); // Positive because CPAHook received claims
 		}
 		

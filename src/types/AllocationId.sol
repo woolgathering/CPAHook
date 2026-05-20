@@ -16,6 +16,7 @@ function notEquals(AllocationId allocationId, AllocationId other) pure returns (
 library AllocationIdLibrary {
 
     function createId(address allocator, bytes32 bundleContentsHash) internal pure returns (AllocationId) {
+        // forge-lint: disable-next-line(asm-keccak256)
         bytes32 allocationId = keccak256(abi.encode(allocator, bundleContentsHash));
         return AllocationId.wrap(allocationId);
     }

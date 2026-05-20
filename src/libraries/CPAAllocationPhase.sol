@@ -3,17 +3,12 @@ pragma solidity ^0.8.24;
 
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Actions } from "@uniswap/v4-periphery/src/libraries/Actions.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
-import { Position } from "@uniswap/v4-core/src/libraries/Position.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { BalanceDelta } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import { ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
@@ -267,7 +262,7 @@ library CPAAllocationPhase {
 		// Step 2: Single batch callback to convert all ERC6909 to ERC20
 		bytes memory callbackData = abi.encode(
 			uint8(9), // operationType = 9 for batch ERC6909 to ERC20 conversion
-			abi.encode(AuctionTypes.CallbackDataBatchERC6909ToERC20({
+			abi.encode(AuctionTypes.CallbackDataBatchErc6909ToErc20({
 				assetCurrencies: assetCurrencies,
 				amounts: amounts
 			}))
@@ -305,7 +300,7 @@ library CPAAllocationPhase {
 
 		bytes memory callbackData = abi.encode(
 			uint8(9),
-			abi.encode(AuctionTypes.CallbackDataBatchERC6909ToERC20({
+			abi.encode(AuctionTypes.CallbackDataBatchErc6909ToErc20({
 				assetCurrencies: assetCurrencies,
 				amounts: amounts
 			}))
@@ -478,9 +473,13 @@ library CPAAllocationPhase {
 		if (address(Currency.unwrap(poolKey.currency0)) == commonNumeraire) {
 			// Asset is currency1, numeraire is currency0
 			amount0Max = 0; // No numeraire liquidity
+			// casting to 'uint128' is safe because depositAmount is an ERC20 token amount bounded by token supply, far below uint128 max
+			// forge-lint: disable-next-line(unsafe-typecast)
 			amount1Max = uint128(depositAmount); // Exact deposit amount
 		} else {
 			// Asset is currency0, numeraire is currency1
+			// casting to 'uint128' is safe because depositAmount is an ERC20 token amount bounded by token supply, far below uint128 max
+			// forge-lint: disable-next-line(unsafe-typecast)
 			amount0Max = uint128(depositAmount); // Exact deposit amount
 			amount1Max = 0; // No numeraire liquidity
 		}

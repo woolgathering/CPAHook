@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-
 import { CPABase } from "../base/CPABase.sol";
 import { CPASetup } from "../libraries/CPASetup.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";

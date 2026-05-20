@@ -169,7 +169,7 @@ library AuctionTypes {
 		address originalCaller;
 	}
 
-	struct CallbackDataBatchERC6909ToERC20 {
+	struct CallbackDataBatchErc6909ToErc20 {
 		Currency[] assetCurrencies;
 		uint256[] amounts;
 	}

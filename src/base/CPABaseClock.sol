@@ -22,6 +22,11 @@ abstract contract CPABaseClock is CPABase {
 	) CPABase(_poolManager, _owner, _cpaAuctionHookAddr, _positionManager, _protocolWallet, _mathFacet) {}
 
 	modifier onlyWhenPhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
+		_onlyWhenPhaseExpired(auctionId, phase);
+		_;
+	}
+
+	function _onlyWhenPhaseExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) internal view {
 		uint256[] memory durations = auctionInfo[auctionId].config.phaseDurations;
 		uint256 startTime;
 
@@ -40,7 +45,6 @@ abstract contract CPABaseClock is CPABase {
 		} else {
 			revert PhaseNotExpired(auctionId, phase);
 		}
-		_;
 	}
 
 	function _startClockRound(AuctionId auctionId) internal {
@@ -48,7 +52,7 @@ abstract contract CPABaseClock is CPABase {
 			if (!CPASetup.confirmSetupComplete(this, auctionId, auctionInfo[auctionId], poolInfo))
 				revert SetupNotComplete();
 			auctionInfo[auctionId].currentPhase = AuctionTypes.AuctionPhase.Clock;
-			_updateCPAHookStates(auctionId);
+			_updateCpaHookStates(auctionId);
 			emit AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 		}
 		CPAClockPhase.openClockRound(auctionId, auctionInfo);

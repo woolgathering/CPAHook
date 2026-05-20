@@ -32,53 +32,89 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 	// ========================================
 
 	modifier onlyAuctionOwner(AuctionId auctionId) {
-		if (auctionInfo[auctionId].auctionOwner == address(0)) revert AuctionNotFound();
-		if (auctionInfo[auctionId].auctionOwner != msg.sender) revert Unauthorized();
+		_onlyAuctionOwner(auctionId);
 		_;
 	}
 
 	// Allows the diamond to call onlyAuctionOwner-gated sub-steps from an orchestrating function
 	// that has already verified the real caller is the auction owner.
 	modifier onlyAuctionOwnerOrSelf(AuctionId auctionId) {
-		if (auctionInfo[auctionId].auctionOwner == address(0)) revert AuctionNotFound();
-		if (auctionInfo[auctionId].auctionOwner != msg.sender && msg.sender != address(this))
-			revert Unauthorized();
+		_onlyAuctionOwnerOrSelf(auctionId);
 		_;
 	}
 
 	modifier onlyPoolManager() {
-		if (msg.sender != address(manager)) revert Unauthorized();
+		_onlyPoolManager();
 		_;
 	}
 
 	modifier whenAuctionActive(AuctionId auctionId) {
-		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Active)
-			revert AuctionNotActive(auctionId, auctionInfo[auctionId].currentStatus);
+		_whenAuctionActive(auctionId);
 		_;
 	}
 
 	modifier whenAuctionCancelled(AuctionId auctionId) {
-		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Cancelled)
-			revert AuctionNotCancelled(auctionId);
+		_whenAuctionCancelled(auctionId);
 		_;
 	}
 
 	modifier onlyPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
-		if (auctionInfo[auctionId].currentPhase != phase)
-			revert InvalidPhase(phase, auctionInfo[auctionId].currentPhase);
+		_onlyPhase(auctionId, phase);
 		_;
 	}
 
 	modifier onlyWhenPhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) {
-		if (_hasPhaseExpired(auctionId, phase)) revert PhaseExpired(auctionId, phase);
+		_onlyWhenPhaseNotExpired(auctionId, phase);
 		_;
 	}
 
 	modifier validateEthForNumeraire(AuctionId auctionId) {
+		_validateEthForNumeraire(auctionId);
+		_;
+	}
+
+	// ========================================
+	// MODIFIER IMPLEMENTATION FUNCTIONS
+	// ========================================
+
+	function _onlyAuctionOwner(AuctionId auctionId) internal view {
+		if (auctionInfo[auctionId].auctionOwner == address(0)) revert AuctionNotFound();
+		if (auctionInfo[auctionId].auctionOwner != msg.sender) revert Unauthorized();
+	}
+
+	function _onlyAuctionOwnerOrSelf(AuctionId auctionId) internal view {
+		if (auctionInfo[auctionId].auctionOwner == address(0)) revert AuctionNotFound();
+		if (auctionInfo[auctionId].auctionOwner != msg.sender && msg.sender != address(this))
+			revert Unauthorized();
+	}
+
+	function _onlyPoolManager() internal view {
+		if (msg.sender != address(manager)) revert Unauthorized();
+	}
+
+	function _whenAuctionActive(AuctionId auctionId) internal view {
+		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Active)
+			revert AuctionNotActive(auctionId, auctionInfo[auctionId].currentStatus);
+	}
+
+	function _whenAuctionCancelled(AuctionId auctionId) internal view {
+		if (auctionInfo[auctionId].currentStatus != AuctionTypes.AuctionStatus.Cancelled)
+			revert AuctionNotCancelled(auctionId);
+	}
+
+	function _onlyPhase(AuctionId auctionId, AuctionTypes.AuctionPhase phase) internal view {
+		if (auctionInfo[auctionId].currentPhase != phase)
+			revert InvalidPhase(phase, auctionInfo[auctionId].currentPhase);
+	}
+
+	function _onlyWhenPhaseNotExpired(AuctionId auctionId, AuctionTypes.AuctionPhase phase) internal view {
+		if (_hasPhaseExpired(auctionId, phase)) revert PhaseExpired(auctionId, phase);
+	}
+
+	function _validateEthForNumeraire(AuctionId auctionId) internal view {
 		address numeraire = auctionInfo[auctionId].commonNumeraire;
 		if (numeraire == address(0) && msg.value == 0) revert EthRequired();
 		if (numeraire != address(0) && msg.value > 0) revert EthNotAllowed();
-		_;
 	}
 
 	// ========================================
@@ -96,7 +132,7 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 			settlementPhaseStartTime[auctionId] = block.timestamp;
 		}
 
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionPhaseChanged(auctionId, newPhase);
 	}
 
@@ -124,7 +160,7 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 		return false;
 	}
 
-	function _updateCPAHookStates(AuctionId auctionId) internal {
+	function _updateCpaHookStates(AuctionId auctionId) internal {
 		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
 		for (uint256 i = 0; i < poolKeys.length; i++) {
 			ICPAHook(cpaAuctionHookAddr).setPoolState(poolKeys[i], auctionInfo[auctionId].currentPhase);
@@ -133,7 +169,7 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 
 	function _cancelAuction(AuctionId auctionId) internal {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 		emit AuctionCancelled(auctionId, msg.sender);
 	}
 }

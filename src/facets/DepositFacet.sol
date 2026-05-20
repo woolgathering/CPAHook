@@ -27,7 +27,7 @@ contract DepositFacet is CPABase {
 		uint256 depositAmount
 	) external nonReentrant onlyAuctionOwner(auctionId) {
 		CPASetup.moveDeposit(this, auctionInfo[auctionId], poolInfo, poolKey, auctionId, depositAmount);
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 	}
 
 	function depositAllAndStartClock(
@@ -36,6 +36,6 @@ contract DepositFacet is CPABase {
 		uint256[] memory amounts
 	) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
 		CPASetup.depositAllAndStartClock(this, auctionInfo[auctionId], poolInfo, poolKeys, amounts, auctionId);
-		_updateCPAHookStates(auctionId);
+		_updateCpaHookStates(auctionId);
 	}
 }

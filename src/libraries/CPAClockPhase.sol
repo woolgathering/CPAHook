@@ -5,14 +5,11 @@ import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import { IMathFacet } from "../interfaces/IMathFacet.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
-import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
-import { CommitReveal } from "../utils/CommitReveal.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { PriceUtils } from "../utils/PriceUtils.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
@@ -77,6 +74,8 @@ library CPAClockPhase {
                 auctionInfo.allocatorReward += allocatorRewardAmount;
 
                 // Transfer the required stake amount from bidder to auction contract via pool manager
+                // casting to 'int128' and 'int256' is safe because numeraire stake amounts are bounded by token supply, far below int128 max
+                // forge-lint: disable-next-line(unsafe-typecast)
                 AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
                     sender: bidder,
                     numeraire: auctionInfo.commonNumeraire,
@@ -273,9 +272,9 @@ library CPAClockPhase {
 		uint256 revenue = IMathFacet(mathFacetAddr).calculateBidValueFromPools(
 			totalDemands, auctionInfo.commonNumeraire, address(poolManager), poolIds, currency0s, currency1s
 		);
-		uint256 R_t = _computeEMA(revenue, auctionInfo.lastRevenue, alpha);
+		uint256 rT = _computeEma(revenue, auctionInfo.lastRevenue, alpha);
 		// if (R_t < revenue * 0.005) {
-		if ((R_t * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
+		if ((rT * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
 			return true;
 		} else {
 			auctionInfo.lastRevenue = revenue;
@@ -287,17 +286,17 @@ library CPAClockPhase {
 
 	/**
 	 * @notice Compute EMA
-	 * @param r_t The current revenue
-	 * @param R_t_1 The previous revenue
+	 * @param rT The current revenue
+	 * @param rT1 The previous revenue
 	 * @param alpha The alpha value
 	 * @return The EMA value
 	 */
-	function _computeEMA(
-		uint256 r_t,
-		uint256 R_t_1,
+	function _computeEma(
+		uint256 rT,
+		uint256 rT1,
 		uint256 alpha
 	) internal pure returns (uint256) {
-		return (alpha * r_t + (1e18 - alpha) * R_t_1) / 1e18;
+		return (alpha * rT + (1e18 - alpha) * rT1) / 1e18;
 	}
 
 	// Helper: validate activity rule based on changedPrices and previous demands
