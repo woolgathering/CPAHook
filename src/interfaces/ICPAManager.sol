@@ -32,13 +32,9 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     // ========================================
     // AUCTION CREATION AND SETUP
     // ========================================
-    
+
     /**
-     * @notice Create a new auction with the specified configuration
-     * @dev Creates a new auction and returns its unique identifier
-     * @param config The auction configuration including pool keys, initial prices, and price increments
-     * @param auctionOwner The address that will own and control this auction
-     * @return The unique auction identifier
+     * @notice Create a new auction in one call (permissionless — auctionOwner is a parameter).
      */
     function createAuction(
         AuctionTypes.AuctionConfig memory config,
@@ -46,9 +42,20 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     ) external returns (AuctionId);
 
     /**
-     * @notice Initialize a new auction (new name for createAuction in SetupFacet)
+     * @notice Initialize a new auction — registers pools and returns the auction ID.
+     * @dev Step 1 of 2 for auction creation. Use createAuction for the single-call version.
      */
     function initAuction(
+        AuctionTypes.AuctionConfig memory config,
+        address auctionOwner
+    ) external returns (AuctionId);
+
+    /**
+     * @notice Finalize auction setup — writes AuctionInfo and activates CPAHook state.
+     * @dev Step 2 of 2 for auction creation. Use createAuction for the single-call version.
+     */
+    function finalizeAuction(
+        AuctionId auctionId,
         AuctionTypes.AuctionConfig memory config,
         address auctionOwner
     ) external returns (AuctionId);
@@ -130,12 +137,22 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     function startClockPhase(AuctionId auctionId) external;
     
     /**
-     * @notice End the current clock round
-     * @dev Processes round results, updates prices, and determines if clock phase should continue
-     * @param auctionId The auction identifier
+     * @notice End the current clock round in one call (onlyAuctionOwner).
      */
     function endClockRound(AuctionId auctionId) external;
-    
+
+    /**
+     * @notice Process one step of the current clock round.
+     * @dev Use endClockRound for the single-call version.
+     */
+    function processClockRoundStep(AuctionId auctionId) external;
+
+    /**
+     * @notice Finalize the current clock round.
+     * @dev Use endClockRound for the single-call version.
+     */
+    function finalizeClockRound(AuctionId auctionId) external;
+
     /**
      * @notice End the clock phase and transition to proxy phase
      * @dev Manually ends the clock phase and moves to proxy phase
@@ -271,12 +288,28 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     function transitionToAllocation(AuctionId auctionId) external;
     
     /**
-     * @notice Transition from Allocation to Settlement phase (callable by anyone)
-     * @dev Permissionless transition when allocation phase expires
-     * @param auctionId The auction identifier
+     * @notice Transition from Allocation to Settlement phase in one call (permissionless).
      */
     function transitionToSettlement(AuctionId auctionId) external;
-    
+
+    /**
+     * @notice Select the winning allocator bundle.
+     * @dev Step 1 of 3. Use transitionToSettlement for the single-call version.
+     */
+    function selectAuctionWinner(AuctionId auctionId) external;
+
+    /**
+     * @notice Convert auction assets for settlement.
+     * @dev Step 2 of 3. Use transitionToSettlement for the single-call version.
+     */
+    function convertAuctionAssets(AuctionId auctionId) external;
+
+    /**
+     * @notice Mint settlement positions for winning bidders.
+     * @dev Step 3 of 3. Use transitionToSettlement for the single-call version.
+     */
+    function mintSettlementPositions(AuctionId auctionId) external;
+
     /**
      * @notice Transition from Settlement to Finished phase (callable by anyone)
      * @dev Permissionless transition when settlement phase expires
@@ -316,15 +349,6 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory);
     
     /**
-     * @notice Get bidder demands for a specific auction and bidder
-     * @dev Returns the demand array submitted by a specific bidder
-     * @param auctionId The auction identifier
-     * @param bidder The bidder address
-     * @return Array of demand quantities for each asset
-     */
-    function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory);
-
-    /**
      * @notice Get top allocation for an auction
      * @dev Returns the winning allocation and its score
      * @param auctionId The auction identifier
@@ -360,6 +384,7 @@ interface ICPAManager is IDiamondCut, IDiamondLoupe {
     // STORAGE GETTERS (auto-generated from CPAStorage public mappings)
     // ========================================
 
+    function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory);
     function poolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, uint256);
     function poolToAuctionId(PoolId poolId) external view returns (AuctionId);
     function bidderBidPoints(AuctionId auctionId, address bidder) external view returns (uint256);

@@ -232,7 +232,7 @@ contract CPAFinishedPhaseTest is CPATestBase {
         vm.warp(block.timestamp + phaseDurations[1]);
 
         // Transition to settlement phase (permissionless)
-        cpaManager.transitionToSettlement(auctionId);
+        transitionToSettlement(auctionId);
     }
 
     function setupSettlementPhase() internal {
@@ -796,9 +796,9 @@ contract CPAFinishedPhaseTest is CPATestBase {
 
     function test_GetBidderDemandsInFinishedPhase() public {
         // Get demands for all bidders in Finished phase
-        uint256[] memory demands1 = cpaManager.getBidderDemands(auctionId, bidder1);
-        uint256[] memory demands2 = cpaManager.getBidderDemands(auctionId, bidder2);
-        uint256[] memory demands3 = cpaManager.getBidderDemands(auctionId, bidder3);
+        uint256[] memory demands1 = getBidderDemands(auctionId, bidder1);
+        uint256[] memory demands2 = getBidderDemands(auctionId, bidder2);
+        uint256[] memory demands3 = getBidderDemands(auctionId, bidder3);
         
         // Verify correct demands from Clock phase
         assertEq(demands1.length, 2, "Bidder1 should have 2 demands");

@@ -134,12 +134,15 @@ contract CPAPhaseTransitionTest is CPATestBase {
         setupProxyPhase();
         setupAllocationPhaseWithoutTransition();
 
+        // Settlement transition is a 3-step process; phase change happens in mintSettlementPositions
+        cpaManager.selectAuctionWinner(auctionId);
+        cpaManager.convertAuctionAssets(auctionId);
+
         // Set up event expectation for Allocation -> Settlement transition
         vm.expectEmit(true, true, true, true);
         emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Settlement);
 
-        // Transition to settlement phase
-        cpaManager.transitionToSettlement(auctionId);
+        cpaManager.mintSettlementPositions(auctionId);
     }
 
     function test_TransitionToFinishedEmitsAuctionPhaseChanged() public {
@@ -350,7 +353,7 @@ contract CPAPhaseTransitionTest is CPATestBase {
         vm.warp(block.timestamp + phaseDurations[1]);
 
         // Transition to settlement phase (permissionless)
-        cpaManager.transitionToSettlement(auctionId);
+        transitionToSettlement(auctionId);
     }
 
     function setupAllocationPhaseWithoutTransition() internal {

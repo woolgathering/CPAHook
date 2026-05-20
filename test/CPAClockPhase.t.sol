@@ -157,8 +157,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // End first round - this should automatically start the second round (due to excess demand)
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Verify second round started automatically
         AuctionTypes.AuctionInfo memory auctionInfo2 = cpaManager.getAuctionInfo(auctionId);
@@ -183,8 +182,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // End second round - this should automatically start the third round
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Verify third round started automatically
         AuctionTypes.AuctionInfo memory auctionInfo3 = cpaManager.getAuctionInfo(auctionId);
@@ -236,7 +234,7 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.submitBid(auctionId, zeroDemands, type(uint256).max);
         
         // Verify the zero bid was accepted using mapping-based storage
-        uint256[] memory zeroDemandsCheck = cpaManager.getBidderDemands(auctionId, testBidder);
+        uint256[] memory zeroDemandsCheck = getBidderDemands(auctionId, testBidder);
         assertEq(zeroDemandsCheck.length, 2, "Should have 2 demand quantities");
         assertEq(zeroDemandsCheck[0], 0, "First asset demand should be 0");
         assertEq(zeroDemandsCheck[1], 0, "Second asset demand should be 0");
@@ -272,7 +270,7 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.submitBid(auctionId, largeDemands, type(uint256).max);
         
         // Verify the large bid was accepted using mapping-based storage
-        uint256[] memory largeDemandsCheck = cpaManager.getBidderDemands(auctionId, testBidder);
+        uint256[] memory largeDemandsCheck = getBidderDemands(auctionId, testBidder);
         assertEq(largeDemandsCheck.length, 2, "Should have 2 demand quantities");
         assertEq(largeDemandsCheck[0], 1000000 * 10**18, "First asset demand should be 1000000");
         assertEq(largeDemandsCheck[1], 500000 * 10**18, "Second asset demand should be 500000");
@@ -357,8 +355,8 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands2, maxStake2);
         
         // Verify both bids were accepted using mapping-based storage
-        uint256[] memory bidder1DemandsFinal = cpaManager.getBidderDemands(auctionId, bidder1);
-        uint256[] memory bidder2DemandsFinal = cpaManager.getBidderDemands(auctionId, bidder2);
+        uint256[] memory bidder1DemandsFinal = getBidderDemands(auctionId, bidder1);
+        uint256[] memory bidder2DemandsFinal = getBidderDemands(auctionId, bidder2);
         assertEq(bidder1DemandsFinal.length, 2, "Bidder1 should have 2 demand quantities");
         assertEq(bidder2DemandsFinal.length, 2, "Bidder2 should have 2 demand quantities");
         assertEq(bidder1DemandsFinal[0], 100 * 10**18, "Bidder1 first asset demand should be 100");
@@ -496,8 +494,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // End round to trigger price increase (excess demand on asset1)
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // New round should start automatically
 
@@ -546,8 +543,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // End round to trigger price increase (excess demand on asset1)
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // New round should start automatically
 
@@ -561,7 +557,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // Verify the reduced demands were accepted
-        uint256[] memory storedDemands = cpaManager.getBidderDemands(auctionId, testBidder1);
+        uint256[] memory storedDemands = getBidderDemands(auctionId, testBidder1);
         assertEq(storedDemands[0], 40 * 10**asset1Token.decimals(), "Demand should be reduced to 40");
         assertEq(storedDemands[1], 25 * 10**asset2Token.decimals(), "Demand should be reduced to 25");
     }
@@ -601,8 +597,7 @@ contract CPAClockPhaseTest is CPATestBase {
         vm.stopPrank();
 
         // End round - should automatically end clock phase due to no excess demand
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Verify clock phase ended and transitioned to proxy phase
         AuctionTypes.AuctionInfo memory auctionInfoAfterEnd = cpaManager.getAuctionInfo(auctionId);
@@ -684,8 +679,7 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands2_1, 1000 * 10**18);
         
         // End round 1
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Check that asset1 was oversold and price increased, asset2 stayed same
         (, int24 asset1Tick1, , ) = poolManager.getSlot0(poolKeys[0].toId());
@@ -722,8 +716,7 @@ contract CPAClockPhaseTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands2_2, 1000 * 10**18);
         
         // End round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Verify pool info after round 2
         (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, uint256 asset1PositionId2) = cpaManager.getPoolInfo(poolKeys[0].toId());
@@ -969,8 +962,7 @@ contract CPAClockPhaseTest is CPATestBase {
         assertTrue(activeBidder3After == bidder2 || activeBidder3After == bidder3, "Bidder2 or bidder3 should be active at index 2");
 
         // End round 1, start round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Bidder2 and bidder3 submit new bids in round 2
         // Must respect activity rule: if price increased, new demand <= previous demand
@@ -1204,8 +1196,7 @@ contract CPAClockPhaseTest is CPATestBase {
         assertEq(stake1, requiredStake1, "Bidder should have stake equal to required stake after first bid");
 
         // End round 1, start round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Submit second bid with same demands (to respect activity rule after price increase)
         uint256[] memory demands2 = new uint256[](2);
@@ -1358,8 +1349,7 @@ contract CPAClockPhaseTest is CPATestBase {
         assertGt(initialStake, 0, "Bidder should have initial stake");
 
         // End round 1, start round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Submit second bid with same demands (to respect activity rule after price increase)
         uint256[] memory demands2 = new uint256[](2);
@@ -1417,8 +1407,7 @@ contract CPAClockPhaseTest is CPATestBase {
         assertGt(initialStake, 0, "Bidder should have initial stake");
 
         // End round 1, start round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
 
         // Submit second bid with lower demands (stake should NOT decrease)
         uint256[] memory demands2 = new uint256[](2);

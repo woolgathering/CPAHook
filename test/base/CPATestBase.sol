@@ -41,6 +41,7 @@ import { SettlementMintFacet } from "../../src/facets/SettlementMintFacet.sol";
 import { SettlementClaimFacet } from "../../src/facets/SettlementPhaseFacet.sol";
 import { SettlementMiscFacet } from "../../src/facets/SettlementMiscFacet.sol";
 import { FinishedPhaseFacet } from "../../src/facets/FinishedPhaseFacet.sol";
+import { AuctionFlowFacet } from "../../src/facets/AuctionFlowFacet.sol";
 import { CallbackRouterFacet } from "../../src/facets/CallbackRouterFacet.sol";
 import { CallbacksClockFacet } from "../../src/facets/CallbacksFacet.sol";
 import { CallbacksDepositFacet } from "../../src/facets/CallbacksDepositFacet.sol";
@@ -180,7 +181,7 @@ abstract contract CPATestBase is Deployers {
     }
 
     function _registerProtocolFacets(CPAManager diamond, address[6] memory a) internal {
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](20);
+        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](21);
         cuts[0]  = _cut(address(new CoreFacet(IPoolManager(a[0]), a[1], a[2], IPositionManager(a[3]), a[4], a[5])),
                         _sel5(0x80dbeb9a, 0xed56531a, 0x2f4dae9f, 0x3ef4d130, 0xb062d33d));
         cuts[1]  = _cut(address(new SetupFacet(IPoolManager(a[0]), a[1], a[2], IPositionManager(a[3]), a[4], a[5])),
@@ -221,6 +222,8 @@ abstract contract CPATestBase is Deployers {
                         _sel2(0x6dab7661, 0xded97a8d));
         cuts[19] = _cut(address(new CallbackRouterFacet(IPoolManager(a[0]), a[1], a[2], IPositionManager(a[3]), a[4], a[5])),
                         _sel1(0x91dd7346));
+        cuts[20] = _cut(address(new AuctionFlowFacet(IPoolManager(a[0]), a[1], a[2], IPositionManager(a[3]), a[4], a[5])),
+                        _sel3(0x6c8c9d4c, 0x047d82d1, 0x1555221e));
         diamond.diamondCut(cuts, address(0), "");
     }
 
@@ -310,13 +313,28 @@ abstract contract CPATestBase is Deployers {
         return deployedHook;
     }
 
-    /// @notice Create a new auction with the given configuration
+    /// @notice Create a new auction with the given configuration (permissionless)
     function createAuction(
         AuctionTypes.AuctionConfig memory config,
         address owner
     ) internal returns (AuctionId) {
-        vm.prank(owner);
-        return cpaManager.initAuction(config, owner);
+        return cpaManager.createAuction(config, owner);
+    }
+
+    /// @notice End the current clock round (onlyAuctionOwner — pranks as auctioneer)
+    function endClockRound(AuctionId _auctionId) internal {
+        vm.prank(auctioneer);
+        cpaManager.endClockRound(_auctionId);
+    }
+
+    /// @notice Transition from Allocation to Settlement phase (permissionless)
+    function transitionToSettlement(AuctionId _auctionId) internal {
+        cpaManager.transitionToSettlement(_auctionId);
+    }
+
+    /// @notice Get bidder demands for a given auction and bidder address
+    function getBidderDemands(AuctionId _auctionId, address _bidder) internal view returns (uint256[] memory) {
+        return cpaManager.getBidderDemands(_auctionId, _bidder);
     }
 
     /// @notice Create a new auction configuration with different pool keys for testing

@@ -45,8 +45,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		AuctionTypes.AuctionConfig memory config = createStandardAuctionConfig();
 
 		// Create auction using CPATestBase's protocolOwner
-		vm.prank(protocolOwner);
-		AuctionId auctionId = cpaManager.createAuction(config, protocolOwner);
+		AuctionId auctionId = createAuction(config, protocolOwner);
 
 		// Verify auction was created
 		assertTrue(AuctionId.unwrap(auctionId) != 0);
@@ -163,8 +162,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		AuctionTypes.AuctionConfig memory config = createStandardAuctionConfig();
 	
 		// Create auction (auctioneer creates it, not protocol owner)
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(config, auctioneer);
+		AuctionId auctionId = createAuction(config, auctioneer);
 	
 		// Verify auction was created
 		assertTrue(AuctionId.unwrap(auctionId) != 0);
@@ -285,8 +283,7 @@ contract CPASetupPhaseTest is CPATestBase {
 		AuctionTypes.AuctionConfig memory config = createStandardAuctionConfig();
 	
 		// Create auction (auctioneer creates it)
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(config, auctioneer);
+		AuctionId auctionId = createAuction(config, auctioneer);
 	
 		// Verify auction was created
 		assertTrue(AuctionId.unwrap(auctionId) != 0);
@@ -376,8 +373,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_StartClockPhase_Success() public {
 		// Create auction and deposit to all pools
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens to auctioneer
 		uint256 tokenAmount = 100000 * 10**18;
@@ -417,8 +413,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_StartClockPhase_RevertNonOwner() public {
 		// Create auction and deposit to all pools as auctioneer
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens and deposit
 		uint256 tokenAmount = 100000 * 10**18;
@@ -443,8 +438,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_StartClockPhase_RevertWrongPhase() public {
 		// Create auction, deposit, and start clock phase
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens and deposit
 		uint256 tokenAmount = 100000 * 10**18;
@@ -477,8 +471,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_StartClockPhase_RevertSetupNotComplete() public {
 		// Create auction
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Deposit to only first pool, leave second pool at zero
 		uint256 tokenAmount = 100000 * 10**18;
@@ -505,8 +498,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_MoveDeposit_RevertNonOwner() public {
 		// Create auction as auctioneer
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens to bidder1 and approve CPAManager
 		uint256 tokenAmount = 100000 * 10**18;
@@ -522,8 +514,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_MoveDeposit_RevertWrongPhase() public {
 		// Create auction and deposit to all pools
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens and deposit
 		uint256 tokenAmount = 100000 * 10**18;
@@ -552,8 +543,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_MoveDeposit_RevertInsufficientBalance() public {
 		// Create auction
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint only 1000 tokens to auctioneer
 		uint256 smallAmount = 1000 * 10**18;
@@ -572,8 +562,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_MoveDeposit_RevertInsufficientApproval() public {
 		// Create auction
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint large amount to auctioneer
 		uint256 tokenAmount = 100000 * 10**18;
@@ -595,8 +584,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_DepositAllAndStartClock_Success() public {
 		// Create auction
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens to auctioneer
 		uint256 tokenAmount = 100000 * 10**18;
@@ -649,8 +637,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_CancelAuction_SuccessInSetup() public {
 		// Create auction (stays in Setup phase)
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Verify initial state
 		AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
@@ -674,8 +661,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_CancelAuction_SuccessWithDeposits() public {
 		// Create auction
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Mint tokens and deposit to all pools
 		uint256 tokenAmount = 100000 * 10**18;
@@ -720,8 +706,7 @@ contract CPASetupPhaseTest is CPATestBase {
 
 	function test_CancelAuction_RevertNonOwner() public {
 		// Create auction as auctioneer
-		vm.prank(auctioneer);
-		AuctionId auctionId = cpaManager.createAuction(createStandardAuctionConfig(), auctioneer);
+		AuctionId auctionId = createAuction(createStandardAuctionConfig(), auctioneer);
 		
 		// Attempt to cancel as bidder1 (non-owner)
 		vm.expectRevert();

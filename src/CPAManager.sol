@@ -11,6 +11,7 @@ import { LibDiamond } from "./libraries/LibDiamond.sol";
 import { IDiamondCut } from "./interfaces/IDiamondCut.sol";
 import { IDiamondLoupe } from "./interfaces/IDiamondLoupe.sol";
 import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
+import { AuctionId } from "./types/AuctionId.sol";
 
 /**
  * @title CPAManager
@@ -18,7 +19,7 @@ import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
  *         This contract holds all shared storage (via CPAStorage), routes calls to facets via
  *         delegatecall, and exposes the standard DiamondCut / DiamondLoupe interfaces.
  */
-contract CPAManager is CPAStorage, Ownable, ReentrancyGuard, IDiamondCut, IDiamondLoupe, IErrorsAndEvents {
+contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamondLoupe, IErrorsAndEvents {
 
     // ========================================
     // CONSTRUCTOR
@@ -140,6 +141,16 @@ contract CPAManager is CPAStorage, Ownable, ReentrancyGuard, IDiamondCut, IDiamo
         external view override returns (address)
     {
         return LibDiamond.getFacet(_functionSelector);
+    }
+
+    // ========================================
+    // Native view helpers (not routed through fallback)
+    // ========================================
+
+    // Nested-mapping auto-getter bids(bytes32,address,uint256) returns a single element;
+    // this explicit getter returns the full demand array without adding to any facet's bytecode.
+    function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory) {
+        return bids[auctionId][bidder];
     }
 
     // ========================================
