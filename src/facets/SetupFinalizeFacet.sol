@@ -27,7 +27,7 @@ contract SetupFinalizeFacet is CPABase {
 		require(poolsRegistered[auctionId], "Pools not registered");
 		poolsRegistered[auctionId] = false;
 		CPASetup.finalizeAuctionCreation(config, auctionId, auctionOwner, auctionInfo);
-		_updateCpaHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		return auctionId;
 	}
 }

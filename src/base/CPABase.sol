@@ -132,7 +132,7 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 			settlementPhaseStartTime[auctionId] = block.timestamp;
 		}
 
-		_updateCpaHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		emit AuctionPhaseChanged(auctionId, newPhase);
 	}
 
@@ -160,7 +160,8 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 		return false;
 	}
 
-	function _updateCpaHookStates(AuctionId auctionId) internal {
+	// forge-lint: disable-next-line(mixed-case-function)
+	function _updateCPAHookStates(AuctionId auctionId) internal {
 		PoolKey[] memory poolKeys = auctionInfo[auctionId].poolKeys;
 		for (uint256 i = 0; i < poolKeys.length; i++) {
 			ICPAHook(cpaAuctionHookAddr).setPoolState(poolKeys[i], auctionInfo[auctionId].currentPhase);
@@ -169,7 +170,7 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
 
 	function _cancelAuction(AuctionId auctionId) internal {
 		auctionInfo[auctionId].currentStatus = AuctionTypes.AuctionStatus.Cancelled;
-		_updateCpaHookStates(auctionId);
+		_updateCPAHookStates(auctionId);
 		emit AuctionCancelled(auctionId, msg.sender);
 	}
 }
