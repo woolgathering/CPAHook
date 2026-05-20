@@ -57,7 +57,7 @@ abstract contract CPABaseClock is CPABase {
             CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
             emit ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
         }
-        CPAClockPhase.revertUndersoldPrices(auctionInfo[auctionId], assetInfo);
+        CPAClockPhase.revertUndersoldPrices(auctionId, auctionInfo[auctionId], assetInfo);
         _changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
     }
 

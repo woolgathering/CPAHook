@@ -1,30 +1,22 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
-import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencySettler.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
+import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
+import { AssetConfig, AssetId, AssetIdLibrary } from "../types/AssetConfig.sol";
 import { BundleId } from "../types/BundleId.sol";
 
 library CPASettlementPhase {
-    using StateLibrary for IPoolManager;
-    using SafeCast for *;
-    using CurrencySettler for Currency;
+    using SafeERC20 for IERC20;
 
     function reveal(
-        CPAStorage self,
         AuctionId auctionId,
         address bidder,
         address proxy,
@@ -35,174 +27,145 @@ library CPASettlementPhase {
     ) internal {
         bytes32 computedCommitHash = CommitReveal.generateCommitHash(bidder, proxy, saltA, saltB);
 
-        // now check if there exists a commit hash for this auction in the commit proxy mapping
-        if (commitProxy[auctionId][computedCommitHash] == address(0)) revert IErrorsAndEvents.NoSuchCommitHash(auctionId, computedCommitHash);
+        if (commitProxy[auctionId][computedCommitHash] == address(0))
+            revert IErrorsAndEvents.NoSuchCommitHash(auctionId, computedCommitHash);
+        if (revealedMappings[auctionId][computedCommitHash] != address(0))
+            revert IErrorsAndEvents.DuplicateReveal(auctionId, computedCommitHash);
 
-        // now check if the commit hash has already been revealed
-        if (revealedMappings[auctionId][computedCommitHash] != address(0)) revert IErrorsAndEvents.DuplicateReveal(auctionId, computedCommitHash);
-
-        // now set the revealed mapping
         revealedMappings[auctionId][computedCommitHash] = bidder;
 
         emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
     }
 
+    /**
+     * @notice Claim all allocated tokens for a bidder.
+     *
+     *  Flow:
+     *   1. Validate reveal and allocation
+     *   2. Non-winner: full stake refund
+     *   3. Winner:
+     *      a. Compute totalCost = sum(quantity[i] * clearingPrice[i] / 10^assetDecimals[i])
+     *      b. Compute protocolFee = totalCost * protocolFeeBps / 10000
+     *      c. Spending violation: if totalCost < minSpendRatio * stake, add shortfall to protocolAccrued
+     *      d. If totalCost + protocolFee + violations > stake: pull shortfall from bidder
+     *      e. Transfer allocated assets to bidder; decrement assetBalance
+     *      f. Refund remainder of stake to bidder
+     */
     function claimAllTokens(
-        CPAStorage self,
         address bidder,
         AuctionId auctionId,
         bytes32 commitHash,
+        uint256 protocolFeeBps,
         AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
         mapping(bytes32 => address) storage revealedMappings,
         mapping(address => uint256) storage bidderStake,
         mapping(BundleId => AuctionTypes.Bundle) storage bundles,
         mapping(bytes32 => BundleId) storage winningBundleIds,
-        mapping(AuctionId => uint256) storage protocolPenalties
+        mapping(AuctionId => uint256) storage protocolAccrued,
+        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
     ) internal {
-        // Validate bidder authorization
+        // Validate bidder
         {
             address revealedBidder = revealedMappings[commitHash];
-            if (revealedBidder == address(0)) revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
+            if (revealedBidder == address(0))
+                revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
         }
 
         BundleId bundleId = winningBundleIds[commitHash];
 
-        // Check if bidder was allocated
+        // Non-winner: full stake refund, no fee
         if (BundleId.unwrap(bundleId) == 0) {
-            // Non-allocated bidder - refund full stake (no penalty)
             uint256 stake = bidderStake[bidder];
             if (stake > 0) {
-                AuctionTypes.CallbackDataRefundStake memory refundData = AuctionTypes.CallbackDataRefundStake({
-                    numeraire: auctionInfo.commonNumeraire,
-                    recipient: bidder,
-                    amount: stake
-                });
-                self.manager().unlock(abi.encode(uint8(5), abi.encode(refundData)));
-                
                 bidderStake[bidder] = 0;
+                IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, stake);
                 emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake);
             }
-            return; // Exit early, no allocation to process
+            return;
         }
 
-        // If the bidder was allocated, we need to claim the tokens from the pool
-        // In a future version, we should combine both calls
-        // to the PoolManager into a single call to save gas.
-        bytes memory data = self.manager().unlock(abi.encode(uint8(7), abi.encode(AuctionTypes.CallbackDataClaimAllTokens({
-			bidder: bidder,
-			numeraire: auctionInfo.commonNumeraire,
-			auctionId: auctionId,
-			poolKeys: auctionInfo.poolKeys,
-			allocatedQuantities: bundles[bundleId].quantities
-		}))));
-
-        (uint256 numerairePaidFromStake) = abi.decode(data, (uint256));
-
+        // Winner: compute costs and transfer
+        AuctionTypes.Bundle memory bundle = bundles[bundleId];
+        uint256 stake = bidderStake[bidder];
         bidderStake[bidder] = 0;
+
+        uint256 totalCost = _computeTotalCost(bundle.quantities, auctionInfo.assets, auctionId, assetInfo);
+        uint256 protocolFee = (totalCost * protocolFeeBps) / 10000;
+
+        // Spending violation check
+        uint256 minSpend = (auctionInfo.config.minSpendRatio * stake) / 10000;
+        uint256 violation = 0;
+        if (totalCost < minSpend) {
+            violation = minSpend - totalCost;
+            protocolAccrued[auctionId] += violation;
+            emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, violation);
+        }
+
+        protocolAccrued[auctionId] += protocolFee;
+
+        uint256 totalDebt = totalCost + protocolFee + violation;
+
+        // Pull shortfall from bidder if stake is insufficient
+        if (totalDebt > stake) {
+            uint256 shortfall = totalDebt - stake;
+            IERC20(auctionInfo.commonNumeraire).safeTransferFrom(bidder, address(this), shortfall);
+            stake += shortfall;
+        }
+
+        // Transfer allocated assets to bidder
+        for (uint256 i = 0; i < auctionInfo.assets.length; ) {
+            uint256 qty = bundle.quantities[i];
+            if (qty > 0) {
+                address assetToken = auctionInfo.assets[i].assetToken;
+                AssetId assetId = AssetIdLibrary.createId(auctionId, assetToken);
+                assetBalance[auctionId][assetToken] -= qty;
+                assetInfo[assetId]; // storage touch (no-op, keeps reference)
+                IERC20(assetToken).safeTransfer(bidder, qty);
+            }
+            unchecked { ++i; }
+        }
+
+        // Refund remaining stake
+        uint256 refund = stake - totalDebt;
+        if (refund > 0) {
+            IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, refund);
+            emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
+        }
     }
 
-    function claimToken(
-        CPAStorage self,
-        address bidder,
+    /**
+     * @notice Check if settlement phase duration has expired.
+     */
+    function shouldSettlementPhaseEnd(
         AuctionId auctionId,
-        bytes32 commitHash,
-        PoolId poolId,
-        AuctionTypes.Allocation memory topAllocation,
-        AuctionTypes.AuctionInfo storage auctionInfo,
-        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
-        mapping(bytes32 => BundleId) storage winningBundleIds,
-        mapping(address => uint256) storage bidderStake,
-        mapping(bytes32 => address) storage revealedMappings
-    ) internal {
-        // Validate bidder authorization
-        {
-            address revealedBidder = revealedMappings[commitHash];
-            if (revealedBidder == address(0)) revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
-            if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
-        }
-
-        // Get amount owed and pool info
-        uint256 amountOwed;
-        PoolKey memory poolKey;
-        {
-            // Find pool index
-            uint256 poolIndex = type(uint256).max;
-            for (uint256 i = 0; i < auctionInfo.poolKeys.length; i++) {
-                if (PoolId.unwrap(auctionInfo.poolKeys[i].toId()) == PoolId.unwrap(poolId)) {
-                    poolIndex = i;
-                    break;
-                }
-            }
-            if (poolIndex == type(uint256).max) {
-                revert IErrorsAndEvents.PoolNotFound(auctionId, poolId);
-            }
-
-            // Get bundle and amount owed
-            BundleId bundleId = winningBundleIds[commitHash];
-            AuctionTypes.Bundle memory bundle = bundles[bundleId];
-            amountOwed = bundle.quantities[poolIndex];
-            poolKey = auctionInfo.poolKeys[poolIndex];
-        }
-
-        // Calculate cost and execute trade
-        {
-            bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == auctionInfo.commonNumeraire);
-
-            SwapParams memory params = SwapParams({
-                zeroForOne: numeraireIsCurrency0,
-                amountSpecified: (amountOwed.toInt256()),
-                sqrtPriceLimitX96: numeraireIsCurrency0
-                    ? TickMath.MIN_SQRT_PRICE + 1 // TickMath.MIN_SQRT_PRICE + 1
-                    : TickMath.MAX_SQRT_PRICE - 1 // TickMath.MAX_SQRT_PRICE - 1
-            });
-            
-            // Execute trade
-            bytes memory data = _executeTrade(self.manager(), poolKey, params, bidder, auctionInfo.commonNumeraire, auctionId);
-            (uint256 numerairePaidByManager, uint256 assetGained) = abi.decode(data, (uint256, uint256));
-            
-            // Update stake balance
-            bidderStake[bidder] -= numerairePaidByManager;
-        }
+        mapping(AuctionId => uint256) storage settlementPhaseStartTime,
+        mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+    ) internal view returns (bool) {
+        uint256 startTime = settlementPhaseStartTime[auctionId];
+        if (startTime == 0) return false;
+        return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[2];
     }
 
-    function _executeTrade(
-        IPoolManager manager,
-        PoolKey memory key,
-        SwapParams memory params,
-        address bidder,
-        address numeraire,
-        AuctionId auctionId
-    ) internal returns (bytes memory) {
-        AuctionTypes.CallbackDataClaimToken memory callbackDataStruct = AuctionTypes.CallbackDataClaimToken({
-            bidder: bidder,
-            numeraire: numeraire,
-            auctionId: auctionId,
-            poolKey: key,
-            swapParams: params
-        });
-        bytes memory callbackData = abi.encode(uint8(4), abi.encode(callbackDataStruct));
-        return manager.unlock(callbackData);
+    // ========================================
+    // INTERNAL HELPERS
+    // ========================================
+
+    function _computeTotalCost(
+        uint256[] memory quantities,
+        AssetConfig[] memory assets,
+        AuctionId auctionId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) private view returns (uint256 totalCost) {
+        for (uint256 i = 0; i < quantities.length; ) {
+            if (quantities[i] > 0) {
+                AssetId assetId = AssetIdLibrary.createId(auctionId, assets[i].assetToken);
+                uint256 price = assetInfo[assetId].currentPrice;
+                uint8 assetDecimals = CurrencyDecimals.getDecimals(assets[i].assetToken);
+                totalCost += (quantities[i] * price) / (10 ** assetDecimals);
+            }
+            unchecked { ++i; }
+        }
     }
-
-	/**
-	 * @notice Check if settlement phase should end based on duration
-	 * @param self The contract instance
-	 * @param auctionId The auction ID
-	 * @param auctionInfo The auction info mapping
-	 * @return true if settlement phase duration has expired
-	 */
-	function shouldSettlementPhaseEnd(
-		CPAStorage self, 
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal view returns (bool) {
-		// Check if settlement phase duration has expired
-		uint256 startTime = self.settlementPhaseStartTime(auctionId);
-		if (startTime == 0) return false; // Phase not started yet
-		
-		// Get phase duration from auction config
-		return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[2];
-	}
-
 }

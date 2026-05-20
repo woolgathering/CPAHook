@@ -8,9 +8,8 @@ import { CPAStorage } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
-import { AssetConfig, AssetId, AssetIdLibrary } from "../types/AssetConfig.sol";
+import { AssetId, AssetIdLibrary } from "../types/AssetConfig.sol";
 import { CPAComputationLibrary } from "./CPAComputationLibrary.sol";
-import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
 library CPAClockPhase {
     using SafeERC20 for IERC20;
@@ -20,11 +19,11 @@ library CPAClockPhase {
      *         Transfers any additional stake required from the bidder.
      */
     function processBid(
-        CPAStorage self,
         AuctionId auctionId,
         uint256[] calldata demands,
         uint256 maxStakeAmount,
         AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
         mapping(address => uint256) storage bidderStake,
         mapping(address => uint256) storage bidderBidPoints,
         mapping(address => uint256[]) storage bids,
@@ -43,11 +42,11 @@ library CPAClockPhase {
             (requiredAdditionalStake, allocatorRewardAmount) = _calculateRequiredStake(
                 demands,
                 auctionInfo,
+                assetInfo,
                 bidderStake[bidder],
                 bidderBidPoints[bidder],
                 maxStakeAmount,
-                auctionId,
-                self
+                auctionId
             );
 
             if (requiredAdditionalStake > 0) {
@@ -70,10 +69,8 @@ library CPAClockPhase {
 
     /**
      * @notice Process end-of-round demand aggregation and price updates.
-     *         Returns total demand per asset.
      */
     function processClockRound(
-        CPAStorage self,
         AuctionId auctionId,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
@@ -114,14 +111,13 @@ library CPAClockPhase {
     }
 
     /**
-     * @notice Check if clock phase should end (no excess demand, max rounds, or stale revenue).
+     * @notice Check if clock phase should end.
      */
     function shouldEndClockPhase(
         AuctionId auctionId,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        uint256[] memory totalDemands,
-        CPAStorage self
+        uint256[] memory totalDemands
     ) internal returns (bool) {
         // 1. No excess demand on any asset
         bool hasExcessDemand = false;
@@ -157,23 +153,6 @@ library CPAClockPhase {
      * @notice Revert prices to lastOversoldPrice for any currently undersold assets.
      */
     function revertUndersoldPrices(
-        AuctionTypes.AuctionInfo storage auctionInfo,
-        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
-    ) internal {
-        for (uint256 i = 0; i < auctionInfo.assets.length; ) {
-            AssetId assetId = AssetIdLibrary.createId(
-                auctionInfo.assets[i].assetToken == auctionInfo.assets[i].assetToken // always true, just using struct
-                    ? AuctionId.wrap(keccak256(abi.encode(auctionInfo.assets))) // can't easily get auctionId here
-                    : AuctionId.wrap(0),
-                auctionInfo.assets[i].assetToken
-            );
-            // NOTE: revertUndersoldPrices must be called with the auctionId available;
-            // see revertUndersoldPricesForAuction below for the correct entry point.
-            unchecked { ++i; }
-        }
-    }
-
-    function revertUndersoldPricesForAuction(
         AuctionId auctionId,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
@@ -241,14 +220,14 @@ library CPAClockPhase {
     function _calculateRequiredStake(
         uint256[] calldata demands,
         AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
         uint256 currentStake,
         uint256 currentBidPoints,
         uint256 maxStakeAmount,
-        AuctionId auctionId,
-        CPAStorage self
+        AuctionId auctionId
     ) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
         uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(
-            demands, auctionInfo.commonNumeraire, auctionInfo.assets, auctionId, self.assetInfo
+            demands, auctionInfo.commonNumeraire, auctionInfo.assets, auctionId, assetInfo
         );
         uint256 requiredBidPoints = CPAComputationLibrary.computeBidPoints(
             totalValueInNumeraire, auctionInfo.commonNumeraire
