@@ -347,8 +347,7 @@ contract CPAClockETHTest is CPATestBaseETH {
         cpaManager.submitBid{value: totalETH2}(auctionId, demands2, type(uint256).max);
         
         // End round to trigger price updates
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Get new tick values
         (, int24 asset1Tick1, , ) = poolManager.getSlot0(asset1PoolId);

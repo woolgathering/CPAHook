@@ -166,8 +166,7 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands3, 1000 * 10**18);
         
         // End round 1 - should create excess demand and increase prices
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Verify round 1 results
         (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, uint256 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolKey.toId());
@@ -217,8 +216,7 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands3_2, 1000 * 10**18);
         
         // End round 2
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Verify round 2 results
         (,,,uint256 asset1Deposit2, int256 asset1ExcessDemand2, int24 asset1LastOversoldTick2, AuctionId asset1AuctionId2, uint256 asset1PositionId2) = cpaManager.getPoolInfo(asset1PoolKey.toId());
@@ -270,8 +268,7 @@ contract CPACompleteFlowTest is CPATestBase {
         cpaManager.submitBid(auctionId, demands3_3, 1000 * 10**18);
         
         // End round 3
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Verify round 3 results
         (,,,uint256 asset1Deposit3, int256 asset1ExcessDemand3, int24 asset1LastOversoldTick3, AuctionId asset1AuctionId3, uint256 asset1PositionId3) = cpaManager.getPoolInfo(asset1PoolKey.toId());
@@ -652,7 +649,7 @@ contract CPACompleteFlowTest is CPATestBase {
         // Warp past the allocation phase duration to allow transition
         auction = cpaManager.getAuctionInfo(auctionId);
         vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
-        cpaManager.transitionToSettlement(auctionId); // permissionless transition
+        transitionToSettlement(auctionId); // permissionless transition
 
         // ========================================
         // CHECK BALANCES AFTER ALLOCATION PHASE ENDS

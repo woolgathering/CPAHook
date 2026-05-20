@@ -408,8 +408,7 @@ contract CPAClock6DecimalsTest is CPATestBase6Decimals {
         console.log("Asset2 deposit:", asset2Deposit);
         
         // End round 1 - should create excess demand and increase prices
-        vm.prank(auctioneer);
-        cpaManager.endClockRound(auctionId);
+        endClockRound(auctionId);
         
         // Get pool info after price update
         (,,,uint256 asset1Deposit1, int256 asset1ExcessDemand1, int24 asset1LastOversoldTick1, AuctionId asset1AuctionId1, uint256 asset1PositionId1) = cpaManager.getPoolInfo(asset1PoolId);

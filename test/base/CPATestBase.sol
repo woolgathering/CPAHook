@@ -316,7 +316,29 @@ abstract contract CPATestBase is Deployers {
         address owner
     ) internal returns (AuctionId) {
         vm.prank(owner);
-        return cpaManager.initAuction(config, owner);
+        AuctionId id = cpaManager.initAuction(config, owner);
+        cpaManager.finalizeAuction(id, config, owner);
+        return id;
+    }
+
+    /// @notice End the current clock round (onlyAuctionOwner — pranks as auctioneer)
+    function endClockRound(AuctionId _auctionId) internal {
+        vm.startPrank(auctioneer);
+        cpaManager.processClockRoundStep(_auctionId);
+        cpaManager.finalizeClockRound(_auctionId);
+        vm.stopPrank();
+    }
+
+    /// @notice Transition from Allocation to Settlement phase (permissionless)
+    function transitionToSettlement(AuctionId _auctionId) internal {
+        cpaManager.selectAuctionWinner(_auctionId);
+        cpaManager.convertAuctionAssets(_auctionId);
+        cpaManager.mintSettlementPositions(_auctionId);
+    }
+
+    /// @notice Get bidder demands for a given auction and bidder address
+    function getBidderDemands(AuctionId _auctionId, address _bidder) internal view returns (uint256[] memory) {
+        return cpaManager.getBidderDemands(_auctionId, _bidder);
     }
 
     /// @notice Create a new auction configuration with different pool keys for testing

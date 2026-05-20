@@ -18,7 +18,7 @@ import { IErrorsAndEvents } from "./utils/IErrorsAndEvents.sol";
  *         This contract holds all shared storage (via CPAStorage), routes calls to facets via
  *         delegatecall, and exposes the standard DiamondCut / DiamondLoupe interfaces.
  */
-contract CPAManager is CPAStorage, Ownable, ReentrancyGuard, IDiamondCut, IDiamondLoupe, IErrorsAndEvents {
+contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamondLoupe, IErrorsAndEvents {
 
     // ========================================
     // CONSTRUCTOR

@@ -307,7 +307,7 @@ contract CPAAllocationPhaseTest is CPATestBase {
         // Warp past the allocation phase duration to allow transition
         AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
         vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
-        cpaManager.transitionToSettlement(auctionId); // permissionless transition
+        transitionToSettlement(auctionId); // permissionless transition
         
         // Verify phase changed to Settlement
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);
@@ -497,7 +497,7 @@ contract CPAAllocationPhaseTest is CPATestBase {
         // Warp past the allocation phase duration to allow transition
         AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
         vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
-        cpaManager.transitionToSettlement(auctionId); // permissionless transition
+        transitionToSettlement(auctionId); // permissionless transition
         
         // Get auction info to check allocator reward
         AuctionTypes.AuctionInfo memory auctionInfo = cpaManager.getAuctionInfo(auctionId);

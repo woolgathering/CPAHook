@@ -110,6 +110,10 @@ abstract contract CPAStorage {
 	/// @notice Active bidders mapping
 	mapping(AuctionId => address[]) public activeBidders;
 
+	function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory) {
+		return bids[auctionId][bidder];
+	}
+
     ////////
     // PROXY PHASE
     ////////

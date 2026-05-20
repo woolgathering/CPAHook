@@ -188,7 +188,7 @@ contract CPASettlementPhaseTest is CPATestBase {
         // Warp past the allocation phase duration to allow transition
         AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
         vm.warp(block.timestamp + auction.config.phaseDurations[1] + 1);
-        cpaManager.transitionToSettlement(auctionId); // permissionless transition
+        transitionToSettlement(auctionId); // permissionless transition
     }
 
     function test_Reveal_Success() public {
