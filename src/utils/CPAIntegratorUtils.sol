@@ -3,12 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { IERC20 } from "forge-std/interfaces/IERC20.sol";
 
-import { CurrencyDecimals } from "./CurrencyDecimals.sol";
-import { PriceUtils } from "./PriceUtils.sol";
-import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { CPAComputationLibrary } from "../libraries/CPAComputationLibrary.sol";
 
 /**
@@ -20,7 +15,6 @@ import { CPAComputationLibrary } from "../libraries/CPAComputationLibrary.sol";
  * @author Clock-Proxy Auction Team
  */
 library CPAIntegratorUtils {
-    using PriceUtils for IPoolManager;
 
     /**
      * @notice Calculate the additional stake required for a bid

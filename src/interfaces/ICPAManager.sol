@@ -3,7 +3,6 @@ pragma solidity ^0.8.24;
 
 import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
 
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";

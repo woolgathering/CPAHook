@@ -3,11 +3,10 @@ pragma solidity ^0.8.24;
 
 import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
 import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
 
-import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 import { BundleId } from "../types/BundleId.sol";
@@ -42,16 +41,20 @@ abstract contract CPAStorage {
 	address public mathFacet;
 
 	/// @notice Pool manager
+	// forge-lint: disable-next-line(screaming-snake-case-immutable)
 	IPoolManager public immutable manager;
-	
+
 	/// @notice Position manager for NFT position creation
+	// forge-lint: disable-next-line(screaming-snake-case-immutable)
 	IPositionManager public immutable positionManager;
 
 	/// @notice Permit2 address for allowance transfers
 	/// @dev This can be hardcoded since it is the same deployment address across all chains Uniswap V4 is deployed on
+	// forge-lint: disable-next-line(screaming-snake-case-immutable)
 	IAllowanceTransfer public immutable permit2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
-	
+
 	/// @notice Protocol wallet address for penalty collection
+	// forge-lint: disable-next-line(screaming-snake-case-immutable)
 	address public immutable protocolWallet;
 
 	uint256 public constant FORFEITURE_REWARD_RATE = 500; // 5% reward (basis points)

@@ -20,12 +20,12 @@ contract MathFacet {
         return TickMath.getSqrtPriceAtTick(tick);
     }
 
-    function getLiquidityForAmount0(uint160 sqrtRatioAX96, uint160 sqrtRatioBX96, uint256 amount0) external pure returns (uint128) {
-        return LiquidityAmounts.getLiquidityForAmount0(sqrtRatioAX96, sqrtRatioBX96, amount0);
+    function getLiquidityForAmount0(uint160 sqrtRatioAx96, uint160 sqrtRatioBx96, uint256 amount0) external pure returns (uint128) {
+        return LiquidityAmounts.getLiquidityForAmount0(sqrtRatioAx96, sqrtRatioBx96, amount0);
     }
 
-    function getLiquidityForAmount1(uint160 sqrtRatioAX96, uint160 sqrtRatioBX96, uint256 amount1) external pure returns (uint128) {
-        return LiquidityAmounts.getLiquidityForAmount1(sqrtRatioAX96, sqrtRatioBX96, amount1);
+    function getLiquidityForAmount1(uint160 sqrtRatioAx96, uint160 sqrtRatioBx96, uint256 amount1) external pure returns (uint128) {
+        return LiquidityAmounts.getLiquidityForAmount1(sqrtRatioAx96, sqrtRatioBx96, amount1);
     }
 
     function mulDiv(uint256 a, uint256 b, uint256 denominator) external pure returns (uint256) {

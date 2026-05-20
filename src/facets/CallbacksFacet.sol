@@ -42,7 +42,7 @@ contract CallbacksClockFacet is CPABase {
 		} else if (operationType == 3) {
 			return _handleMintPosition(operationData);
 		} else if (operationType == 9) {
-			return _handleBatchERC6909ToERC20Conversion(operationData);
+			return _handleBatchErc6909ToErc20Conversion(operationData);
 		} else {
 			revert("Invalid operation type");
 		}
@@ -91,10 +91,10 @@ contract CallbacksClockFacet is CPABase {
 		return abi.encode(callerDelta, feesAccrued);
 	}
 
-	function _handleBatchERC6909ToERC20Conversion(bytes memory operationData) internal returns (bytes memory) {
-		AuctionTypes.CallbackDataBatchERC6909ToERC20 memory data = abi.decode(
+	function _handleBatchErc6909ToErc20Conversion(bytes memory operationData) internal returns (bytes memory) {
+		AuctionTypes.CallbackDataBatchErc6909ToErc20 memory data = abi.decode(
 			operationData,
-			(AuctionTypes.CallbackDataBatchERC6909ToERC20)
+			(AuctionTypes.CallbackDataBatchErc6909ToErc20)
 		);
 
 		for (uint256 i = 0; i < data.assetCurrencies.length; i++) {

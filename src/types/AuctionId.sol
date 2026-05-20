@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId, PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
+import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
 
 type AuctionId is bytes32;
 

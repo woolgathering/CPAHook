@@ -12,8 +12,6 @@ import { CurrencySettler } from "@openzeppelin/uniswap-hooks/src/utils/CurrencyS
 import { BalanceDelta, toBalanceDelta, BalanceDeltaLibrary } from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import { SwapParams, ModifyLiquidityParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeCast } from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 
 /**
@@ -103,9 +101,13 @@ abstract contract Callbacks is CPAStorage {
 		require(block.timestamp <= data.deadline, "Bid deadline expired");
 		
 		// Transfer numeraire from bidder to pool manager
+		// casting to 'uint256' is safe because stake is populated from non-negative numeraire amounts
+		// forge-lint: disable-next-line(unsafe-typecast)
 		Currency.wrap(numeraire).settle(manager, sender, uint256(int256(stake)), false);
-		
+
 		// Mint ERC6909 claims to this hook (bypassing V3 curve)
+		// casting to 'uint256' is safe because stake is populated from non-negative numeraire amounts
+		// forge-lint: disable-next-line(unsafe-typecast)
 		Currency.wrap(numeraire).take(manager, address(this), uint256(int256(stake)), true);
 		
 		// Return the balance deltas
@@ -333,10 +335,10 @@ abstract contract Callbacks is CPAStorage {
 	 * @param operationData The encoded batch conversion data
 	 * @return returnData Empty bytes (no balance deltas needed)
 	 */
-	function _handleBatchERC6909ToERC20Conversion(bytes memory operationData) internal returns (bytes memory) {
-		AuctionTypes.CallbackDataBatchERC6909ToERC20 memory data = abi.decode(
+	function _handleBatchErc6909ToErc20Conversion(bytes memory operationData) internal returns (bytes memory) {
+		AuctionTypes.CallbackDataBatchErc6909ToErc20 memory data = abi.decode(
 			operationData, 
-			(AuctionTypes.CallbackDataBatchERC6909ToERC20)
+			(AuctionTypes.CallbackDataBatchErc6909ToErc20)
 		);
 		
 		// Convert all ERC6909 claims to ERC20 for each asset

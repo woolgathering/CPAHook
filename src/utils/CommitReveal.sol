@@ -27,12 +27,15 @@ library CommitReveal {
 		bytes32 saltB
 	) internal pure returns (bytes32 commitHash) {
 		// Inner hash 1: bidder + saltA
+		// forge-lint: disable-next-line(asm-keccak256)
 		bytes32 innerHash1 = keccak256(abi.encode(bidderId, saltA));
-		
+
 		// Inner hash 2: proxy + saltB
+		// forge-lint: disable-next-line(asm-keccak256)
 		bytes32 innerHash2 = keccak256(abi.encode(proxyAddress, saltB));
-		
+
 		// Outer hash: innerHash1 + innerHash2
+		// forge-lint: disable-next-line(asm-keccak256)
 		commitHash = keccak256(abi.encode(innerHash1, innerHash2));
 	}
 
@@ -72,6 +75,7 @@ library CommitReveal {
 		address bidderId,
 		bytes32 saltA
 	) internal pure returns (bytes32 bidderHash) {
+		// forge-lint: disable-next-line(asm-keccak256)
 		return keccak256(abi.encode(bidderId, saltA));
 	}
 
@@ -85,6 +89,7 @@ library CommitReveal {
 		address proxyAddress,
 		bytes32 saltB
 	) internal pure returns (bytes32 proxyHash) {
+		// forge-lint: disable-next-line(asm-keccak256)
 		return keccak256(abi.encode(proxyAddress, saltB));
 	}
 
@@ -108,6 +113,7 @@ library CommitReveal {
 	function generateSalt(
 		bytes32 seed
 	) internal view returns (bytes32 salt) {
+		// forge-lint: disable-next-line(asm-keccak256)
 		return keccak256(abi.encodePacked(
 			block.timestamp,
 			block.prevrandao,
