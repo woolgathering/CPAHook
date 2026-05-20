@@ -286,6 +286,91 @@ The paper appears to treat this as a theoretical framework rather than a practic
 
 This represents a significant gap between the academic theory and practical implementation, requiring substantial research and design work to develop a concrete multi-round proxy mechanism that maintains the economic properties described in the paper while being implementable in a decentralized system.
 
+## 11. Stuck Auctioneer Deposit on Cancellation
+
+### Problem
+
+When the auctioneer calls `depositAllAndStartClock`, the item tokens are pulled from the auctioneer via `itemCurrency.settle(manager, auctionOwner, depositAmount, false)` and credited to CPAManager as ERC-6909 claim tokens inside the PoolManager (`itemCurrency.take(manager, address(self), depositAmount, true)`). At that point CPAManager holds the ERC-6909 claims; the auctioneer no longer holds the tokens.
+
+If the auction is subsequently cancelled — via `cancelAuction` (onlyAuctionOwner) or `forceCancelAuction` (permissionless after a timeout) — the ERC-6909 claims remain inside the PoolManager with no withdrawal path. The only existing refund mechanism is `reclaimStake`, which returns **bidder** numeraire only and has nothing to do with the auctioneer's deposited items.
+
+The LP positions that would contain the items (minted by `mintSettlementPositions`) have not been created yet at cancel time, so `transferPositionsToAuctioneer` (which transfers LP NFTs) cannot help either.
+
+**Net result**: auctioneer loses deposited items if they cancel after the deposit step.
+
+### Affected code
+
+- `src/libraries/CPASetup.sol` — deposit callback that mints ERC-6909 claims to CPAManager
+- `src/facets/CoreFacet.sol` — `cancelAuction` / `forceCancelAuction` set status to Cancelled but do nothing with deposits
+- `src/libraries/CPAFinishedPhase.sol` — `transferPositionsToAuctioneer` transfers LP NFTs; only callable in Finished phase; does not cover pre-settlement cancellations
+- `src/base/CPAStorage.sol` — `poolInfo[poolId].depositAmount` tracks the deposited amounts
+
+### Fix required
+
+Add a `reclaimDeposit(AuctionId auctionId)` function (callable by auction owner, only when status is Cancelled) that:
+1. Iterates `auctionInfo[auctionId].poolKeys`
+2. For each pool with a non-zero `poolInfo[poolId].depositAmount`, opens a PoolManager unlock callback to `burn` the ERC-6909 claims and `take` the ERC-20 tokens back to the auction owner
+3. Zeroes `poolInfo[poolId].depositAmount` to prevent double-withdrawal
+
+Edge cases to handle:
+- Cancel after `transitionToSettlement` has already converted ERC-6909 → ERC-20 and minted LP positions: in this state the LP NFTs exist; `transferPositionsToAuctioneer` already handles this path (called in Finished phase), but it requires being in Finished phase. May need to either (a) allow `transferPositionsToAuctioneer` in Cancelled state too, or (b) add a separate path. Practically, cancellation post-settlement is not currently possible because there is no cancel function that operates in Allocation/Settlement/Finished phases, so this is lower priority.
+- Cancel before any deposit: `depositAmount == 0` for all pools, so the function is a no-op.
+
+### Tests needed
+
+- `test_CancelBeforeDeposit_NoStuck`: cancel in Setup phase before deposit → no action needed, verify no revert
+- `test_CancelAfterDeposit_ReclaimReturnsItems`: deposit then cancel → `reclaimDeposit` returns exact `depositAmount` of item tokens to auctioneer
+- `test_ReclaimDeposit_OnlyWhenCancelled`: calling `reclaimDeposit` in Active auction reverts
+- `test_ReclaimDeposit_IdempotentAfterFirstCall`: calling `reclaimDeposit` twice does not double-return
+
+---
+
+## 12. Settlement Pool Open to External Trading; Non-Uniform Claim Price
+
+### Problem — part A: external trading during Settlement
+
+`CPAHook.setPoolState` sets `allowedPools[poolId] = true` when the auction phase is `Settlement` **or** `Finished`:
+
+```solidity
+allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement || state == AuctionTypes.AuctionPhase.Finished);
+```
+
+This means from the moment `transitionToSettlement` is called, external users can swap through the pool freely. During Settlement, the LP holds the full item inventory and all bidder claims are still pending. External traders (or MEV bots) can:
+
+- Buy items ahead of bidder claims, raising the price bidders pay
+- Sandwich individual `claimAllTokens` transactions
+- Drain inventory that bidders are entitled to
+
+The correct behaviour is: the pool should only open to external trading in the **Finished** phase, after all claims are complete and the auctioneer owns the LP positions.
+
+**Fix**: Change the `setPoolState` condition to `allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Finished)`.
+
+### Problem — part B: non-uniform claim price within the tick
+
+Even with external trading removed, settlement claims are not executed at a perfectly uniform price. The LP position is minted as a **single-tick-spacing-wide** concentrated position (see `CPAAllocationPhase._calculateLiquidityParams`: `tickUpper = tickLower + poolKey.tickSpacing`). Within that one-tick range the standard AMM constant-product curve still applies, so each `claimAllTokens` swap marginally moves the sqrtPrice.
+
+For a pool with `tickSpacing = 60`, the price band across the full tick is approximately `(1.0001)^60 − 1 ≈ 0.6%`. The first bidder to claim pays the price at the bottom of the tick; the last pays up to ~0.6% more (for that tick spacing). Larger tick spacings widen the band proportionally.
+
+This is a minor, bounded deviation from the ideal uniform price that is accepted for now given the single-tick constraint. It is documented here so future versions can consider mitigation (e.g. donate-based price pinning, or minting at an exact sqrtPrice without tick rounding).
+
+### Combined impact of part A + part B
+
+External trading during Settlement compounds the non-uniformity arbitrarily: an arbitrageur front-running a claim can move price far more than the 0.6% intra-tick drift. Part A is the more urgent fix.
+
+### Affected code
+
+- `src/CPAHook.sol` line ~148: `allowedPools[poolId] = (state == AuctionTypes.AuctionPhase.Settlement || state == AuctionTypes.AuctionPhase.Finished)`
+- `src/libraries/CPAAllocationPhase.sol` lines ~376–389: `_calculateLiquidityParams` tick range calculation (part B, lower priority)
+
+### Tests needed (Part A — fix external trading gate)
+
+- `test_SettlementPhase_ExternalSwapReverts`: external EOA attempting a swap during Settlement phase should revert with `AuctionOngoing`
+- `test_FinishedPhase_ExternalSwapSucceeds`: same EOA attempting a swap after `transitionToFinished` should succeed
+- `test_SettlementPhase_AuctionManagerSwapSucceeds`: `claimAllTokens` (which triggers an auctionManager swap) should still work during Settlement after the fix
+- `test_SettlementPhase_ExternalAddLiquidityReverts`: confirm `beforeAddLiquidity` also blocks external callers during Settlement (note: currently the `_beforeAddLiquidity` hook body is commented-out for non-auctionManager callers — should be checked and restored or the comment explained)
+
+---
+
 ## Summary of Missing Features
 
 1. Activity Rules: Both strict (clock) and relaxed (proxy) revealed preference rules
@@ -298,6 +383,8 @@ This represents a significant gap between the academic theory and practical impl
 8. Multi-Round Proxy: Ascending proxy auction mechanics
 9. Cross-Phase Consistency: Bundle validation against clock bids (superseded by deposit mechanism)
 10. Live Bid Maintenance: Keeping all clock bids active in proxy phase (superseded by deposit mechanism)
+11. Stuck Auctioneer Deposit on Cancellation: no refund path for deposited items if auction is cancelled post-deposit
+12. Settlement Pool External Trading + Non-Uniform Claim Price: pool opens to external traders during Settlement; intra-tick price drift means later claimers pay slightly more
 
 ## Implementation Priority
 
