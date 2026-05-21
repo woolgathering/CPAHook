@@ -17,6 +17,8 @@ import { BundleId } from "../types/BundleId.sol";
 library CPASettlementPhase {
     using SafeERC20 for IERC20;
 
+    // ---- Reveal ----
+
     function reveal(
         AuctionId auctionId,
         address bidder,
@@ -37,6 +39,8 @@ library CPASettlementPhase {
 
         emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
     }
+
+    // ---- Claim ----
 
     /**
      * @notice Claim all allocated tokens for a bidder.
@@ -87,58 +91,16 @@ library CPASettlementPhase {
             return;
         }
 
-        // Winner: compute costs and transfer
-        AuctionTypes.Bundle memory bundle = bundles[bundleId];
-        uint256 stake = bidderStake[bidder];
-        bidderStake[bidder] = 0;
-
-        uint256 totalCost = _computeTotalCost(bundle.quantities, auctionInfo.assets, auctionId, assetInfo);
-        uint256 protocolFee = (totalCost * protocolFeeBps) / 10000;
-
-        // Spending violation check
-        uint256 minSpend = (auctionInfo.config.minSpendRatio * stake) / 10000;
-        uint256 violation = 0;
-        if (totalCost < minSpend) {
-            violation = minSpend - totalCost;
-            protocolAccrued[auctionId] += violation;
-            emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, violation);
-        }
-
-        protocolAccrued[auctionId] += protocolFee;
-
-        uint256 totalDebt = totalCost + protocolFee + violation;
-
-        // Pull shortfall from bidder if stake is insufficient
-        if (totalDebt > stake) {
-            uint256 shortfall = totalDebt - stake;
-            NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, shortfall, 0);
-            stake += shortfall;
-        }
-
-        // Transfer allocated assets to bidder
-        for (uint256 i = 0; i < auctionInfo.assets.length; ) {
-            uint256 qty = bundle.quantities[i];
-            if (qty > 0) {
-                address assetToken = auctionInfo.assets[i].assetToken;
-                AssetId assetId = AssetIdLibrary.createId(auctionId, assetToken);
-                assetBalance[auctionId][assetToken] -= qty;
-                assetInfo[assetId]; // storage touch (no-op, keeps reference)
-                IERC20(assetToken).safeTransfer(bidder, qty);
-            }
-            unchecked { ++i; }
-        }
-
-        // Refund remaining stake
-        uint256 refund = stake - totalDebt;
-        if (refund > 0) {
-            NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, refund);
-            emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
-        }
+        // Winner: delegate to helper to keep this frame's stack shallow
+        _settleWinner(
+            bidder, auctionId, bundleId, protocolFeeBps,
+            auctionInfo, assetInfo, bidderStake, bundles,
+            protocolAccrued, assetBalance
+        );
     }
 
-    /**
-     * @notice Check if settlement phase duration has expired.
-     */
+    // ---- Phase check ----
+
     function shouldSettlementPhaseEnd(
         AuctionId auctionId,
         mapping(AuctionId => uint256) storage settlementPhaseStartTime,
@@ -152,6 +114,84 @@ library CPASettlementPhase {
     // ========================================
     // INTERNAL HELPERS
     // ========================================
+
+    function _settleWinner(
+        address bidder,
+        AuctionId auctionId,
+        BundleId bundleId,
+        uint256 protocolFeeBps,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        mapping(address => uint256) storage bidderStake,
+        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
+        mapping(AuctionId => uint256) storage protocolAccrued,
+        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
+    ) private {
+        AuctionTypes.Bundle memory bundle = bundles[bundleId];
+        uint256 stake = bidderStake[bidder];
+        bidderStake[bidder] = 0;
+
+        uint256 totalCost = _computeTotalCost(bundle.quantities, auctionInfo.assets, auctionId, assetInfo);
+        uint256 protocolFee = (totalCost * protocolFeeBps) / 10000;
+
+        // Spending violation check
+        uint256 violation = _computeViolation(auctionId, bidder, totalCost, stake, auctionInfo.config.minSpendRatio, protocolAccrued);
+
+        protocolAccrued[auctionId] += protocolFee;
+
+        uint256 totalDebt = totalCost + protocolFee + violation;
+
+        // Pull shortfall from bidder if stake is insufficient
+        if (totalDebt > stake) {
+            uint256 shortfall = totalDebt - stake;
+            NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, shortfall, 0);
+            stake += shortfall;
+        }
+
+        // Transfer allocated assets to bidder
+        _transferAssets(bidder, auctionId, bundle.quantities, auctionInfo.assets, assetBalance);
+
+        // Refund remaining stake
+        uint256 refund = stake - totalDebt;
+        if (refund > 0) {
+            NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, refund);
+            emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
+        }
+    }
+
+    function _computeViolation(
+        AuctionId auctionId,
+        address bidder,
+        uint256 totalCost,
+        uint256 stake,
+        uint256 minSpendRatio,
+        mapping(AuctionId => uint256) storage protocolAccrued
+    ) private returns (uint256 violation) {
+        uint256 minSpend = (minSpendRatio * stake) / 10000;
+        if (totalCost < minSpend) {
+            violation = minSpend - totalCost;
+            protocolAccrued[auctionId] += violation;
+            emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, violation);
+        }
+    }
+
+    function _transferAssets(
+        address bidder,
+        AuctionId auctionId,
+        uint256[] memory quantities,
+        AssetConfig[] memory assets,
+        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
+    ) private {
+        for (uint256 i = 0; i < quantities.length; ) {
+            uint256 qty = quantities[i];
+            if (qty > 0) {
+                address assetToken = assets[i].assetToken;
+                assetBalance[auctionId][assetToken] -= qty;
+                IERC20(assetToken).safeTransfer(bidder, qty);
+            }
+            unchecked { ++i; }
+        }
+    }
 
     function _computeTotalCost(
         uint256[] memory quantities,
