@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 
-import { CPAStorage } from "../base/CPAStorage.sol";
+import { AllocationPhaseState, ProxyPhaseState } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
@@ -14,24 +14,23 @@ library CPAAllocationPhase {
 
     function submitAllocation(
         AuctionTypes.Allocation calldata allocationData,
-        mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
+        AllocationPhaseState storage allocState,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
-        mapping(AuctionId => bool) storage hasAllocations
+        ProxyPhaseState storage proxyState
     ) internal {
         AuctionId auctionId = allocationData.auctionId;
 
         (uint256 score, uint256 totalValue) = _scoreAllocation(
-            auctionId, allocationData, auctionInfo, assetInfo, auctionBundles
+            auctionId, allocationData, auctionInfo, assetInfo, proxyState.bundles
         );
-        if (score > topAllocation[auctionId].score) {
-            topAllocation[auctionId].allocation = allocationData;
-            topAllocation[auctionId].score = score;
-            topAllocation[auctionId].totalValue = totalValue;
+        if (score > allocState.topAllocation.score) {
+            allocState.topAllocation.allocation = allocationData;
+            allocState.topAllocation.score = score;
+            allocState.topAllocation.totalValue = totalValue;
         }
 
-        hasAllocations[auctionId] = true;
+        allocState.hasAllocations = true;
 
         emit IErrorsAndEvents.AllocationSubmitted(auctionId, allocationData.allocator, score);
     }
@@ -76,7 +75,6 @@ library CPAAllocationPhase {
 
             uint256 price = assetInfo[assetId].currentPrice;
             uint8 assetDecimals = CurrencyDecimals.getDecimals(assets[i].assetToken);
-            // value = quantity * price / 10^assetDecimals  (price is in numeraire decimals)
             totalValue += (quantities[i] * price) / (10 ** assetDecimals);
 
             unchecked { ++i; }
@@ -98,23 +96,23 @@ library CPAAllocationPhase {
 
     function selectWinner(
         AuctionId auctionId,
-        mapping(AuctionId => AuctionTypes.TopAllocation) storage topAllocation,
-        mapping(BundleId => AuctionTypes.Bundle) storage auctionBundles,
+        AllocationPhaseState storage allocState,
+        ProxyPhaseState storage proxyState,
         mapping(bytes32 => BundleId) storage winningBundleIds
     ) internal {
-        AuctionTypes.Allocation memory winner = topAllocation[auctionId].allocation;
+        AuctionTypes.Allocation memory winner = allocState.topAllocation.allocation;
         for (uint256 i = 0; i < winner.bundleIds.length; ) {
-            winningBundleIds[auctionBundles[winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
+            winningBundleIds[proxyState.bundles[winner.bundleIds[i]].commitHash] = winner.bundleIds[i];
             unchecked { ++i; }
         }
     }
 
     function shouldAllocationPhaseEnd(
         AuctionId auctionId,
-        mapping(AuctionId => uint256) storage allocationPhaseStartTime,
+        AllocationPhaseState storage allocState,
         mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
     ) internal view returns (bool) {
-        uint256 startTime = allocationPhaseStartTime[auctionId];
+        uint256 startTime = allocState.allocationPhaseStartTime;
         if (startTime == 0) return false;
         return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[1];
     }

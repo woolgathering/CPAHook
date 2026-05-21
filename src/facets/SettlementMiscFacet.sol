@@ -17,7 +17,7 @@ contract SettlementMiscFacet is CPABase {
     ) CPABase(_owner, _protocolWallet, _protocolFeeBps, _mathFacet) {}
 
     function claimAllocatorReward(AuctionId auctionId) external {
-        address winningAllocator = topAllocation[auctionId].allocation.allocator;
+        address winningAllocator = _alloc[auctionId].topAllocation.allocation.allocator;
         if (msg.sender != winningAllocator) revert Unauthorized();
 
         AuctionTypes.AuctionPhase phase = auctionInfo[auctionId].currentPhase;
@@ -32,15 +32,15 @@ contract SettlementMiscFacet is CPABase {
     }
 
     function reclaimStake(AuctionId auctionId) external {
-        uint256 stake = bidderStake[auctionId][msg.sender];
+        uint256 stake = _clock[auctionId].bidderStake[msg.sender];
         if (stake == 0) revert InvalidStakeAmount();
 
         address numeraire = auctionInfo[auctionId].commonNumeraire;
         AuctionTypes.AuctionStatus status = auctionInfo[auctionId].currentStatus;
 
         if (status == AuctionTypes.AuctionStatus.Cancelled) {
-            bidderStake[auctionId][msg.sender] = 0;
-            bidderBidPoints[auctionId][msg.sender] = 0;
+            _clock[auctionId].bidderStake[msg.sender] = 0;
+            _clock[auctionId].bidderBidPoints[msg.sender] = 0;
             NumeraireLib.transfer(numeraire, msg.sender, stake);
             emit StakeRefunded(auctionId, msg.sender, stake);
             return;
@@ -53,9 +53,9 @@ contract SettlementMiscFacet is CPABase {
         uint256 penalty = stake * penaltyRate / 10000;
         uint256 refund = stake - penalty;
 
-        protocolAccrued[auctionId] += penalty;
-        bidderStake[auctionId][msg.sender] = 0;
-        bidderBidPoints[auctionId][msg.sender] = 0;
+        _settlement[auctionId].protocolAccrued += penalty;
+        _clock[auctionId].bidderStake[msg.sender] = 0;
+        _clock[auctionId].bidderBidPoints[msg.sender] = 0;
 
         NumeraireLib.transfer(numeraire, msg.sender, refund);
 

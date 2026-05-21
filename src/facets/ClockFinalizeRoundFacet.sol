@@ -21,10 +21,10 @@ contract ClockFinalizeRoundFacet is CPABaseClock {
         onlyAuctionOwnerOrSelf(auctionId)
         onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
     {
-        require(roundPendingFinalize[auctionId], "No round pending finalization");
-        uint256[] memory totalDemands = pendingRoundDemands[auctionId];
-        delete pendingRoundDemands[auctionId];
-        roundPendingFinalize[auctionId] = false;
+        require(_clock[auctionId].roundPendingFinalize, "No round pending finalization");
+        uint256[] memory totalDemands = _clock[auctionId].pendingRoundDemands;
+        delete _clock[auctionId].pendingRoundDemands;
+        _clock[auctionId].roundPendingFinalize = false;
 
         if (CPAClockPhase.shouldEndClockPhase(auctionId, auctionInfo[auctionId], assetInfo, totalDemands)) {
             _endClockPhase(auctionId);

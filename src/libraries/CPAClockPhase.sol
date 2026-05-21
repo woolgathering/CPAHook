@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { NumeraireLib } from "./NumeraireLib.sol";
 
-import { CPAStorage } from "../base/CPAStorage.sol";
+import { ClockPhaseState } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
@@ -17,26 +17,21 @@ library CPAClockPhase {
 
     /**
      * @notice Process a bid during the clock phase.
-     *         Transfers any additional stake required from the bidder.
      */
     function processBid(
         AuctionId auctionId,
         uint256[] calldata demands,
         uint256 maxStakeAmount,
-        uint256 msgValue,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(address => uint256) storage bidderStake,
-        mapping(address => uint256) storage bidderBidPoints,
-        mapping(address => uint256[]) storage bids,
-        address[] storage activeBidders
+        ClockPhaseState storage clockState
     ) internal {
         address bidder = msg.sender;
 
         if (auctionInfo.clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
         if (demands.length != auctionInfo.assets.length) revert IErrorsAndEvents.InvalidBidsLength();
 
-        _validateActivityRule(demands, bids[bidder], auctionInfo.changedPrices);
+        _validateActivityRule(demands, clockState.bids[bidder], auctionInfo.changedPrices);
 
         uint256 requiredAdditionalStake;
         uint256 allocatorRewardAmount;
@@ -45,26 +40,26 @@ library CPAClockPhase {
                 demands,
                 auctionInfo,
                 assetInfo,
-                bidderStake[bidder],
-                bidderBidPoints[bidder],
+                clockState.bidderStake[bidder],
+                clockState.bidderBidPoints[bidder],
                 maxStakeAmount,
                 auctionId
             );
 
             if (requiredAdditionalStake > 0) {
-                bidderStake[bidder] += requiredAdditionalStake;
-                bidderBidPoints[bidder] = CPAComputationLibrary.computeBidPoints(
-                    bidderStake[bidder], auctionInfo.commonNumeraire
+                clockState.bidderStake[bidder] += requiredAdditionalStake;
+                clockState.bidderBidPoints[bidder] = CPAComputationLibrary.computeBidPoints(
+                    clockState.bidderStake[bidder], auctionInfo.commonNumeraire
                 );
                 auctionInfo.allocatorReward += allocatorRewardAmount;
 
                 uint256 total = requiredAdditionalStake + allocatorRewardAmount;
-                NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, total, msgValue);
+                NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, total, msg.value);
             }
         }
 
-        bids[bidder] = demands;
-        activeBidders.push(bidder);
+        clockState.bids[bidder] = demands;
+        clockState.activeBidders.push(bidder);
 
         emit IErrorsAndEvents.BidSubmitted(auctionId, bidder, requiredAdditionalStake, auctionInfo.currentRound);
     }
@@ -76,12 +71,11 @@ library CPAClockPhase {
         AuctionId auctionId,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(address => uint256[]) storage bids,
-        mapping(AuctionId => address[]) storage activeBidders
+        ClockPhaseState storage clockState
     ) internal returns (uint256[] memory) {
         uint256 numAssets = auctionInfo.assets.length;
         uint256[] memory totalDemands = new uint256[](numAssets);
-        address[] storage currentActiveBidders = activeBidders[auctionId];
+        address[] storage currentActiveBidders = clockState.activeBidders;
 
         for (uint256 i = 0; i < numAssets; ) {
             AssetId assetId = AssetIdLibrary.createId(auctionId, auctionInfo.assets[i].assetToken);
@@ -89,7 +83,7 @@ library CPAClockPhase {
             for (uint256 j = 0; j < currentActiveBidders.length; ) {
                 address bidder = currentActiveBidders[j];
                 if (bidder != address(0)) {
-                    totalDemands[i] += bids[bidder][i];
+                    totalDemands[i] += clockState.bids[bidder][i];
                 }
                 unchecked { ++j; }
             }
@@ -108,7 +102,7 @@ library CPAClockPhase {
             unchecked { ++i; }
         }
 
-        delete activeBidders[auctionId];
+        delete clockState.activeBidders;
         return totalDemands;
     }
 

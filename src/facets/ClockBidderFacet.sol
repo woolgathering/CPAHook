@@ -17,12 +17,12 @@ contract ClockCommitFacet is CPABaseClock {
     ) CPABaseClock(_owner, _protocolWallet, _protocolFeeBps, _mathFacet) {}
 
     function commitToBidder(AuctionId auctionId, bytes32 commitHash) external {
-        commitProxy[auctionId][commitHash] = msg.sender;
+        _proxy[auctionId].commitProxy[commitHash] = msg.sender;
     }
 
     function registerCommit(AuctionId auctionId, bytes32 commitHash) external {
-        if (commitProxy[auctionId][commitHash] != address(0)) revert InvalidCommitHash();
-        commitProxy[auctionId][commitHash] = msg.sender;
+        if (_proxy[auctionId].commitProxy[commitHash] != address(0)) revert InvalidCommitHash();
+        _proxy[auctionId].commitProxy[commitHash] = msg.sender;
     }
 
     function dropout(AuctionId auctionId)
@@ -31,18 +31,18 @@ contract ClockCommitFacet is CPABaseClock {
         onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
         onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock)
     {
-        uint256 stake = bidderStake[auctionId][msg.sender];
+        uint256 stake = _clock[auctionId].bidderStake[msg.sender];
         if (stake == 0) revert InvalidStakeAmount();
 
         uint256 penalty = (stake * auctionInfo[auctionId].config.dropoutSlashRatio) / 10000;
         uint256 refund = stake - penalty;
 
-        bidderStake[auctionId][msg.sender] = 0;
-        bidderBidPoints[auctionId][msg.sender] = 0;
+        _clock[auctionId].bidderStake[msg.sender] = 0;
+        _clock[auctionId].bidderBidPoints[msg.sender] = 0;
         removeBidder(auctionId, msg.sender);
 
-        droppedBidders[auctionId][msg.sender] = true;
-        protocolAccrued[auctionId] += penalty;
+        _clock[auctionId].droppedBidders[msg.sender] = true;
+        _settlement[auctionId].protocolAccrued += penalty;
 
         NumeraireLib.transfer(auctionInfo[auctionId].commonNumeraire, msg.sender, refund);
 

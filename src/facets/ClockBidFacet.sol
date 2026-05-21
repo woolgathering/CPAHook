@@ -30,13 +30,9 @@ contract ClockBidFacet is CPABaseClock {
             auctionId,
             demands,
             maxStakeAmount,
-            msg.value,
             auctionInfo[auctionId],
             assetInfo,
-            bidderStake[auctionId],
-            bidderBidPoints[auctionId],
-            bids[auctionId],
-            activeBidders[auctionId]
+            _clock[auctionId]
         );
     }
 }

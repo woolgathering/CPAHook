@@ -20,8 +20,8 @@ contract SetupFinalizeFacet is CPABase {
         AuctionTypes.AuctionConfig memory config,
         address auctionOwner
     ) external nonReentrant returns (AuctionId) {
-        require(poolsRegistered[auctionId], "Assets not registered");
-        poolsRegistered[auctionId] = false;
+        require(_proxy[auctionId].poolsRegistered, "Assets not registered");
+        _proxy[auctionId].poolsRegistered = false;
         CPASetup.finalizeAuctionCreation(config, auctionId, auctionOwner, auctionInfo);
         return auctionId;
     }

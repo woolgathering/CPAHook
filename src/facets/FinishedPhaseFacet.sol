@@ -20,7 +20,7 @@ contract FinishedPhaseFacet is CPABase {
         external
         onlyPhase(auctionId, AuctionTypes.AuctionPhase.Finished)
     {
-        uint256 stake = bidderStake[auctionId][bidder];
+        uint256 stake = _clock[auctionId].bidderStake[bidder];
         if (stake == 0) revert InvalidStakeAmount();
 
         address numeraire = auctionInfo[auctionId].commonNumeraire;
@@ -30,9 +30,9 @@ contract FinishedPhaseFacet is CPABase {
         uint256 callerReward = stake * FORFEITURE_REWARD_RATE / 10000;
         uint256 remaining = stake - penalty - callerReward;
 
-        protocolAccrued[auctionId] += penalty;
-        bidderStake[auctionId][bidder] = 0;
-        bidderBidPoints[auctionId][bidder] = 0;
+        _settlement[auctionId].protocolAccrued += penalty;
+        _clock[auctionId].bidderStake[bidder] = 0;
+        _clock[auctionId].bidderBidPoints[bidder] = 0;
 
         NumeraireLib.transfer(numeraire, msg.sender, callerReward);
         if (callerReward > 0) emit ForfeitureRewardTransferred(auctionId, msg.sender, callerReward);

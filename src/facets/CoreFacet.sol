@@ -30,7 +30,7 @@ contract CoreFacet is CPABase {
             revert MaxPauseDurationExceeded(currentPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
 
         auction.currentStatus = AuctionTypes.AuctionStatus.Paused;
-        pauseStartTime[auctionId] = block.timestamp;
+        _settlement[auctionId].pauseStartTime = block.timestamp;
         emit AuctionPaused(auctionId, msg.sender);
     }
 
@@ -40,13 +40,13 @@ contract CoreFacet is CPABase {
         if (auction.currentStatus != AuctionTypes.AuctionStatus.Paused)
             revert AuctionNotActive(auctionId, auction.currentStatus);
 
-        uint256 newTotalPauseDuration = auction.totalPauseDuration + (block.timestamp - pauseStartTime[auctionId]);
+        uint256 newTotalPauseDuration = auction.totalPauseDuration + (block.timestamp - _settlement[auctionId].pauseStartTime);
 
         if (newTotalPauseDuration >= AuctionTypes.MAX_PAUSE_DURATION)
             revert MaxPauseDurationExceeded(newTotalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);
 
         auction.totalPauseDuration = newTotalPauseDuration;
-        pauseStartTime[auctionId] = 0;
+        _settlement[auctionId].pauseStartTime = 0;
         auction.currentStatus = AuctionTypes.AuctionStatus.Active;
         emit AuctionUnpaused(auctionId, msg.sender);
     }
@@ -65,7 +65,7 @@ contract CoreFacet is CPABase {
 
         uint256 totalPauseDuration = auction.totalPauseDuration;
         if (auction.currentStatus == AuctionTypes.AuctionStatus.Paused)
-            totalPauseDuration += block.timestamp - pauseStartTime[auctionId];
+            totalPauseDuration += block.timestamp - _settlement[auctionId].pauseStartTime;
 
         if (totalPauseDuration < AuctionTypes.MAX_PAUSE_DURATION)
             revert PauseDurationNotExceeded(totalPauseDuration, AuctionTypes.MAX_PAUSE_DURATION);

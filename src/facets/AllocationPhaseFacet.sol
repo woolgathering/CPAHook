@@ -23,7 +23,7 @@ contract AllocationTransitionFacet is CPABase {
         if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Proxy))
             revert PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy);
 
-        if (!hasBundles[auctionId]) {
+        if (!_proxy[auctionId].hasBundles) {
             _cancelAuction(auctionId);
             revert NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Proxy);
         }

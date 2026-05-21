@@ -26,15 +26,15 @@ abstract contract CPABaseClock is CPABase {
         uint256 startTime;
 
         if (phase == AuctionTypes.AuctionPhase.Proxy) {
-            startTime = proxyPhaseStartTime[auctionId];
+            startTime = _proxy[auctionId].proxyPhaseStartTime;
             if (startTime == 0) revert PhaseNotStarted(auctionId);
             if (block.timestamp < startTime + durations[0]) revert PhaseNotExpired(auctionId, phase);
         } else if (phase == AuctionTypes.AuctionPhase.Allocation) {
-            startTime = allocationPhaseStartTime[auctionId];
+            startTime = _alloc[auctionId].allocationPhaseStartTime;
             if (startTime == 0) revert PhaseNotStarted(auctionId);
             if (block.timestamp < startTime + durations[1]) revert PhaseNotExpired(auctionId, phase);
         } else if (phase == AuctionTypes.AuctionPhase.Settlement) {
-            startTime = settlementPhaseStartTime[auctionId];
+            startTime = _settlement[auctionId].settlementPhaseStartTime;
             if (startTime == 0) revert PhaseNotStarted(auctionId);
             if (block.timestamp < startTime + durations[2]) revert PhaseNotExpired(auctionId, phase);
         } else {
@@ -55,14 +55,14 @@ abstract contract CPABaseClock is CPABase {
     function _endClockPhase(AuctionId auctionId) internal {
         if (auctionInfo[auctionId].clockOpen == 2) {
             CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
-            emit ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidders[auctionId].length);
+            emit ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, _clock[auctionId].activeBidders.length);
         }
         CPAClockPhase.revertUndersoldPrices(auctionId, auctionInfo[auctionId], assetInfo);
         _changePhase(auctionId, AuctionTypes.AuctionPhase.Proxy);
     }
 
     function removeBidder(AuctionId auctionId, address bidder) internal {
-        address[] storage activeBiddersInThisAuction = activeBidders[auctionId];
+        address[] storage activeBiddersInThisAuction = _clock[auctionId].activeBidders;
         for (uint256 i = 0; i < activeBiddersInThisAuction.length; i++) {
             if (activeBiddersInThisAuction[i] == bidder) {
                 activeBiddersInThisAuction[i] = address(0);
