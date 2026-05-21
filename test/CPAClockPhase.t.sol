@@ -17,10 +17,9 @@ import { CPATestBase } from "./base/CPATestBase.sol";
 
 contract CPAClockPhaseTest is CPATestBase {
 
-    uint256 public depositAmount1 = 100 * 10**18;
-    uint256 public depositAmount2 = 150 * 10**18;
-
     function setUp() public override {
+        depositAmount1 = 100 * 10**18;
+        depositAmount2 = 150 * 10**18;
         super.setUp();
 
         // Create auction with standard configuration

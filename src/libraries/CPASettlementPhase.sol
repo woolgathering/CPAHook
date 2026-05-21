@@ -77,11 +77,11 @@ library CPASettlementPhase {
 
         // Non-winner: full stake refund, no fee
         if (BundleId.unwrap(bundleId) == 0) {
-            uint256 stake = bidderStake[bidder];
-            if (stake > 0) {
+            uint256 stake_ = bidderStake[bidder];
+            if (stake_ > 0) {
                 bidderStake[bidder] = 0;
-                IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, stake);
-                emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake);
+                IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, stake_);
+                emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake_);
             }
             return;
         }

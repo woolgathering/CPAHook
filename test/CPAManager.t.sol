@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { console2 } from "forge-std/console2.sol";
 import { CPAManager } from "../src/CPAManager.sol";
+import { MathFacet } from "../src/facets/MathFacet.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
 import { AuctionId } from "../src/types/AuctionId.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
