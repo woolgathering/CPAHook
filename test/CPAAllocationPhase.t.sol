@@ -62,9 +62,9 @@ contract CPAAllocationPhaseTest is CPATestBase {
     }
     
     function setupAuctionForAllocationPhase() internal {
-        // Move deposits to pools
-        moveDeposit(auctionId, asset1PoolKey, 1000 * 10**18);
-        moveDeposit(auctionId, asset2PoolKey, 1000 * 10**18);
+        // Move deposits to assets
+        moveDeposit(auctionId, address(asset1Token), 1000 * 10**18);
+        moveDeposit(auctionId, address(asset2Token), 1000 * 10**18);
         
         // Set up proxy commitments
         vm.prank(proxy1);
