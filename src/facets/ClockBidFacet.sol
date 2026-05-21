@@ -21,6 +21,7 @@ contract ClockBidFacet is CPABaseClock {
         uint256 maxStakeAmount
     )
         external
+        payable
         whenAuctionActive(auctionId)
         onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
         onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Clock)
@@ -29,6 +30,7 @@ contract ClockBidFacet is CPABaseClock {
             auctionId,
             demands,
             maxStakeAmount,
+            msg.value,
             auctionInfo[auctionId],
             assetInfo,
             bidderStake[auctionId],

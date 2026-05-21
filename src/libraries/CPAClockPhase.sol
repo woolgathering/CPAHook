@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "./NumeraireLib.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
@@ -22,6 +23,7 @@ library CPAClockPhase {
         AuctionId auctionId,
         uint256[] calldata demands,
         uint256 maxStakeAmount,
+        uint256 msgValue,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
         mapping(address => uint256) storage bidderStake,
@@ -57,7 +59,7 @@ library CPAClockPhase {
                 auctionInfo.allocatorReward += allocatorRewardAmount;
 
                 uint256 total = requiredAdditionalStake + allocatorRewardAmount;
-                IERC20(auctionInfo.commonNumeraire).safeTransferFrom(bidder, address(this), total);
+                NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, total, msgValue);
             }
         }
 

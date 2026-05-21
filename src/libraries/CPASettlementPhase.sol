@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "./NumeraireLib.sol";
 
 import { CPAStorage } from "../base/CPAStorage.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
@@ -80,7 +81,7 @@ library CPASettlementPhase {
             uint256 stake_ = bidderStake[bidder];
             if (stake_ > 0) {
                 bidderStake[bidder] = 0;
-                IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, stake_);
+                NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, stake_);
                 emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake_);
             }
             return;
@@ -110,7 +111,7 @@ library CPASettlementPhase {
         // Pull shortfall from bidder if stake is insufficient
         if (totalDebt > stake) {
             uint256 shortfall = totalDebt - stake;
-            IERC20(auctionInfo.commonNumeraire).safeTransferFrom(bidder, address(this), shortfall);
+            NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, shortfall, 0);
             stake += shortfall;
         }
 
@@ -130,7 +131,7 @@ library CPASettlementPhase {
         // Refund remaining stake
         uint256 refund = stake - totalDebt;
         if (refund > 0) {
-            IERC20(auctionInfo.commonNumeraire).safeTransfer(bidder, refund);
+            NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, refund);
             emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, refund);
         }
     }

@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "../libraries/NumeraireLib.sol";
 
 import { CPABase } from "../base/CPABase.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
@@ -37,15 +38,15 @@ contract ProceedsFacet is CPABase {
 
         // Transfer numeraire proceeds: total balance minus accumulated fees/penalties
         address numeraire = info.commonNumeraire;
-        uint256 totalNumeraire = IERC20(numeraire).balanceOf(address(this));
+        uint256 totalNumeraire = NumeraireLib.balanceOf(numeraire, address(this));
         uint256 reserved = protocolAccrued[auctionId];
         uint256 proceeds = totalNumeraire > reserved ? totalNumeraire - reserved : 0;
         if (proceeds > 0) {
-            IERC20(numeraire).safeTransfer(info.auctionOwner, proceeds);
+            NumeraireLib.transfer(numeraire, info.auctionOwner, proceeds);
             emit ProceedsClaimed(auctionId, info.auctionOwner, proceeds);
         }
 
-        // Return unsold assets
+        // Return unsold assets (always ERC20)
         AssetConfig[] memory assets = info.assets;
         for (uint256 i = 0; i < assets.length; ) {
             address assetToken = assets[i].assetToken;
@@ -68,7 +69,7 @@ contract ProceedsFacet is CPABase {
 
         protocolAccrued[auctionId] = 0;
         address numeraire = auctionInfo[auctionId].commonNumeraire;
-        IERC20(numeraire).safeTransfer(protocolWallet, amount);
+        NumeraireLib.transfer(numeraire, protocolWallet, amount);
 
         emit ProtocolFeesWithdrawn(auctionId, protocolWallet, amount);
     }

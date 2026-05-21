@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "../libraries/NumeraireLib.sol";
 
 import { CPABaseClock } from "../base/CPABaseClock.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
 contract ClockCommitFacet is CPABaseClock {
-    using SafeERC20 for IERC20;
 
     constructor(
         address _owner,
@@ -46,9 +44,7 @@ contract ClockCommitFacet is CPABaseClock {
         droppedBidders[auctionId][msg.sender] = true;
         protocolAccrued[auctionId] += penalty;
 
-        if (refund > 0) {
-            IERC20(auctionInfo[auctionId].commonNumeraire).safeTransfer(msg.sender, refund);
-        }
+        NumeraireLib.transfer(auctionInfo[auctionId].commonNumeraire, msg.sender, refund);
 
         emit PenaltyApplied(auctionId, msg.sender, penalty);
         emit StakeRefunded(auctionId, msg.sender, refund);

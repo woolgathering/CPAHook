@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "../libraries/NumeraireLib.sol";
 
 import { CPABase } from "../base/CPABase.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
 
 contract SettlementMiscFacet is CPABase {
-    using SafeERC20 for IERC20;
 
     constructor(
         address _owner,
@@ -30,7 +28,7 @@ contract SettlementMiscFacet is CPABase {
         auctionInfo[auctionId].allocatorReward = 0;
 
         emit AllocatorRewardClaimed(auctionId, winningAllocator, reward);
-        IERC20(auctionInfo[auctionId].commonNumeraire).safeTransfer(winningAllocator, reward);
+        NumeraireLib.transfer(auctionInfo[auctionId].commonNumeraire, winningAllocator, reward);
     }
 
     function reclaimStake(AuctionId auctionId) external {
@@ -43,7 +41,7 @@ contract SettlementMiscFacet is CPABase {
         if (status == AuctionTypes.AuctionStatus.Cancelled) {
             bidderStake[auctionId][msg.sender] = 0;
             bidderBidPoints[auctionId][msg.sender] = 0;
-            IERC20(numeraire).safeTransfer(msg.sender, stake);
+            NumeraireLib.transfer(numeraire, msg.sender, stake);
             emit StakeRefunded(auctionId, msg.sender, stake);
             return;
         }
@@ -59,9 +57,7 @@ contract SettlementMiscFacet is CPABase {
         bidderStake[auctionId][msg.sender] = 0;
         bidderBidPoints[auctionId][msg.sender] = 0;
 
-        if (refund > 0) {
-            IERC20(numeraire).safeTransfer(msg.sender, refund);
-        }
+        NumeraireLib.transfer(numeraire, msg.sender, refund);
 
         emit PenaltyApplied(auctionId, msg.sender, penalty);
         emit StakeRefunded(auctionId, msg.sender, refund);
