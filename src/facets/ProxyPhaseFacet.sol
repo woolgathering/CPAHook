@@ -27,8 +27,9 @@ contract ProxyPhaseFacet is CPABase {
         onlyWhenPhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Proxy)
         returns (BundleId bundleId)
     {
+        uint256 numItems = auctionInfo[auctionId].assets.length;
         bundleId = CPAProxyPhase.submitBundle(
-            this, commitHash, bundles[auctionId], commitProxy[auctionId], bundleData, hasBundles
+            auctionId, commitHash, numItems, _proxy[auctionId], bundleData
         );
     }
 }

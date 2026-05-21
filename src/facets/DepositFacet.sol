@@ -20,13 +20,13 @@ contract DepositFacet is CPABase {
         address assetToken,
         uint256 depositAmount
     ) external nonReentrant onlyAuctionOwner(auctionId) {
-        CPASetup.moveDeposit(auctionInfo[auctionId], assetInfo, assetBalance, auctionId, assetToken, depositAmount);
+        CPASetup.moveDeposit(auctionInfo[auctionId], assetInfo, _settlement[auctionId], auctionId, assetToken, depositAmount);
     }
 
     function depositAllAndStartClock(
         AuctionId auctionId,
         uint256[] memory amounts
     ) external nonReentrant onlyAuctionOwner(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Setup) {
-        CPASetup.depositAllAndStartClock(auctionInfo[auctionId], assetInfo, assetBalance, amounts, auctionId);
+        CPASetup.depositAllAndStartClock(auctionInfo[auctionId], assetInfo, _settlement[auctionId], amounts, auctionId);
     }
 }

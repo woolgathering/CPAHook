@@ -122,7 +122,7 @@ contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamo
     // ========================================
 
     function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory) {
-        return bids[auctionId][bidder];
+        return _clock[auctionId].bids[bidder];
     }
 
     // ========================================

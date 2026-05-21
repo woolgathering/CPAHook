@@ -23,13 +23,13 @@ contract SettlementTransitionFacet is CPABase {
     {
         if (!_hasPhaseExpired(auctionId, AuctionTypes.AuctionPhase.Allocation))
             revert PhaseNotExpired(auctionId, AuctionTypes.AuctionPhase.Allocation);
-        require(!winnerSelected[auctionId], "Winner already selected");
-        if (!hasAllocations[auctionId]) {
+        require(!_alloc[auctionId].winnerSelected, "Winner already selected");
+        if (!_alloc[auctionId].hasAllocations) {
             _cancelAuction(auctionId);
             revert NoSubmissionsReceived(auctionId, AuctionTypes.AuctionPhase.Allocation);
         }
-        CPAAllocationPhase.selectWinner(auctionId, topAllocation, bundles[auctionId], winningBundleIds);
-        winnerSelected[auctionId] = true;
+        CPAAllocationPhase.selectWinner(auctionId, _alloc[auctionId], _proxy[auctionId], winningBundleIds);
+        _alloc[auctionId].winnerSelected = true;
         _changePhase(auctionId, AuctionTypes.AuctionPhase.Settlement);
     }
 }

@@ -21,14 +21,14 @@ contract ClockEndRoundFacet is CPABase {
         onlyAuctionOwnerOrSelf(auctionId)
         onlyPhase(auctionId, AuctionTypes.AuctionPhase.Clock)
     {
-        require(!roundPendingFinalize[auctionId], "Round already processed - finalize first");
-        uint256 activeBidderCount = activeBidders[auctionId].length;
+        require(!_clock[auctionId].roundPendingFinalize, "Round already processed - finalize first");
+        uint256 activeBidderCount = _clock[auctionId].activeBidders.length;
         CPAClockPhase.setClockOpen(auctionId, 1, auctionInfo);
         uint256[] memory totalDemands = CPAClockPhase.processClockRound(
-            auctionId, auctionInfo[auctionId], assetInfo, bids[auctionId], activeBidders
+            auctionId, auctionInfo[auctionId], assetInfo, _clock[auctionId]
         );
-        pendingRoundDemands[auctionId] = totalDemands;
-        roundPendingFinalize[auctionId] = true;
+        _clock[auctionId].pendingRoundDemands = totalDemands;
+        _clock[auctionId].roundPendingFinalize = true;
         emit ClockRoundClosed(auctionId, auctionInfo[auctionId].currentRound, activeBidderCount);
     }
 }

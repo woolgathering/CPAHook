@@ -20,7 +20,7 @@ contract SetupFacet is CPABase {
         address auctionOwner
     ) external nonReentrant returns (AuctionId) {
         AuctionId auctionId = CPASetup.registerAssetsForAuction(config, assetToAuctionId, assetInfo);
-        poolsRegistered[auctionId] = true;
+        _proxy[auctionId].poolsRegistered = true;
         return auctionId;
     }
 }

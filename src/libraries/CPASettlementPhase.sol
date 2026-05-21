@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { NumeraireLib } from "./NumeraireLib.sol";
 
-import { CPAStorage } from "../base/CPAStorage.sol";
+import { ClockPhaseState, ProxyPhaseState, SettlementPhaseState } from "../base/CPAStorage.sol";
 import { CommitReveal } from "../utils/CommitReveal.sol";
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
@@ -25,17 +25,17 @@ library CPASettlementPhase {
         address proxy,
         bytes32 saltA,
         bytes32 saltB,
-        mapping(AuctionId => mapping(bytes32 => address)) storage commitProxy,
-        mapping(AuctionId => mapping(bytes32 => address)) storage revealedMappings
+        ProxyPhaseState storage proxyState,
+        SettlementPhaseState storage settlementState
     ) internal {
         bytes32 computedCommitHash = CommitReveal.generateCommitHash(bidder, proxy, saltA, saltB);
 
-        if (commitProxy[auctionId][computedCommitHash] == address(0))
+        if (proxyState.commitProxy[computedCommitHash] == address(0))
             revert IErrorsAndEvents.NoSuchCommitHash(auctionId, computedCommitHash);
-        if (revealedMappings[auctionId][computedCommitHash] != address(0))
+        if (settlementState.revealedMappings[computedCommitHash] != address(0))
             revert IErrorsAndEvents.DuplicateReveal(auctionId, computedCommitHash);
 
-        revealedMappings[auctionId][computedCommitHash] = bidder;
+        settlementState.revealedMappings[computedCommitHash] = bidder;
 
         emit IErrorsAndEvents.RevealProcessed(auctionId, bidder, proxy, computedCommitHash);
     }
@@ -44,17 +44,6 @@ library CPASettlementPhase {
 
     /**
      * @notice Claim all allocated tokens for a bidder.
-     *
-     *  Flow:
-     *   1. Validate reveal and allocation
-     *   2. Non-winner: full stake refund
-     *   3. Winner:
-     *      a. Compute totalCost = sum(quantity[i] * clearingPrice[i] / 10^assetDecimals[i])
-     *      b. Compute protocolFee = totalCost * protocolFeeBps / 10000
-     *      c. Spending violation: if totalCost < minSpendRatio * stake, add shortfall to protocolAccrued
-     *      d. If totalCost + protocolFee + violations > stake: pull shortfall from bidder
-     *      e. Transfer allocated assets to bidder; decrement assetBalance
-     *      f. Refund remainder of stake to bidder
      */
     function claimAllTokens(
         address bidder,
@@ -63,16 +52,14 @@ library CPASettlementPhase {
         uint256 protocolFeeBps,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(bytes32 => address) storage revealedMappings,
-        mapping(address => uint256) storage bidderStake,
-        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
         mapping(bytes32 => BundleId) storage winningBundleIds,
-        mapping(AuctionId => uint256) storage protocolAccrued,
-        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
+        ClockPhaseState storage clockState,
+        ProxyPhaseState storage proxyState,
+        SettlementPhaseState storage settlementState
     ) internal {
         // Validate bidder
         {
-            address revealedBidder = revealedMappings[commitHash];
+            address revealedBidder = settlementState.revealedMappings[commitHash];
             if (revealedBidder == address(0))
                 revert IErrorsAndEvents.CommitHashNotYetRevealed(auctionId, commitHash);
             if (revealedBidder != bidder) revert IErrorsAndEvents.Unauthorized();
@@ -82,20 +69,20 @@ library CPASettlementPhase {
 
         // Non-winner: full stake refund, no fee
         if (BundleId.unwrap(bundleId) == 0) {
-            uint256 stake_ = bidderStake[bidder];
+            uint256 stake_ = clockState.bidderStake[bidder];
             if (stake_ > 0) {
-                bidderStake[bidder] = 0;
+                clockState.bidderStake[bidder] = 0;
                 NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, stake_);
                 emit IErrorsAndEvents.StakeRefunded(auctionId, bidder, stake_);
             }
             return;
         }
 
-        // Winner: delegate to helper to keep this frame's stack shallow
+        // Load bundle into memory before delegating so _settleWinner doesn't need proxyState
+        AuctionTypes.Bundle memory bundle = proxyState.bundles[bundleId];
         _settleWinner(
-            bidder, auctionId, bundleId, protocolFeeBps,
-            auctionInfo, assetInfo, bidderStake, bundles,
-            protocolAccrued, assetBalance
+            bidder, auctionId, bundle, protocolFeeBps,
+            auctionInfo, assetInfo, clockState, settlementState
         );
     }
 
@@ -103,10 +90,10 @@ library CPASettlementPhase {
 
     function shouldSettlementPhaseEnd(
         AuctionId auctionId,
-        mapping(AuctionId => uint256) storage settlementPhaseStartTime,
+        SettlementPhaseState storage settlementState,
         mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
     ) internal view returns (bool) {
-        uint256 startTime = settlementPhaseStartTime[auctionId];
+        uint256 startTime = settlementState.settlementPhaseStartTime;
         if (startTime == 0) return false;
         return block.timestamp >= startTime + auctionInfo[auctionId].config.phaseDurations[2];
     }
@@ -118,40 +105,33 @@ library CPASettlementPhase {
     function _settleWinner(
         address bidder,
         AuctionId auctionId,
-        BundleId bundleId,
+        AuctionTypes.Bundle memory bundle,
         uint256 protocolFeeBps,
         AuctionTypes.AuctionInfo storage auctionInfo,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(address => uint256) storage bidderStake,
-        mapping(BundleId => AuctionTypes.Bundle) storage bundles,
-        mapping(AuctionId => uint256) storage protocolAccrued,
-        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
+        ClockPhaseState storage clockState,
+        SettlementPhaseState storage settlementState
     ) private {
-        AuctionTypes.Bundle memory bundle = bundles[bundleId];
-        uint256 stake = bidderStake[bidder];
-        bidderStake[bidder] = 0;
+        uint256 stake = clockState.bidderStake[bidder];
+        clockState.bidderStake[bidder] = 0;
 
-        uint256 totalCost = _computeTotalCost(bundle.quantities, auctionInfo.assets, auctionId, assetInfo);
-        uint256 protocolFee = (totalCost * protocolFeeBps) / 10000;
+        uint256 totalDebt;
+        {
+            uint256 totalCost = _computeTotalCost(bundle.quantities, auctionInfo.assets, auctionId, assetInfo);
+            uint256 protocolFee = (totalCost * protocolFeeBps) / 10000;
+            uint256 violation = _computeViolation(auctionId, bidder, totalCost, stake, auctionInfo.config.minSpendRatio, settlementState);
+            settlementState.protocolAccrued += protocolFee;
+            totalDebt = totalCost + protocolFee + violation;
+        }
 
-        // Spending violation check
-        uint256 violation = _computeViolation(auctionId, bidder, totalCost, stake, auctionInfo.config.minSpendRatio, protocolAccrued);
-
-        protocolAccrued[auctionId] += protocolFee;
-
-        uint256 totalDebt = totalCost + protocolFee + violation;
-
-        // Pull shortfall from bidder if stake is insufficient
         if (totalDebt > stake) {
             uint256 shortfall = totalDebt - stake;
             NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, shortfall, 0);
             stake += shortfall;
         }
 
-        // Transfer allocated assets to bidder
-        _transferAssets(bidder, auctionId, bundle.quantities, auctionInfo.assets, assetBalance);
+        _transferAssets(bidder, auctionId, bundle.quantities, auctionInfo.assets, settlementState);
 
-        // Refund remaining stake
         uint256 refund = stake - totalDebt;
         if (refund > 0) {
             NumeraireLib.transfer(auctionInfo.commonNumeraire, bidder, refund);
@@ -165,12 +145,12 @@ library CPASettlementPhase {
         uint256 totalCost,
         uint256 stake,
         uint256 minSpendRatio,
-        mapping(AuctionId => uint256) storage protocolAccrued
+        SettlementPhaseState storage settlementState
     ) private returns (uint256 violation) {
         uint256 minSpend = (minSpendRatio * stake) / 10000;
         if (totalCost < minSpend) {
             violation = minSpend - totalCost;
-            protocolAccrued[auctionId] += violation;
+            settlementState.protocolAccrued += violation;
             emit IErrorsAndEvents.PenaltyApplied(auctionId, bidder, violation);
         }
     }
@@ -180,13 +160,13 @@ library CPASettlementPhase {
         AuctionId auctionId,
         uint256[] memory quantities,
         AssetConfig[] memory assets,
-        mapping(AuctionId => mapping(address => uint256)) storage assetBalance
+        SettlementPhaseState storage settlementState
     ) private {
         for (uint256 i = 0; i < quantities.length; ) {
             uint256 qty = quantities[i];
             if (qty > 0) {
                 address assetToken = assets[i].assetToken;
-                assetBalance[auctionId][assetToken] -= qty;
+                settlementState.assetBalance[assetToken] -= qty;
                 IERC20(assetToken).safeTransfer(bidder, qty);
             }
             unchecked { ++i; }

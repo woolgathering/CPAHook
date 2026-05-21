@@ -21,7 +21,6 @@ contract ProceedsFacet is CPABase {
     ) CPABase(_owner, _protocolWallet, _protocolFeeBps, _mathFacet) {}
 
     /// @notice Return unsold assets and numeraire proceeds to the auctioneer.
-    ///         Only callable after Settlement phase; only callable once per auction.
     function returnProceeds(AuctionId auctionId) external {
         AuctionTypes.AuctionInfo storage info = auctionInfo[auctionId];
 
@@ -30,29 +29,27 @@ contract ProceedsFacet is CPABase {
             info.currentPhase != AuctionTypes.AuctionPhase.Settlement &&
             info.currentPhase != AuctionTypes.AuctionPhase.Finished
         ) revert InvalidPhase(AuctionTypes.AuctionPhase.Settlement, info.currentPhase);
-        if (proceedsClaimed[auctionId]) revert ProceedsAlreadyClaimed(auctionId);
+        if (_settlement[auctionId].proceedsClaimed) revert ProceedsAlreadyClaimed(auctionId);
 
-        proceedsClaimed[auctionId] = true;
+        _settlement[auctionId].proceedsClaimed = true;
 
-        if (createPoolOnFinish[auctionId]) revert World2NotImplemented();
+        if (_settlement[auctionId].createPoolOnFinish) revert World2NotImplemented();
 
-        // Transfer numeraire proceeds: total balance minus accumulated fees/penalties
         address numeraire = info.commonNumeraire;
         uint256 totalNumeraire = NumeraireLib.balanceOf(numeraire, address(this));
-        uint256 reserved = protocolAccrued[auctionId];
+        uint256 reserved = _settlement[auctionId].protocolAccrued;
         uint256 proceeds = totalNumeraire > reserved ? totalNumeraire - reserved : 0;
         if (proceeds > 0) {
             NumeraireLib.transfer(numeraire, info.auctionOwner, proceeds);
             emit ProceedsClaimed(auctionId, info.auctionOwner, proceeds);
         }
 
-        // Return unsold assets (always ERC20)
         AssetConfig[] memory assets = info.assets;
         for (uint256 i = 0; i < assets.length; ) {
             address assetToken = assets[i].assetToken;
-            uint256 remaining = assetBalance[auctionId][assetToken];
+            uint256 remaining = _settlement[auctionId].assetBalance[assetToken];
             if (remaining > 0) {
-                assetBalance[auctionId][assetToken] = 0;
+                _settlement[auctionId].assetBalance[assetToken] = 0;
                 IERC20(assetToken).safeTransfer(info.auctionOwner, remaining);
                 emit AssetsWithdrawn(auctionId, AssetIdLibrary.createId(auctionId, assetToken), assetToken, remaining);
             }
@@ -64,10 +61,10 @@ contract ProceedsFacet is CPABase {
     function withdrawProtocolFees(AuctionId auctionId) external {
         if (msg.sender != protocolWallet) revert Unauthorized();
 
-        uint256 amount = protocolAccrued[auctionId];
+        uint256 amount = _settlement[auctionId].protocolAccrued;
         if (amount == 0) return;
 
-        protocolAccrued[auctionId] = 0;
+        _settlement[auctionId].protocolAccrued = 0;
         address numeraire = auctionInfo[auctionId].commonNumeraire;
         NumeraireLib.transfer(numeraire, protocolWallet, amount);
 

@@ -105,11 +105,11 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
         auctionInfo[auctionId].currentPhase = newPhase;
 
         if (newPhase == AuctionTypes.AuctionPhase.Proxy) {
-            proxyPhaseStartTime[auctionId] = block.timestamp;
+            _proxy[auctionId].proxyPhaseStartTime = block.timestamp;
         } else if (newPhase == AuctionTypes.AuctionPhase.Allocation) {
-            allocationPhaseStartTime[auctionId] = block.timestamp;
+            _alloc[auctionId].allocationPhaseStartTime = block.timestamp;
         } else if (newPhase == AuctionTypes.AuctionPhase.Settlement) {
-            settlementPhaseStartTime[auctionId] = block.timestamp;
+            _settlement[auctionId].settlementPhaseStartTime = block.timestamp;
         }
 
         emit AuctionPhaseChanged(auctionId, newPhase);
@@ -119,19 +119,19 @@ abstract contract CPABase is IErrorsAndEvents, Ownable, CPAStorage, ReentrancyGu
         uint256[] memory durations = auctionInfo[auctionId].config.phaseDurations;
 
         if (phase == AuctionTypes.AuctionPhase.Proxy) {
-            uint256 startTime = proxyPhaseStartTime[auctionId];
+            uint256 startTime = _proxy[auctionId].proxyPhaseStartTime;
             if (startTime == 0) return false;
             return block.timestamp >= startTime + durations[0];
         }
 
         if (phase == AuctionTypes.AuctionPhase.Allocation) {
-            uint256 startTime = allocationPhaseStartTime[auctionId];
+            uint256 startTime = _alloc[auctionId].allocationPhaseStartTime;
             if (startTime == 0) return false;
             return block.timestamp >= startTime + durations[1];
         }
 
         if (phase == AuctionTypes.AuctionPhase.Settlement) {
-            uint256 startTime = settlementPhaseStartTime[auctionId];
+            uint256 startTime = _settlement[auctionId].settlementPhaseStartTime;
             if (startTime == 0) return false;
             return block.timestamp >= startTime + durations[2];
         }

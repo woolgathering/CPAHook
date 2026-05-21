@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import { CPAStorage } from "../base/CPAStorage.sol";
+import { SettlementPhaseState } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId, AuctionIdLibrary } from "../types/AuctionId.sol";
@@ -83,7 +83,7 @@ library CPASetup {
     function moveDeposit(
         AuctionTypes.AuctionInfo storage info,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(AuctionId => mapping(address => uint256)) storage assetBalance,
+        SettlementPhaseState storage settlementState,
         AuctionId auctionId,
         address assetToken,
         uint256 depositAmount
@@ -93,7 +93,7 @@ library CPASetup {
 
         AssetId assetId = AssetIdLibrary.createId(auctionId, assetToken);
         assetInfo[assetId].depositAmount = depositAmount;
-        assetBalance[auctionId][assetToken] = depositAmount;
+        settlementState.assetBalance[assetToken] = depositAmount;
 
         IERC20(assetToken).safeTransferFrom(info.auctionOwner, address(this), depositAmount);
 
@@ -123,22 +123,14 @@ library CPASetup {
     function depositAllAndStartClock(
         AuctionTypes.AuctionInfo storage info,
         mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
-        mapping(AuctionId => mapping(address => uint256)) storage assetBalance,
+        SettlementPhaseState storage settlementState,
         uint256[] memory amounts,
         AuctionId auctionId
     ) internal {
         if (info.assets.length != amounts.length) revert IErrorsAndEvents.InvalidBidsLength();
 
         for (uint256 i = 0; i < info.assets.length; ) {
-            address assetToken = info.assets[i].assetToken;
-            uint256 amount = amounts[i];
-
-            AssetId assetId = AssetIdLibrary.createId(auctionId, assetToken);
-            assetInfo[assetId].depositAmount = amount;
-            assetBalance[auctionId][assetToken] = amount;
-
-            IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amount);
-            emit IErrorsAndEvents.AssetsDeposited(auctionId, assetId, assetToken, amount);
+            _depositSingleAsset(auctionId, assetInfo, settlementState, info.assets[i].assetToken, amounts[i]);
             unchecked { ++i; }
         }
 
@@ -148,5 +140,19 @@ library CPASetup {
 
         emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
         emit IErrorsAndEvents.ClockRoundOpened(auctionId, 1);
+    }
+
+    function _depositSingleAsset(
+        AuctionId auctionId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        SettlementPhaseState storage settlementState,
+        address assetToken,
+        uint256 amount
+    ) private {
+        AssetId assetId = AssetIdLibrary.createId(auctionId, assetToken);
+        assetInfo[assetId].depositAmount = amount;
+        settlementState.assetBalance[assetToken] = amount;
+        IERC20(assetToken).safeTransferFrom(msg.sender, address(this), amount);
+        emit IErrorsAndEvents.AssetsDeposited(auctionId, assetId, assetToken, amount);
     }
 }

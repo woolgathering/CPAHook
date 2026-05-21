@@ -23,7 +23,8 @@ contract SettlementClaimFacet is CPABase {
         bytes32 saltB
     ) external whenAuctionActive(auctionId) onlyPhase(auctionId, AuctionTypes.AuctionPhase.Settlement) {
         CPASettlementPhase.reveal(
-            auctionId, msg.sender, proxy, saltA, saltB, commitProxy, revealedMappings
+            auctionId, msg.sender, proxy, saltA, saltB,
+            _proxy[auctionId], _settlement[auctionId]
         );
     }
 
@@ -39,12 +40,10 @@ contract SettlementClaimFacet is CPABase {
             protocolFeeBps,
             auctionInfo[auctionId],
             assetInfo,
-            revealedMappings[auctionId],
-            bidderStake[auctionId],
-            bundles[auctionId],
             winningBundleIds,
-            protocolAccrued,
-            assetBalance
+            _clock[auctionId],
+            _proxy[auctionId],
+            _settlement[auctionId]
         );
 
         winningBundleIds[commitHash] = BundleId.wrap(0);

@@ -27,7 +27,7 @@ contract AllocationSubmitFacet is CPABase {
         if (msg.sender != allocationData.allocator) revert Unauthorized();
 
         CPAAllocationPhase.submitAllocation(
-            allocationData, topAllocation, auctionInfo[auctionId], assetInfo, bundles[auctionId], hasAllocations
+            allocationData, _alloc[auctionId], auctionInfo[auctionId], assetInfo, _proxy[auctionId]
         );
     }
 }
