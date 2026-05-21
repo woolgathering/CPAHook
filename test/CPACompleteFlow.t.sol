@@ -404,7 +404,8 @@ contract CPACompleteFlowTest is CPATestBase {
         vm.prank(allocator1);
         cpaManager.submitAllocation(auctionId, allocation1);
 
-        (AuctionTypes.Allocation memory topAllocation1, uint256 topScore1, ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory _top1 = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory topAllocation1 = _top1.allocation; uint256 topScore1 = _top1.score;
         assertEq(topAllocation1.allocator, allocator1, "Allocator1 should be the top allocation");
         assertEq(topAllocation1.bundleIds.length, 1, "Allocator1 should have 1 bundle");
         assertGt(topScore1, 0, "Allocator1 should have a positive score");
@@ -428,7 +429,8 @@ contract CPACompleteFlowTest is CPATestBase {
         vm.expectRevert();
         cpaManager.submitAllocation(auctionId, allocation2);
 
-        (AuctionTypes.Allocation memory topAllocationAfterFailure, uint256 topScoreAfterFailure, ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory _top2 = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory topAllocationAfterFailure = _top2.allocation; uint256 topScoreAfterFailure = _top2.score;
         assertEq(topAllocationAfterFailure.allocator, allocator1, "Allocator1 should still be the top allocation");
         assertEq(topScoreAfterFailure, topScore1, "Top score should remain unchanged after failed allocation");
 
@@ -450,7 +452,8 @@ contract CPACompleteFlowTest is CPATestBase {
         vm.prank(allocator3);
         cpaManager.submitAllocation(auctionId, allocation3);
 
-        (AuctionTypes.Allocation memory topAllocation3, uint256 topScore3, ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory _top3 = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory topAllocation3 = _top3.allocation; uint256 topScore3 = _top3.score;
         assertEq(topAllocation3.allocator, allocator3, "Allocator3 should now be the top allocation");
         assertEq(topAllocation3.bundleIds.length, 3, "Allocator3 should have 3 bundles");
         assertGt(topScore3, topScore1, "Allocator3 should have a higher score than allocator1");
@@ -468,7 +471,8 @@ contract CPACompleteFlowTest is CPATestBase {
         AuctionTypes.AuctionInfo memory auctionInfoSettlement = cpaManager.getAuctionInfo(auctionId);
         assertEq(uint8(auctionInfoSettlement.currentPhase), uint8(AuctionTypes.AuctionPhase.Settlement), "Auction should be in settlement phase");
 
-        (AuctionTypes.Allocation memory winnerAllocation, uint256 winnerScore, ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory _topWinner = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory winnerAllocation = _topWinner.allocation; uint256 winnerScore = _topWinner.score;
         assertEq(winnerAllocation.allocator, allocator3, "Allocator3 should be the winner");
         assertGt(winnerScore, 0, "Winner should have a positive score");
 
@@ -517,7 +521,7 @@ contract CPACompleteFlowTest is CPATestBase {
         // ALLOCATOR REWARD CLAIM
         // ========================================
 
-        (AuctionTypes.Allocation memory currentWinnerAllocation, , ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.Allocation memory currentWinnerAllocation = cpaManager.getTopAllocation(auctionId).allocation;
         address winningAllocator = currentWinnerAllocation.allocator;
 
         uint256 allocatorBalanceBefore = numeraireToken.balanceOf(winningAllocator);

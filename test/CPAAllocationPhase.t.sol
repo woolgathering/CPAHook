@@ -512,7 +512,8 @@ contract CPAAllocationPhaseTest is CPATestBase {
         assertGt(auctionInfo.allocatorReward, 0, "Allocator reward should be greater than 0");
         
         // Verify that allocator1 is the winning allocator
-        (AuctionTypes.Allocation memory winnerAllocation, , ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory top = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory winnerAllocation = top.allocation;
         assertEq(winnerAllocation.allocator, allocator1, "Allocator1 should be the winning allocator");
         
         // Check allocator's balance before claiming
