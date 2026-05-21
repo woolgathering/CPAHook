@@ -707,10 +707,11 @@ contract CPAClockPhaseTest is CPATestBase {
         // Asset2 should have negative excess demand (undersold)
         assertLt(asset2Info2.excessDemand, 0, "Asset2 should have negative excess demand (undersold)");
 
-        // Asset1 price should remain from round 1 (no further increase when exactly clearing)
+        // Asset1 exactly clearing (excessDemand == 0): price stays at round-1 incremented value, no revert
         assertEq(asset1Info2.currentPrice, asset1Info1.currentPrice, "Asset1 price should remain unchanged when exactly clearing");
-        // Asset2 price should remain from round 1 (no further increase when undersold)
-        assertEq(asset2Info2.currentPrice, asset2Info1.currentPrice, "Asset2 price should remain unchanged when undersold");
+        // Asset2 undersold (excessDemand < 0): clock phase ends, revertUndersoldPrices() sets price back to
+        // lastOversoldPrice (= startingPrice, captured before the round-1 increment)
+        assertEq(asset2Info2.currentPrice, asset2StartingPrice, "Asset2 price should revert to lastOversoldPrice when undersold at phase end");
     }
 
     // ============ dropout() Function Tests ============
