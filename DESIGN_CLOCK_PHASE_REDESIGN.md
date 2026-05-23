@@ -233,56 +233,59 @@ Defer unless required for v1.
 
 ---
 
+## Allocation Scoring Loop (Related Concern)
+
+The allocation scoring (`_scoreAllocation`) is O(b×n) per submission — b bundles in
+the allocation × n assets to compute total value. The winner comparison is a single
+`score > topAllocation.score` check — O(1). There is no loop over all allocations;
+each submission either displaces the current leader or doesn't.
+
+This is manageable but worth noting: as asset count grows, each allocation submission
+gets more expensive. Allocators bear that cost, which provides natural DoS resistance
+(submitting a large allocation is expensive for the allocator). No immediate action
+needed, but feeds into the market research question on maximum asset count.
+
+Combinatorial optimization for allocation (finding the best bundle combination) is
+not done on-chain at all — allocators compute off-chain and submit their best result.
+This is intentional and correct; it is not a current off-chain integration, just
+allocators running their own logic and submitting via the on-chain facet.
+
+---
+
 ## Hybrid On/Off-Chain Architecture (Future Work)
 
-### Key Insight: Allocation Phase Already Uses This Pattern
+**Priority**: On-chain architecture comes first. The off-chain integration layer is
+designed and built later. Everything below is forward-looking design, not current work.
 
-The allocation phase is already an optimistic off-chain model:
-- Combinatorial optimization runs off-chain (allocators run their own algorithms)
-- Result is submitted on-chain
-- Protocol verifies the submitted score but cannot verify optimality — it accepts the
-  highest-scoring submission
-- Permissionless — any allocator can compete
+### The Pattern to Follow
 
-This is Alternative 1 (Optimistic Aggregation) already in practice. The protocol
-already trusts off-chain computation for the hardest problem (combinatorial
-optimization), and verifies only what it can cheaply verify on-chain (the score).
+The natural integration point is the clock phase demand aggregation. For large auctions
+(many assets, many bidders), the auctioneer would:
 
-### Extending the Pattern to Clock Phase
+1. Watch on-chain `adjustBid` events
+2. Aggregate demand off-chain
+3. Post aggregated results + new prices on-chain at round end
+4. A challenge window allows anyone to dispute against the on-chain bid record
+5. If unchallenged, prices are accepted
 
-The gap between the current system and a full Alternative 1 hybrid is smaller than it
-appears. What's needed is:
+The on-chain bid record (from `adjustBid`) is what makes fraud proofs cheap — anyone
+can recompute the correct aggregate and challenge a lie in O(1).
 
-1. Auctioneer posts aggregated demand + new prices on-chain each round
-2. A challenge window where anyone can submit a fraud proof
-3. Fraud proof: "bidder X has on-chain bid Y for asset Z, but your aggregate for asset Z
-   is wrong" — trivially verifiable in O(1) against stored bids
-4. Auctioneer stakes a bond slashed on successful challenge
-
-The on-chain bid record (from `adjustBid`) is what makes fraud proofs cheap. As long
-as bids are on-chain, anyone can recompute the correct aggregate and challenge a lie.
-
-### Dual-Mode Design (Recommended)
-
-Maintain both modes:
+### Dual-Mode Design
 
 **Mode A: Full On-Chain** (current architecture, with O(n×m) fix applied)
 - No off-chain infrastructure required
-- Auctioneer calls `endRound` which checks `assetsWithExcessDemand` counter (O(1))
+- Auctioneer calls `endRound`, checks `assetsWithExcessDemand` counter (O(1))
 - Auctioneer calls `incrementPrice` per asset between rounds
-- Suitable for small auctions (< ~200 assets) or auctions where simplicity matters
+- Suitable for small auctions or where simplicity matters
 - Basically done once the O(n×m) fix is implemented
 
 **Mode B: Optimistic Off-Chain** (future, for large auctions)
 - Bids still submitted on-chain via `adjustBid` (same interface as Mode A)
 - Auctioneer aggregates off-chain, posts `endRound(demands[], newPrices[])` assertion
-- Challenge window (e.g., 15 minutes) before prices are accepted
-- Fraud proof contract verifies disputes in O(1)
-- Suitable for large auctions (hundreds/thousands of ERC721 assets)
-- Requires bond from auctioneer, challenge infrastructure
-
-The same `adjustBid` interface works for both modes. Mode selection could be per-auction
-at setup time, or determined by asset count threshold.
+- Challenge window before prices are accepted; fraud proof verifiable in O(1)
+- Requires auctioneer bond (slashed on successful challenge)
+- Same `adjustBid` interface — Mode A and B are compatible at the bidder layer
 
 ### What Stays On-Chain in Both Modes
 
@@ -297,20 +300,16 @@ at setup time, or determined by asset count threshold.
 | Settlement | Always | Financial |
 | Demand aggregation | Mode A only | Moves off-chain in Mode B |
 | Price update computation | Mode A only | Moves off-chain in Mode B |
-| Allocation scoring | Neither | Already off-chain in both |
 
 ### Long-Term: ZK Proofs (Not Near-Term)
 
-ZK-proven aggregation would eliminate the challenge window and trust assumption
-entirely. Auctioneer proves correct computation cryptographically; on-chain verifier
-checks in O(1). Suitable for private bids (bids never revealed publicly). This is the
-ideal end state but requires substantial ZK circuit work — not a v1 or v2 concern.
+ZK-proven aggregation eliminates the challenge window and trust assumption entirely.
+Ideal end state; not a v1 or v2 concern.
 
 ### Recommended Sequencing
 
 1. **Now**: Implement O(n×m) fix (Mode A). Full on-chain, no new trust assumptions.
    After market research on typical auction sizes, decide if Mode A is sufficient.
-2. **If large auctions needed**: Implement Mode B (optimistic). Same `adjustBid`
-   interface, add assertion + challenge logic.
-3. **Long-term**: ZK proofs for Mode B, eliminating challenge latency and trust
-   assumptions entirely.
+2. **If large auctions needed**: Add Mode B on top. Same `adjustBid` interface,
+   add assertion + challenge logic.
+3. **Long-term**: ZK proofs for Mode B.
