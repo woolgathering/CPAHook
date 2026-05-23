@@ -230,3 +230,87 @@ Defer unless required for v1.
 5. `incrementPrice` / `incrementAllOversoldPrices` external functions
 6. Activity rule redesign
 7. Test rewrite
+
+---
+
+## Hybrid On/Off-Chain Architecture (Future Work)
+
+### Key Insight: Allocation Phase Already Uses This Pattern
+
+The allocation phase is already an optimistic off-chain model:
+- Combinatorial optimization runs off-chain (allocators run their own algorithms)
+- Result is submitted on-chain
+- Protocol verifies the submitted score but cannot verify optimality — it accepts the
+  highest-scoring submission
+- Permissionless — any allocator can compete
+
+This is Alternative 1 (Optimistic Aggregation) already in practice. The protocol
+already trusts off-chain computation for the hardest problem (combinatorial
+optimization), and verifies only what it can cheaply verify on-chain (the score).
+
+### Extending the Pattern to Clock Phase
+
+The gap between the current system and a full Alternative 1 hybrid is smaller than it
+appears. What's needed is:
+
+1. Auctioneer posts aggregated demand + new prices on-chain each round
+2. A challenge window where anyone can submit a fraud proof
+3. Fraud proof: "bidder X has on-chain bid Y for asset Z, but your aggregate for asset Z
+   is wrong" — trivially verifiable in O(1) against stored bids
+4. Auctioneer stakes a bond slashed on successful challenge
+
+The on-chain bid record (from `adjustBid`) is what makes fraud proofs cheap. As long
+as bids are on-chain, anyone can recompute the correct aggregate and challenge a lie.
+
+### Dual-Mode Design (Recommended)
+
+Maintain both modes:
+
+**Mode A: Full On-Chain** (current architecture, with O(n×m) fix applied)
+- No off-chain infrastructure required
+- Auctioneer calls `endRound` which checks `assetsWithExcessDemand` counter (O(1))
+- Auctioneer calls `incrementPrice` per asset between rounds
+- Suitable for small auctions (< ~200 assets) or auctions where simplicity matters
+- Basically done once the O(n×m) fix is implemented
+
+**Mode B: Optimistic Off-Chain** (future, for large auctions)
+- Bids still submitted on-chain via `adjustBid` (same interface as Mode A)
+- Auctioneer aggregates off-chain, posts `endRound(demands[], newPrices[])` assertion
+- Challenge window (e.g., 15 minutes) before prices are accepted
+- Fraud proof contract verifies disputes in O(1)
+- Suitable for large auctions (hundreds/thousands of ERC721 assets)
+- Requires bond from auctioneer, challenge infrastructure
+
+The same `adjustBid` interface works for both modes. Mode selection could be per-auction
+at setup time, or determined by asset count threshold.
+
+### What Stays On-Chain in Both Modes
+
+| Component | On-Chain? | Notes |
+|-----------|-----------|-------|
+| Stake deposits/withdrawals | Always | Financial |
+| Asset deposits/transfers | Always | Financial |
+| Individual bids | Always | Enables fraud proofs in Mode B |
+| Locked clearing prices | Always | All downstream phases depend on these |
+| Commit hashes (proxy phase) | Always | Privacy layer |
+| Winning allocation | Always | Financial finality |
+| Settlement | Always | Financial |
+| Demand aggregation | Mode A only | Moves off-chain in Mode B |
+| Price update computation | Mode A only | Moves off-chain in Mode B |
+| Allocation scoring | Neither | Already off-chain in both |
+
+### Long-Term: ZK Proofs (Not Near-Term)
+
+ZK-proven aggregation would eliminate the challenge window and trust assumption
+entirely. Auctioneer proves correct computation cryptographically; on-chain verifier
+checks in O(1). Suitable for private bids (bids never revealed publicly). This is the
+ideal end state but requires substantial ZK circuit work — not a v1 or v2 concern.
+
+### Recommended Sequencing
+
+1. **Now**: Implement O(n×m) fix (Mode A). Full on-chain, no new trust assumptions.
+   After market research on typical auction sizes, decide if Mode A is sufficient.
+2. **If large auctions needed**: Implement Mode B (optimistic). Same `adjustBid`
+   interface, add assertion + challenge logic.
+3. **Long-term**: ZK proofs for Mode B, eliminating challenge latency and trust
+   assumptions entirely.
