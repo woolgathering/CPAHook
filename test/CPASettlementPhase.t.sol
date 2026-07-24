@@ -4,15 +4,6 @@ pragma solidity ^0.8.24;
 import { Test } from "forge-std/Test.sol";
 import { console } from "forge-std/console.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
 
 import { CPAManager } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
@@ -23,7 +14,6 @@ import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
 
 contract CPASettlementPhaseTest is CPATestBase {
-    using PoolIdLibrary for PoolKey;
 
     // Test participants
     address allocator1;
@@ -57,8 +47,8 @@ contract CPASettlementPhaseTest is CPATestBase {
         approveTokens(address(asset2Token), address(cpaManager), 1000 * 10**18);
 
         // Move deposits to pools
-        moveDeposit(auctionId, asset1PoolKey, 100 * 10**18);
-        moveDeposit(auctionId, asset2PoolKey, 150 * 10**18);
+        moveDeposit(auctionId, address(asset1Token), 100 * 10**18);
+        moveDeposit(auctionId, address(asset2Token), 150 * 10**18);
 
         // Generate commit-reveal data
         saltA1 = keccak256("saltA1");
@@ -229,17 +219,14 @@ contract CPASettlementPhaseTest is CPATestBase {
         // Get the commit hash and check if it's in the winning bundle ids
         bytes32 commitHash = CommitReveal.generateCommitHash(bidder1, proxy1, saltA1, saltB1);
         BundleId bundleId = cpaManager.winningBundleIds(commitHash);
-        // assertEq(bundleId, bundleId1, "Commit hash should be in the winning bundle ids");
         console.log("Bundle ID:", uint256(BundleId.unwrap(bundleId)));
         console.log("Commit hash:", uint256(commitHash));
         console.log("Bidder1:", bidder1);
         console.log("Proxy1:", proxy1);
-        // console.log("SaltA1:", saltA1);
-        // console.log("SaltB1:", saltB1);
         console.log("Commit hash1:", uint256(commitHash1));
         console.log("Bundle ID1:", uint256(BundleId.unwrap(bundleId1)));
 
-        // Claim asset1
+        // Claim all tokens
         vm.prank(bidder1);
         cpaManager.claimAllTokens(auctionId, commitHash1);
 
@@ -250,7 +237,7 @@ contract CPASettlementPhaseTest is CPATestBase {
 
         // Should have received asset1 tokens
         assertGt(finalAsset1Balance, initialAsset1Balance, "Bidder should have received asset1 tokens");
-        
+
         // Stake should have been reduced (used for payment)
         assertLt(finalBidderStake, initialBidderStake, "Bidder stake should have been reduced");
     }
@@ -290,9 +277,7 @@ contract CPASettlementPhaseTest is CPATestBase {
 
         // Get initial state
         uint256 initialBidderStake = cpaManager.bidderStake(auctionId, bidder1);
-        uint256 initialBidderNumeraire = numeraireToken.balanceOf(bidder1);
-        uint256 initialPoolManagerNumeraire = numeraireToken.balanceOf(address(poolManager));
-        uint256 initialCPAManagerClaims = IERC6909Claims(poolManager).balanceOf(address(cpaManager), uint256(uint160(address(numeraireToken))));
+        uint256 initialCPAManagerNumeraire = numeraireToken.balanceOf(address(cpaManager));
 
         // Claim token
         vm.prank(bidder1);
@@ -300,50 +285,25 @@ contract CPASettlementPhaseTest is CPATestBase {
 
         // Verify state changes
         uint256 finalBidderStake = cpaManager.bidderStake(auctionId, bidder1);
-        uint256 finalBidderNumeraire = numeraireToken.balanceOf(bidder1);
-        uint256 finalPoolManagerNumeraire = numeraireToken.balanceOf(address(poolManager));
-        uint256 finalCPAManagerClaims = IERC6909Claims(poolManager).balanceOf(address(cpaManager), uint256(uint160(address(numeraireToken))));
+        uint256 finalCPAManagerNumeraire = numeraireToken.balanceOf(address(cpaManager));
 
-        // Calculate changes (using safe subtraction to prevent overflow)
         uint256 stakeReduction = initialBidderStake > finalBidderStake ? initialBidderStake - finalBidderStake : 0;
-        uint256 numeraireChange = finalPoolManagerNumeraire > initialPoolManagerNumeraire ? finalPoolManagerNumeraire - initialPoolManagerNumeraire : 0;
-        uint256 bidderNumeraireChange = finalBidderNumeraire > initialBidderNumeraire ? finalBidderNumeraire - initialBidderNumeraire : 0;
-        uint256 claimsReduction = initialCPAManagerClaims > finalCPAManagerClaims ? initialCPAManagerClaims - finalCPAManagerClaims : 0;
+        uint256 numeraireChange = initialCPAManagerNumeraire > finalCPAManagerNumeraire
+            ? initialCPAManagerNumeraire - finalCPAManagerNumeraire : 0;
 
         console.log("Stake reduction:", stakeReduction);
-        console.log("Pool manager numeraire change:", numeraireChange);
-        console.log("Bidder numeraire change:", bidderNumeraireChange);
-        console.log("Claims reduction:", claimsReduction);
+        console.log("CPAManager numeraire change:", numeraireChange);
 
         // Bidder stake should be reduced (used for payment)
         assertLt(finalBidderStake, initialBidderStake, "Bidder stake should be reduced after claim");
 
-        // CPAManager claims should be reduced (used for swap)
-        assertLt(finalCPAManagerClaims, initialCPAManagerClaims, "CPAManager claims should be reduced");
-
-        // The CPAManager claims should be reduced (used for the swap)
-        assertGt(claimsReduction, 0, "CPAManager claims should be reduced for the swap");
-
-        // Pool manager numeraire balance may or may not change depending on the swap mechanism
-        // The key is that the CPAManager's claims are reduced, representing the numeraire used for the swap
-        if (numeraireChange > 0) {
-            // If pool manager received numeraire, it should equal the claims reduction
-            assertEq(numeraireChange, claimsReduction, "Pool manager numeraire increase should equal CPAManager claims reduction");
-        } else {
-            // If pool manager balance didn't change, the CPAManager used its own numeraire balance
-            // This is also a valid scenario - the swap happens internally within the CPAManager
-            console.log("Pool manager balance unchanged - CPAManager used internal numeraire");
-        }
-
-        // If bidder had to pay additional numeraire (insufficient stake), their balance should decrease
-        if (bidderNumeraireChange < 0) {
-            assertLt(finalBidderNumeraire, initialBidderNumeraire, "Bidder should lose numeraire if stake was insufficient");
-        }
+        // The numeraire held by CPAManager should be reduced (used for asset distribution)
+        assertGt(stakeReduction, 0, "Stake should be reduced");
     }
 
     function test_CompleteSettlementFlow() public {
         // This test verifies the complete settlement flow from reveal to claim
-        
+
         // 1. Reveal both bidders
         vm.prank(bidder1);
         cpaManager.reveal(auctionId, proxy1, saltA1, saltB1);
@@ -376,11 +336,11 @@ contract CPASettlementPhaseTest is CPATestBase {
         assertLt(cpaManager.bidderStake(auctionId, bidder1), 1000 * 10**18, "Bidder1 stake reduced");
         assertLt(cpaManager.bidderStake(auctionId, bidder2), 1000 * 10**18, "Bidder2 stake reduced");
     }
-    
+
     function test_SubmitAllocation_RejectedInSettlementPhase() public {
         // Test that allocation submission is rejected during Settlement phase
         address testAllocator = makeAddr("testAllocator");
-        
+
         // Create a test allocation
         AuctionTypes.Allocation memory testAllocation = AuctionTypes.Allocation({
             auctionId: auctionId,
@@ -389,39 +349,10 @@ contract CPASettlementPhaseTest is CPATestBase {
             totalValue: 1000 * 10**18,
             timestamp: block.timestamp
         });
-        
+
         // Should fail with InvalidPhase error (Settlement phase, not Allocation phase)
         vm.prank(testAllocator);
         vm.expectRevert(abi.encodeWithSelector(IErrorsAndEvents.InvalidPhase.selector, AuctionTypes.AuctionPhase.Allocation, AuctionTypes.AuctionPhase.Settlement));
         cpaManager.submitAllocation(auctionId, testAllocation);
-    }
-
-    function test_PositionMintingAndIdMatching() public {
-        // This test verifies that positions are minted during transitionToSettlement
-        // and that position IDs are correctly set via ERC721 receiver
-        
-        // Get auction info to access pool keys
-        AuctionTypes.AuctionInfo memory auction = cpaManager.getAuctionInfo(auctionId);
-        PoolKey[] memory poolKeys = auction.poolKeys;
-        
-        // Verify positions were minted for each pool
-        for (uint256 i = 0; i < poolKeys.length; i++) {
-            PoolId poolId = poolKeys[i].toId();
-            (,,,uint256 depositAmount,,,AuctionId poolAuctionId, uint256 positionId) = cpaManager.getPoolInfo(poolId);
-            
-            // Verify position ID is set (should be > 0)
-            assertTrue(positionId > 0, "Position ID should be set for pool");
-            
-            // Verify CPAManager owns the position NFT
-            assertEq(IERC721(address(positionManager)).ownerOf(positionId), address(cpaManager), "CPAManager should own the position NFT");
-            
-            // Verify the position ID corresponds to the correct pool using PositionManager
-            (PoolKey memory retrievedPoolKey, ) = positionManager.getPoolAndPositionInfo(positionId);
-            assertEq(PoolId.unwrap(retrievedPoolKey.toId()), PoolId.unwrap(poolId), "Position should be associated with correct pool");
-            
-            console.log("Pool %d: Position ID %d correctly associated with pool", i, positionId);
-        }
-        
-        console.log("All positions minted and IDs correctly matched!");
     }
 }

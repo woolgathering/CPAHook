@@ -1,466 +1,238 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { StateLibrary } from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
-import { IMathFacet } from "../interfaces/IMathFacet.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { SwapParams } from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { NumeraireLib } from "./NumeraireLib.sol";
 
-import { CPAStorage } from "../base/CPAStorage.sol";
+import { ClockPhaseState } from "../base/CPAStorage.sol";
 import { IErrorsAndEvents } from "../utils/IErrorsAndEvents.sol";
-import { PriceUtils } from "../utils/PriceUtils.sol";
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
+import { AssetId, AssetIdLibrary } from "../types/AssetConfig.sol";
 import { CPAComputationLibrary } from "./CPAComputationLibrary.sol";
 
 library CPAClockPhase {
-	using StateLibrary for IPoolManager;
-	using PriceUtils for IPoolManager;
+    using SafeERC20 for IERC20;
 
-	/**
-	 * @notice Process a bid as liquidity during clock phase
-	 * @param self The contract instance
-	 * @param auctionId The auction ID
-	 * @param demands Array of item demands
-	 * @param maxStakeAmount Maximum stake amount the bidder is willing to provide
-	 * @param auctionInfo Mapping for auction info
-	 * @param bidderStake Mapping for bidder stakes
-	 * @param bidderBidPoints Mapping for bidder bid points
-	 */
+    /**
+     * @notice Process a bid during the clock phase.
+     */
     function processBid(
-		CPAStorage self,
-		AuctionId auctionId,
-		uint256[] calldata demands,
-		uint256 maxStakeAmount,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(address => uint256) storage bidderStake,
-		mapping(address => uint256) storage bidderBidPoints,
-		mapping(address => uint256[]) storage bids, // pre-read mapping
-		address[] storage activeBidders
-	) internal {
-		address bidder = msg.sender;
-		
-		if (auctionInfo.clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
-		if (demands.length != auctionInfo.poolKeys.length) revert IErrorsAndEvents.InvalidBidsLength();
-        // Scope 1: Validate activity rule
-        {
-            _validateActivityRule(demands, bids[bidder], auctionInfo.changedPrices);
-        }
+        AuctionId auctionId,
+        uint256[] calldata demands,
+        uint256 maxStakeAmount,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        ClockPhaseState storage clockState
+    ) internal {
+        address bidder = msg.sender;
 
-        // Scope 2: Calculate required stake and update bidder state
+        if (auctionInfo.clockOpen == 1) revert IErrorsAndEvents.ClockNotOpen();
+        if (demands.length != auctionInfo.assets.length) revert IErrorsAndEvents.InvalidBidsLength();
+
+        _validateActivityRule(demands, clockState.bids[bidder], auctionInfo.changedPrices);
+
         uint256 requiredAdditionalStake;
         uint256 allocatorRewardAmount;
         {
             (requiredAdditionalStake, allocatorRewardAmount) = _calculateRequiredStake(
                 demands,
                 auctionInfo,
-                bidderStake[bidder],
-                bidderBidPoints[bidder],
+                assetInfo,
+                clockState.bidderStake[bidder],
+                clockState.bidderBidPoints[bidder],
                 maxStakeAmount,
-                auctionId,
-                self.manager(),
-                self.mathFacet()
+                auctionId
             );
 
             if (requiredAdditionalStake > 0) {
-                // Update storage directly
-                bidderStake[bidder] += requiredAdditionalStake;
-                bidderBidPoints[bidder] = CPAComputationLibrary.computeBidPoints(bidderStake[bidder], auctionInfo.commonNumeraire);
-
-                // Account allocator reward now
+                clockState.bidderStake[bidder] += requiredAdditionalStake;
+                clockState.bidderBidPoints[bidder] = CPAComputationLibrary.computeBidPoints(
+                    clockState.bidderStake[bidder], auctionInfo.commonNumeraire
+                );
                 auctionInfo.allocatorReward += allocatorRewardAmount;
 
-                // Transfer the required stake amount from bidder to auction contract via pool manager
-                // casting to 'int128' and 'int256' is safe because numeraire stake amounts are bounded by token supply, far below int128 max
-                // forge-lint: disable-next-line(unsafe-typecast)
-                AuctionTypes.CallbackDataBid memory callbackDataStruct = AuctionTypes.CallbackDataBid({
-                    sender: bidder,
-                    numeraire: auctionInfo.commonNumeraire,
-                    stake: int128(int256(requiredAdditionalStake + allocatorRewardAmount)), // stake amount in numeraire
-                    deadline: block.timestamp + 60
-                });
-                self.manager().unlock(abi.encode(uint8(0), abi.encode(callbackDataStruct)));
+                uint256 total = requiredAdditionalStake + allocatorRewardAmount;
+                NumeraireLib.transferFrom(auctionInfo.commonNumeraire, bidder, total, msg.value);
             }
         }
-		// would be interesting to eventually have "deposits" for bidders who use the system often
-		// so that they don't have to transfer the common numeraire every time they bid.
-		// the deposit could be rehypothecated by the protocol when not being used. During auctions,
-		// this auction contract would make a "claim" against the deposits that are needed for staking.
-		// the complication is that we do not assert a common numeraire across all auction contracts.
-		
-		// Store bidder demands
-		bids[bidder] = demands;
-		
-		// Note: Active bidders management should be handled by the calling function
-		// since activeBidders is a separate mapping in CPAStorage, not part of AuctionInfo
-		activeBidders.push(bidder);
-		
-		emit IErrorsAndEvents.BidSubmitted(auctionId, bidder, requiredAdditionalStake, auctionInfo.currentRound);
-		// another thought is that "active" bids could be ERC721 tokens that could be traded on secondary markets
-		// would be useful if there are participant-limited auctions where more people want in than actually got in.
-	}
 
-	/**
-	 * @notice Process clock round results
-	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolInfo Mapping for pool info
-	 * @param bids Mapping for bidder demands
-	 * @param activeBidders Mapping for active bidders
-	 */
-	function processClockRound(
-		CPAStorage self,
-		AuctionId auctionId,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		mapping(address => uint256[]) storage bids,
-		mapping(AuctionId => address[]) storage activeBidders
-	) internal returns (uint256[] memory) {
-		// Calculate excess demand for each item and update pool prices accordingly
-		PoolId[] memory pools = getAllPools(auctionInfo);
-		uint256[] memory totalDemands = new uint256[](pools.length);
+        clockState.bids[bidder] = demands;
+        clockState.activeBidders.push(bidder);
 
-		// Pre-index the activeBidders array for gas efficiency
-		address[] storage currentActiveBidders = activeBidders[auctionId];
+        emit IErrorsAndEvents.BidSubmitted(auctionId, bidder, requiredAdditionalStake, auctionInfo.currentRound);
+    }
 
-		// Note: changedPrices array is already initialized in openClockRound
+    /**
+     * @notice Process end-of-round demand aggregation and price updates.
+     */
+    function processClockRound(
+        AuctionId auctionId,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        ClockPhaseState storage clockState
+    ) internal returns (uint256[] memory) {
+        uint256 numAssets = auctionInfo.assets.length;
+        uint256[] memory totalDemands = new uint256[](numAssets);
+        address[] storage currentActiveBidders = clockState.activeBidders;
 
-		// Iterate over pools and calculate excess demand
-		for (uint256 i = 0; i < pools.length; ) {
-			PoolId poolId = pools[i];
-			
-			// Sum up all demand for this item across all active bidders
-			address bidder;
-			for (uint256 j = 0; j < currentActiveBidders.length; ) {
-				bidder = currentActiveBidders[j]; // just one read
-				if (bidder != address(0)) {
-					totalDemands[i] += bids[bidder][i];
-				}
-				unchecked { ++j; }
-			}
-			
-			// Calculate excess demand (can be negative for undersell)
-			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
-			pool.excessDemand = int256(totalDemands[i]) - int256(pool.depositAmount);
-			poolInfo[poolId].excessDemand = pool.excessDemand;
-			
-			// If there is excess demand (oversell), increase the price by tick increment
-			if (pool.excessDemand > 0) {
-				// Track last oversold tick BEFORE updating price
-				(, int24 currentTick, , ) = StateLibrary.getSlot0(self.manager(), poolId);
-				poolInfo[poolId].lastOversoldTick = currentTick;
+        for (uint256 i = 0; i < numAssets; ) {
+            AssetId assetId = AssetIdLibrary.createId(auctionId, auctionInfo.assets[i].assetToken);
 
-				_updatePoolPrice(poolId, pool.key, pool.priceIncrement, self.manager(), auctionInfo.commonNumeraire, self.mathFacet());
-				auctionInfo.changedPrices[i] = true; // Mark this price as changed
-			} else {
-				auctionInfo.changedPrices[i] = false; // Mark this price as not changed
-			}
-			unchecked { ++i; }
-		}
+            for (uint256 j = 0; j < currentActiveBidders.length; ) {
+                address bidder = currentActiveBidders[j];
+                if (bidder != address(0)) {
+                    totalDemands[i] += clockState.bids[bidder][i];
+                }
+                unchecked { ++j; }
+            }
 
-		// Clear the active bidders list using delete (more gas efficient)
-		delete activeBidders[auctionId];
-		
-		// Note: We don't clear bids here anymore since we want to keep them for activity rule validation
-		// The bids mapping persists across rounds until explicitly cleared
+            AuctionTypes.AssetInfo storage asset = assetInfo[assetId];
+            asset.excessDemand = int256(totalDemands[i]) - int256(asset.depositAmount);
 
-		return totalDemands;
-	}
+            if (asset.excessDemand > 0) {
+                asset.lastOversoldPrice = asset.currentPrice;
+                asset.currentPrice += asset.config.priceIncrement;
+                auctionInfo.changedPrices[i] = true;
+            } else {
+                auctionInfo.changedPrices[i] = false;
+            }
 
-	function _updatePoolPrice(
-		PoolId poolId,
-		PoolKey memory poolKey,
-		int24 priceIncrement,
-		IPoolManager poolManager,
-		address commonNumeraire,
-		address mathFacetAddr
-	) internal {
-		// Doppler-style price manipulation: perform a swap on a pool with no liquidity
-		// to move the price by the specified tick increment
-		
-		// Get current tick from pool
-		( , int24 tick, , ) = poolManager.getSlot0(poolId);
-		
-		// Calculate new tick based on which currency is the asset
-		bool zeroForOne = Currency.unwrap(poolKey.currency0) == commonNumeraire;
-		if (zeroForOne) {
-			// Numeraire is currency0, asset is currency1
-			// To increase price of the asset (move tick down), decrease the tick
-			tick -= priceIncrement;
-		} else {
-			// Numeraire is currency1, asset is currency0  
-			// To increase price of the asset (move tick up), increase the tick
-			tick += priceIncrement;
-		} 
-		
-		// Create swap parameters for minimal swap
-		SwapParams memory swapParams = SwapParams({
-			zeroForOne: zeroForOne,
-			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: IMathFacet(mathFacetAddr).getSqrtPriceAtTick(tick) // target price
-		});
+            unchecked { ++i; }
+        }
 
-		// Perform the swap to update the price using callback approach
-		// Encode the operation type (2) and the swap parameters
-		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
-		poolManager.unlock(callbackData);
-	}
+        delete clockState.activeBidders;
+        return totalDemands;
+    }
 
-	/**
-	 * @notice Check if clock phase should end
-	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
-	 * @param poolInfo Mapping for pool info
-	 * @return shouldEnd True if clock phase should end
-	 */
-	function shouldEndClockPhase(
-		AuctionId auctionId,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		uint256[] memory totalDemands,
-		IPoolManager poolManager,
-		address mathFacetAddr
-	) internal returns (bool) {
-		// For now, clock phase does not end automatically
-		// It must be manually ended by the auctioneer
-		// return false;
+    /**
+     * @notice Check if clock phase should end.
+     */
+    function shouldEndClockPhase(
+        AuctionId auctionId,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        uint256[] memory totalDemands
+    ) internal returns (bool) {
+        // 1. No excess demand on any asset
+        bool hasExcessDemand = false;
+        for (uint256 i = 0; i < auctionInfo.assets.length; ) {
+            AssetId assetId = AssetIdLibrary.createId(auctionId, auctionInfo.assets[i].assetToken);
+            if (assetInfo[assetId].excessDemand > 0) {
+                hasExcessDemand = true;
+                break;
+            }
+            unchecked { ++i; }
+        }
+        if (!hasExcessDemand) return true;
 
-		// there are three conditions under which clock phase should end
-		// 1. No excess demand on any item
-		// 2. Max clock rounds exceeded
-		// 3. Revenue improvement is less than ½ percent for two consecutive rounds
+        // 2. Max rounds exceeded
+        if (auctionInfo.currentRound >= auctionInfo.config.maxRounds) return true;
 
-		// 1. No excess demand on any item - end clock phase
-		bool hasExcessDemand = false;
-		for (uint256 i = 0; i < auctionInfo.poolKeys.length; ) {
-			if (poolInfo[auctionInfo.poolKeys[i].toId()].excessDemand > 0) {
-				hasExcessDemand = true;
-				break;
-			}
-			unchecked { ++i; }
-		}
-		if (!hasExcessDemand) {
-			return true; // End clock phase - no excess demand on any item
-		}
+        // 3. Revenue EMA improvement < 0.5%
+        uint256 alpha = 5e17;
+        uint256 revenue = CPAComputationLibrary.calculateBidValueWithMemoryDemands(
+            totalDemands, auctionInfo.commonNumeraire, auctionInfo.assets, auctionId, assetInfo
+        );
+        if (revenue == 0) return false;
+        uint256 rT = _computeEma(revenue, auctionInfo.lastRevenue, alpha);
+        if ((rT * 1e18) / revenue <= 5e15) {
+            return true;
+        }
+        auctionInfo.lastRevenue = revenue;
 
-		// 2. Max clock rounds exceeded
-		// greater than or equal to because we increment the round after the clock round is processed
-		if (auctionInfo.currentRound >= auctionInfo.config.maxRounds) {
-			return true;
-		}
+        return false;
+    }
 
-		// 3. Revenue improvement is less than 1/2 percent for two consecutive rounds.
-		// Here we use an EMA formula to avoid using two storage slots. I have not checked
-		// for mathemetical equivalence but I think it should be relatively close. It's fine
-		// for now.
-		// EMA formula: R_t = alpha * r_t + (1 - alpha) * R_{t-1}
-		uint256 alpha = 5e17; // 1/2 in 1e18 precision
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		uint256 numPools = poolKeys.length;
-		bytes32[] memory poolIds = new bytes32[](numPools);
-		address[] memory currency0s = new address[](numPools);
-		address[] memory currency1s = new address[](numPools);
-		for (uint256 i = 0; i < numPools; ) {
-			poolIds[i] = PoolId.unwrap(poolKeys[i].toId());
-			currency0s[i] = Currency.unwrap(poolKeys[i].currency0);
-			currency1s[i] = Currency.unwrap(poolKeys[i].currency1);
-			unchecked { ++i; }
-		}
-		uint256 revenue = IMathFacet(mathFacetAddr).calculateBidValueFromPools(
-			totalDemands, auctionInfo.commonNumeraire, address(poolManager), poolIds, currency0s, currency1s
-		);
-		uint256 rT = _computeEma(revenue, auctionInfo.lastRevenue, alpha);
-		// if (R_t < revenue * 0.005) {
-		if ((rT * 1e18) / revenue <= (5e15)) { // 1/2 percent in 1e18 precision
-			return true;
-		} else {
-			auctionInfo.lastRevenue = revenue;
-		}
-		// Note: lastRevenue update is handled in the calling function
+    /**
+     * @notice Revert prices to lastOversoldPrice for any currently undersold assets.
+     */
+    function revertUndersoldPrices(
+        AuctionId auctionId,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) internal {
+        for (uint256 i = 0; i < auctionInfo.assets.length; ) {
+            AssetId assetId = AssetIdLibrary.createId(auctionId, auctionInfo.assets[i].assetToken);
+            AuctionTypes.AssetInfo storage asset = assetInfo[assetId];
 
-		return false; // keep going
-	}
+            if (asset.excessDemand < 0 && asset.lastOversoldPrice != 0) {
+                asset.currentPrice = asset.lastOversoldPrice;
+            }
+            unchecked { ++i; }
+        }
+    }
 
-	/**
-	 * @notice Compute EMA
-	 * @param rT The current revenue
-	 * @param rT1 The previous revenue
-	 * @param alpha The alpha value
-	 * @return The EMA value
-	 */
-	function _computeEma(
-		uint256 rT,
-		uint256 rT1,
-		uint256 alpha
-	) internal pure returns (uint256) {
-		return (alpha * rT + (1e18 - alpha) * rT1) / 1e18;
-	}
+    function setClockOpen(
+        AuctionId auctionId,
+        uint256 _clockOpen,
+        mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+    ) internal {
+        auctionInfo[auctionId].clockOpen = _clockOpen;
+    }
 
-	// Helper: validate activity rule based on changedPrices and previous demands
-	function _validateActivityRule(
-		uint256[] calldata demands,
-		uint256[] memory previousDemands,
-		bool[] memory changedPrices
-	) private pure {
-		if (previousDemands.length == 0) return;
-		for (uint256 i = 0; i < changedPrices.length; i++) {
-			if (changedPrices[i] && demands[i] > previousDemands[i]) {
-				revert IErrorsAndEvents.ActivityRuleViolation();
-			}
-		}
-	}
+    function openClockRound(
+        AuctionId auctionId,
+        mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
+    ) internal {
+        AuctionTypes.AuctionInfo storage info = auctionInfo[auctionId];
 
-	// Helper: calculate required stake and allocator reward; validates maxStake
-	function _calculateRequiredStake(
-		uint256[] calldata demands,
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		uint256 currentStake,
-		uint256 currentBidPoints,
-		uint256 maxStakeAmount,
-		AuctionId auctionId,
-		IPoolManager poolManager,
-		address mathFacetAddr
-	) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(demands, auctionInfo.commonNumeraire, poolManager, poolKeys, mathFacetAddr);
-		uint256 requiredBidPoints = CPAComputationLibrary.computeBidPoints(totalValueInNumeraire, auctionInfo.commonNumeraire);
-		if (requiredBidPoints <= currentBidPoints) {
-			return (0, 0);
-		}
-		requiredAdditionalStake = totalValueInNumeraire - currentStake;
-		allocatorReward = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
-		if (maxStakeAmount < requiredAdditionalStake + allocatorReward) revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
-	}
+        if (info.currentStatus != AuctionTypes.AuctionStatus.Active)
+            revert IErrorsAndEvents.AuctionNotActive(auctionId, info.currentStatus);
+        if (info.clockOpen == 2) revert IErrorsAndEvents.ClockAlreadyOpen();
+        if (info.currentPhase != AuctionTypes.AuctionPhase.Clock)
+            revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Clock, info.currentPhase);
 
-	/**
-	 * @notice Set clock open state in AuctionInfo
-	 * @param auctionId The auction ID
-	 * @param _clockOpen The new clock state
-	 * @param auctionInfo Mapping for auction info
-	 */
-	function setClockOpen(
-		AuctionId auctionId, 
-		uint256 _clockOpen,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal {
-		auctionInfo[auctionId].clockOpen = _clockOpen;
-	}
+        unchecked {
+            info.clockOpen = 2;
+            info.currentRound++;
+        }
 
-	/**
-	 * @notice Get all pool IDs for an auction
-	 * @param auctionInfo Storage reference to auction info
-	 * @return Array of all pool IDs
-	 */
-	function getAllPools(
-		AuctionTypes.AuctionInfo storage auctionInfo
-	) internal view returns (PoolId[] memory) {
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
-		PoolId[] memory poolIds = new PoolId[](poolKeys.length);
-		
-		for (uint256 i = 0; i < poolKeys.length; ) {
-			poolIds[i] = poolKeys[i].toId();
-			unchecked { ++i; }
-		}
-		
-		return poolIds;
-	}
+        emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
+    }
 
-	/**
-	 * @notice Open a new clock round - prepares the entire clock phase
-	 * @param auctionId The auction ID
-	 * @param auctionInfo Mapping for auction info
-	 */
-	function openClockRound(
-		AuctionId auctionId,
-		mapping(AuctionId => AuctionTypes.AuctionInfo) storage auctionInfo
-	) internal {
-		// Cache auction info to reduce storage reads
-		AuctionTypes.AuctionInfo storage info = auctionInfo[auctionId];
-		
-		// 1. Validate auction is active (not paused or cancelled)
-		if (info.currentStatus != AuctionTypes.AuctionStatus.Active) {
-			revert IErrorsAndEvents.AuctionNotActive(auctionId, info.currentStatus);
-		}
-		
-		// 2. Validate clock is closed - we close between rounds
-		if (info.clockOpen == 2) {
-			revert IErrorsAndEvents.ClockAlreadyOpen();
-		}
-		
-		// 3. Validate we're in Clock phase (phase transition handled in startClockRound)
-		if (info.currentPhase != AuctionTypes.AuctionPhase.Clock) {
-			revert IErrorsAndEvents.InvalidPhase(AuctionTypes.AuctionPhase.Clock, info.currentPhase);
-		}
-		
-		// 4. Set clock open and increment round (unchecked for gas optimization)
-		unchecked {
-			info.clockOpen = 2;
-			info.currentRound++;
-		}
-		
-		// 5. Emit event with cached round number
-		emit IErrorsAndEvents.ClockRoundOpened(auctionId, info.currentRound);
-	}
+    // ========================================
+    // INTERNAL HELPERS
+    // ========================================
 
-	/**
-	 * @notice Revert prices to last oversold ticks for any items currently undersold
-	 * @param auctionInfo Storage reference to auction info
-	 * @param poolInfo Storage reference to pool info
-	 * @param poolManager The pool manager instance
-	 */
-	function revertUndersoldPrices(
-		AuctionTypes.AuctionInfo storage auctionInfo,
-		mapping(PoolId => AuctionTypes.PoolInfo) storage poolInfo,
-		IPoolManager poolManager,
-		address mathFacetAddr
-	) internal {
-		PoolKey[] memory poolKeys = auctionInfo.poolKeys;
+    function _computeEma(uint256 rT, uint256 rT1, uint256 alpha) internal pure returns (uint256) {
+        return (alpha * rT + (1e18 - alpha) * rT1) / 1e18;
+    }
 
-		for (uint256 i = 0; i < poolKeys.length; ) {
-			PoolId poolId = poolKeys[i].toId();
-			AuctionTypes.PoolInfo storage pool = poolInfo[poolId];
+    function _validateActivityRule(
+        uint256[] calldata demands,
+        uint256[] memory previousDemands,
+        bool[] memory changedPrices
+    ) private pure {
+        if (previousDemands.length == 0) return;
+        for (uint256 i = 0; i < changedPrices.length; i++) {
+            if (changedPrices[i] && demands[i] > previousDemands[i]) {
+                revert IErrorsAndEvents.ActivityRuleViolation();
+            }
+        }
+    }
 
-			// Check if this item is undersold (excessDemand < 0)
-			if (pool.excessDemand < 0 && pool.lastOversoldTick != 0) {
-				// Revert to last oversold tick
-				(, int24 currentTick, , ) = StateLibrary.getSlot0(poolManager, poolId);
+    function _calculateRequiredStake(
+        uint256[] calldata demands,
+        AuctionTypes.AuctionInfo storage auctionInfo,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo,
+        uint256 currentStake,
+        uint256 currentBidPoints,
+        uint256 maxStakeAmount,
+        AuctionId auctionId
+    ) private view returns (uint256 requiredAdditionalStake, uint256 allocatorReward) {
+        uint256 totalValueInNumeraire = CPAComputationLibrary.calculateBidValue(
+            demands, auctionInfo.commonNumeraire, auctionInfo.assets, auctionId, assetInfo
+        );
+        uint256 requiredBidPoints = CPAComputationLibrary.computeBidPoints(
+            totalValueInNumeraire, auctionInfo.commonNumeraire
+        );
+        if (requiredBidPoints <= currentBidPoints) return (0, 0);
 
-				if (pool.lastOversoldTick != currentTick) {
-					// Use existing price update logic with negative tick delta for price decrease
-					_updatePoolPriceByTick(pool.key, pool.lastOversoldTick, poolManager, auctionInfo.commonNumeraire, mathFacetAddr);
-				}
-			}
-			unchecked { ++i; }
-		}
-	}
-
-	/**
-	 * @notice Update pool price by tick delta (can be negative to decrease price)
-	 * @param poolKey The pool key
-	 * @param tickTarget The tick change (positive or negative)
-	 * @param poolManager The pool manager instance
-	 * @param commonNumeraire The common numeraire address
-	 */
-	function _updatePoolPriceByTick(
-		PoolKey memory poolKey,
-		int24 tickTarget,
-		IPoolManager poolManager,
-		address commonNumeraire,
-		address mathFacetAddr
-	) internal {
-		// Create swap parameters for minimal swap
-		SwapParams memory swapParams = SwapParams({
-			zeroForOne: Currency.unwrap(poolKey.currency0) != commonNumeraire,
-			amountSpecified: 1, // minimal amount
-			sqrtPriceLimitX96: IMathFacet(mathFacetAddr).getSqrtPriceAtTick(tickTarget) // target price
-		});
-
-		// Perform the swap to update the price using callback approach
-		// Encode the operation type (2) and the swap parameters
-		bytes memory callbackData = abi.encode(uint8(2), abi.encode(poolKey, swapParams));
-		poolManager.unlock(callbackData);
-	}
+        requiredAdditionalStake = totalValueInNumeraire - currentStake;
+        allocatorReward = (requiredAdditionalStake * auctionInfo.config.allocatorRewardPct) / 10000;
+        if (maxStakeAmount < requiredAdditionalStake + allocatorReward)
+            revert IErrorsAndEvents.MaxStakeTooLow(auctionId);
+    }
 }

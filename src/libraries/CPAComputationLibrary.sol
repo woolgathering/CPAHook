@@ -1,90 +1,73 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-
 import { CurrencyDecimals } from "../utils/CurrencyDecimals.sol";
-import { PriceUtils } from "../utils/PriceUtils.sol";
+import { AuctionTypes } from "../types/AuctionTypes.sol";
+import { AuctionId } from "../types/AuctionId.sol";
+import { AssetConfig, AssetId, AssetIdLibrary } from "../types/AssetConfig.sol";
 
 library CPAComputationLibrary {
-	using PriceUtils for IPoolManager;
 
-	function calculateBidValue(
-		uint256[] calldata demands,
-		address numeraire,
-		IPoolManager poolManager,
-		PoolKey[] memory poolKeys,
-		address mathFacetAddr
-	) internal view returns (uint256 totalValue) {
-		return _calculateBidValueInternal(demands, numeraire, poolManager, poolKeys, mathFacetAddr);
-	}
+    /**
+     * @notice Compute total bid value in numeraire from calldata demands.
+     *         price is read directly from assetInfo[assetId].currentPrice.
+     *         Formula: sum( quantity[i] * price[i] / 10^assetDecimals[i] )
+     */
+    function calculateBidValue(
+        uint256[] calldata demands,
+        address numeraire,
+        AssetConfig[] memory assets,
+        AuctionId auctionId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) internal view returns (uint256 totalValue) {
+        return _calculateBidValueInternal(demands, numeraire, assets, auctionId, assetInfo);
+    }
 
-	function calculateBidValueWithMemoryDemands(
-		uint256[] memory demands,
-		address numeraire,
-		IPoolManager poolManager,
-		PoolKey[] memory poolKeys,
-		address mathFacetAddr
-	) internal view returns (uint256 totalValue) {
-		return _calculateBidValueInternal(demands, numeraire, poolManager, poolKeys, mathFacetAddr);
-	}
+    function calculateBidValueWithMemoryDemands(
+        uint256[] memory demands,
+        address numeraire,
+        AssetConfig[] memory assets,
+        AuctionId auctionId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) internal view returns (uint256 totalValue) {
+        return _calculateBidValueInternal(demands, numeraire, assets, auctionId, assetInfo);
+    }
 
-	function _calculateBidValueInternal(
-		uint256[] memory demands,
-		address numeraire,
-		IPoolManager poolManager,
-		PoolKey[] memory poolKeys,
-		address mathFacetAddr
-	) private view returns (uint256 totalValue) {
-		uint8 numeraireDecimals = CurrencyDecimals.getDecimals(numeraire);
-		uint256 numeraireFactor = 10**numeraireDecimals;
+    function _calculateBidValueInternal(
+        uint256[] memory demands,
+        address numeraire,
+        AssetConfig[] memory assets,
+        AuctionId auctionId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) private view returns (uint256 totalValue) {
+        for (uint256 i = 0; i < demands.length && i < assets.length; ) {
+            if (demands[i] == 0) { unchecked { ++i; } continue; }
 
-		for (uint256 i = 0; i < demands.length && i < poolKeys.length; ) {
-			uint256 itemValue;
-			{
-				(uint256 price, address assetCurrency) = _getPriceAndAssetCurrency(
-					poolKeys[i],
-					numeraire,
-					poolManager,
-					mathFacetAddr
-				);
-				uint8 assetDecimals = CurrencyDecimals.getDecimals(assetCurrency);
-				uint256 divisor = 10**(18 + assetDecimals);
-				itemValue = (demands[i] * price * numeraireFactor) / divisor;
-			}
-			totalValue += itemValue;
-			unchecked { ++i; }
-		}
-	}
+            AssetId assetId = AssetIdLibrary.createId(auctionId, assets[i].assetToken);
+            uint256 price = assetInfo[assetId].currentPrice; // numeraire decimals per asset token
 
-	function _getPriceAndAssetCurrency(
-		PoolKey memory poolKey,
-		address commonNumeraire,
-		IPoolManager poolManager,
-		address mathFacetAddr
-	) private view returns (uint256 price, address assetCurrency) {
-		bool numeraireIsCurrency0 = (Currency.unwrap(poolKey.currency0) == commonNumeraire);
-		if (numeraireIsCurrency0) {
-			price = poolManager.getPriceOfCurrency1(poolKey, mathFacetAddr);
-			assetCurrency = Currency.unwrap(poolKey.currency1);
-		} else {
-			price = poolManager.getPriceOfCurrency0(poolKey, mathFacetAddr);
-			assetCurrency = Currency.unwrap(poolKey.currency0);
-		}
-	}
+            uint8 assetDecimals = CurrencyDecimals.getDecimals(assets[i].assetToken);
+            // cost = quantity * price / 10^assetDecimals
+            totalValue += (demands[i] * price) / (10 ** assetDecimals);
 
-	function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256 bidPoints) {
-		bidPoints = stakeAmount * 10**18 / (10**CurrencyDecimals.getDecimals(numeraire));
-	}
+            unchecked { ++i; }
+        }
+    }
 
-	function getCurrentPrice(
-		PoolKey memory poolKey,
-		address numeraire,
-		IPoolManager poolManager,
-		address mathFacetAddr
-	) internal view returns (uint256 price) {
-		(price, ) = _getPriceAndAssetCurrency(poolKey, numeraire, poolManager, mathFacetAddr);
-	}
+    /**
+     * @notice Normalise stake to 18-decimal bid points for activity-rule comparisons.
+     */
+    function computeBidPoints(uint256 stakeAmount, address numeraire) internal view returns (uint256) {
+        return stakeAmount * 10**18 / (10**CurrencyDecimals.getDecimals(numeraire));
+    }
+
+    /**
+     * @notice Get the current price for a single asset.
+     */
+    function getCurrentPrice(
+        AssetId assetId,
+        mapping(AssetId => AuctionTypes.AssetInfo) storage assetInfo
+    ) internal view returns (uint256) {
+        return assetInfo[assetId].currentPrice;
+    }
 }

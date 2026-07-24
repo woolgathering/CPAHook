@@ -1,201 +1,161 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { IAllowanceTransfer } from "permit2/src/interfaces/IAllowanceTransfer.sol";
-
 import { AuctionTypes } from "../types/AuctionTypes.sol";
 import { AuctionId } from "../types/AuctionId.sol";
+import { AssetId } from "../types/AssetConfig.sol";
 import { BundleId } from "../types/BundleId.sol";
+
+// ========================================
+// PER-PHASE STORAGE STRUCTS
+// ========================================
+
+struct ClockPhaseState {
+    mapping(address => uint256) bidderStake;      // also read in Settlement
+    mapping(address => uint256) bidderBidPoints;
+    mapping(address => uint256[]) bids;
+    address[] activeBidders;
+    mapping(address => bool) droppedBidders;
+    uint256[] pendingRoundDemands;
+    bool roundPendingFinalize;
+}
+
+struct ProxyPhaseState {
+    mapping(bytes32 => address) commitProxy;
+    mapping(BundleId => AuctionTypes.Bundle) bundles;
+    bool hasBundles;
+    bool poolsRegistered;
+    uint256 proxyPhaseStartTime;
+}
+
+struct AllocationPhaseState {
+    AuctionTypes.TopAllocation topAllocation;
+    bool hasAllocations;
+    bool winnerSelected;
+    uint256 allocationPhaseStartTime;
+}
+
+struct SettlementPhaseState {
+    mapping(bytes32 => address) revealedMappings;
+    mapping(address => uint256) assetBalance;     // assetToken → balance
+    uint256 protocolAccrued;
+    bool proceedsClaimed;
+    bool createPoolOnFinish;
+    uint256 settlementPhaseStartTime;
+    uint256 pauseStartTime;
+}
 
 abstract contract CPAStorage {
 
-	/// @notice Commit hash to proxy mapping
-	// AuctionId -> CommitHash -> Proxy Address
-	mapping(AuctionId => mapping(bytes32 => address)) public commitProxy;
+    // ========================================
+    // PER-AUCTION PHASE STATE
+    // ========================================
 
-	/// @notice Pool key to auction owner mapping
-	mapping(PoolId => AuctionId) public poolToAuctionId;
+    mapping(AuctionId => ClockPhaseState)      internal _clock;
+    mapping(AuctionId => ProxyPhaseState)      internal _proxy;
+    mapping(AuctionId => AllocationPhaseState) internal _alloc;
+    mapping(AuctionId => SettlementPhaseState) internal _settlement;
 
-	/// @notice Auction info mapping
-	mapping(AuctionId => AuctionTypes.AuctionInfo) public auctionInfo;
+    // ========================================
+    // AUCTION / ASSET LOOKUPS (flat, not per-phase)
+    // ========================================
 
-	/// @notice Pool info mapping
-	mapping(PoolId => AuctionTypes.PoolInfo) public poolInfo;
+    /// AssetId -> AuctionId
+    mapping(AssetId => AuctionId) public assetToAuctionId;
 
-	/// @notice Pause start time mapping (timestamp when current pause started, 0 if not paused)
-	mapping(AuctionId => uint256) public pauseStartTime;
+    /// AuctionId -> AuctionInfo
+    mapping(AuctionId => AuctionTypes.AuctionInfo) public auctionInfo;
 
-	/// @notice Current prices for currencies (in numeraire units)
-	/// @dev Currency address => price in numeraire (e.g., 1e18 = 1 numeraire token per currency unit)
-	mapping(address => uint256) public currentPrices;
+    /// AssetId -> AssetInfo
+    mapping(AssetId => AuctionTypes.AssetInfo) public assetInfo;
 
-	/// @notice CPA Auction Hook address
-	// this is the hook that all auction item pools share
-	address public cpaAuctionHookAddr;
+    // ========================================
+    // SETTLEMENT (flat — keyed by commitHash, not AuctionId)
+    // ========================================
 
-	/// @notice MathFacet address for external math library calls
-	address public mathFacet;
+    /// commitHash -> BundleId
+    mapping(bytes32 => BundleId) public winningBundleIds;
 
-	/// @notice Pool manager
-	// forge-lint: disable-next-line(screaming-snake-case-immutable)
-	IPoolManager public immutable manager;
+    // ========================================
+    // PROTOCOL CONFIG (immutable on deployment)
+    // ========================================
 
-	/// @notice Position manager for NFT position creation
-	// forge-lint: disable-next-line(screaming-snake-case-immutable)
-	IPositionManager public immutable positionManager;
+    /// @notice MathFacet address for mulDiv and decimal helpers
+    address public mathFacet;
 
-	/// @notice Permit2 address for allowance transfers
-	/// @dev This can be hardcoded since it is the same deployment address across all chains Uniswap V4 is deployed on
-	// forge-lint: disable-next-line(screaming-snake-case-immutable)
-	IAllowanceTransfer public immutable permit2 = IAllowanceTransfer(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+    /// @notice Protocol wallet — receives accumulated fees/penalties
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
+    address public immutable protocolWallet;
 
-	/// @notice Protocol wallet address for penalty collection
-	// forge-lint: disable-next-line(screaming-snake-case-immutable)
-	address public immutable protocolWallet;
+    /// @notice Protocol fee in basis points, charged in numeraire at token claim time
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
+    uint256 public immutable protocolFeeBps;
 
-	uint256 public constant FORFEITURE_REWARD_RATE = 500; // 5% reward (basis points)
+    uint256 public constant FORFEITURE_REWARD_RATE = 500; // 5% (basis points)
 
-	//// getters
-	function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory) {
-    	return auctionInfo[auctionId];
-	}
+    // ========================================
+    // GETTERS — preserve ICPAManager interface
+    // ========================================
 
-	function getPoolInfo(PoolId poolId) external view returns (PoolKey memory, int24, int24, uint256, int256, int24, AuctionId, uint256) {
-		return (
-			poolInfo[poolId].key,
-			poolInfo[poolId].startingTick,
-			poolInfo[poolId].priceIncrement,
-			poolInfo[poolId].depositAmount,
-			poolInfo[poolId].excessDemand,
-			poolInfo[poolId].lastOversoldTick,
-			poolInfo[poolId].auctionId,
-			poolInfo[poolId].positionId
-		);
-	}
+    function bidderStake(AuctionId id, address b)      external view returns (uint256) { return _clock[id].bidderStake[b]; }
+    function bidderBidPoints(AuctionId id, address b)  external view returns (uint256) { return _clock[id].bidderBidPoints[b]; }
+    function activeBidders(AuctionId id, uint256 i)    external view returns (address) { return _clock[id].activeBidders[i]; }
+    function droppedBidders(AuctionId id, address b)   external view returns (bool)    { return _clock[id].droppedBidders[b]; }
+    function pendingRoundDemands(AuctionId id, uint256 i) external view returns (uint256) { return _clock[id].pendingRoundDemands[i]; }
+    function roundPendingFinalize(AuctionId id)        external view returns (bool)    { return _clock[id].roundPendingFinalize; }
 
+    function commitProxy(AuctionId id, bytes32 h)      external view returns (address) { return _proxy[id].commitProxy[h]; }
+    function hasBundles(AuctionId id)                  external view returns (bool)    { return _proxy[id].hasBundles; }
+    function poolsRegistered(AuctionId id)             external view returns (bool)    { return _proxy[id].poolsRegistered; }
+    function proxyPhaseStartTime(AuctionId id)         external view returns (uint256) { return _proxy[id].proxyPhaseStartTime; }
 
-	///////
-	// SETUP PHASE
-	///////
+    function hasAllocations(AuctionId id)              external view returns (bool)    { return _alloc[id].hasAllocations; }
+    function winnerSelected(AuctionId id)              external view returns (bool)    { return _alloc[id].winnerSelected; }
+    function allocationPhaseStartTime(AuctionId id)    external view returns (uint256) { return _alloc[id].allocationPhaseStartTime; }
 
+    function revealedMappings(AuctionId id, bytes32 h) external view returns (address) { return _settlement[id].revealedMappings[h]; }
+    function assetBalance(AuctionId id, address t)     external view returns (uint256) { return _settlement[id].assetBalance[t]; }
+    function protocolAccrued(AuctionId id)             external view returns (uint256) { return _settlement[id].protocolAccrued; }
+    function proceedsClaimed(AuctionId id)             external view returns (bool)    { return _settlement[id].proceedsClaimed; }
+    function createPoolOnFinish(AuctionId id)          external view returns (bool)    { return _settlement[id].createPoolOnFinish; }
+    function settlementPhaseStartTime(AuctionId id)    external view returns (uint256) { return _settlement[id].settlementPhaseStartTime; }
+    function pauseStartTime(AuctionId id)              external view returns (uint256) { return _settlement[id].pauseStartTime; }
 
-	function getNumItems(AuctionId auctionId) external view returns (uint256) {
-		return auctionInfo[auctionId].poolKeys.length;
-	}
+    // ========================================
+    // COMPLEX GETTERS
+    // ========================================
 
+    function getAuctionInfo(AuctionId auctionId) external view returns (AuctionTypes.AuctionInfo memory) {
+        return auctionInfo[auctionId];
+    }
 
+    function getAssetInfo(AssetId assetId) external view returns (AuctionTypes.AssetInfo memory) {
+        return assetInfo[assetId];
+    }
 
-    ////////
-    // CLOCK PHASE
-    ////////
-    /// @notice Dropped bidders (not stored in AuctionInfo)
-	mapping(AuctionId => mapping(address => bool)) public droppedBidders;
+    function getNumItems(AuctionId auctionId) external view returns (uint256) {
+        return auctionInfo[auctionId].assets.length;
+    }
 
-	/// @notice Pending total demands stored between processClockRoundStep and finalizeClockRound
-	mapping(AuctionId => uint256[]) internal pendingRoundDemands;
+    function getBundle(AuctionId auctionId, BundleId bundleId)
+        external view
+        returns (AuctionId, bytes32, BundleId, uint256[] memory, uint256, uint256)
+    {
+        AuctionTypes.Bundle storage b = _proxy[auctionId].bundles[bundleId];
+        return (auctionId, b.commitHash, bundleId, b.quantities, b.value, b.timestamp);
+    }
 
-	/// @notice Flag indicating a clock round has been processed and is awaiting finalization
-	mapping(AuctionId => bool) internal roundPendingFinalize;
+    function getTopAllocation(AuctionId auctionId) external view returns (AuctionTypes.TopAllocation memory) {
+        return _alloc[auctionId].topAllocation;
+    }
 
-    /// @notice Bidder stake mapping (not stored in AuctionInfo)
-	mapping(AuctionId => mapping(address => uint256)) public bidderStake;
+    // ========================================
+    // CONSTRUCTOR
+    // ========================================
 
-    /// @notice Bidder bid points mapping (not stored in AuctionInfo)
-	mapping(AuctionId => mapping(address => uint256)) public bidderBidPoints;
-
-	/// @notice Bidder demand vector mapping
-	mapping(AuctionId => mapping(address => uint256[])) public bids;
-
-	/// @notice Active bidders mapping
-	mapping(AuctionId => address[]) public activeBidders;
-
-    ////////
-    // PROXY PHASE
-    ////////
-    /// @notice Bundle storage (id -> bundleId -> bundle)
-	mapping(AuctionId => mapping(BundleId => AuctionTypes.Bundle)) public bundles;
-
-	/// @notice Proxy phase start time
-	mapping(AuctionId => uint256) public proxyPhaseStartTime;
-
-	/// @notice Allocation phase start time
-	mapping(AuctionId => uint256) public allocationPhaseStartTime;
-
-	/// @notice Settlement phase start time
-	mapping(AuctionId => uint256) public settlementPhaseStartTime;
-
-	/// @notice Track if at least one bundle was submitted
-	mapping(AuctionId => bool) public hasBundles;
-
-	/// @notice Track if at least one allocation was submitted
-	mapping(AuctionId => bool) public hasAllocations;
-
-	/// @notice Flag set after selectAuctionWinner runs, allowing transferToSettlement to proceed
-	mapping(AuctionId => bool) internal winnerSelected;
-
-	/// @notice Flag set after initAuction registers pools, cleared after finalizeAuction completes
-	mapping(AuctionId => bool) internal poolsRegistered;
-
-	/// @notice Set after convertAuctionAssets completes ERC6909→ERC20 conversion
-	mapping(AuctionId => bool) internal assetsConverted;
-
-	/// @notice Position manager nextTokenId captured before minting (for positionId pre-storage)
-	mapping(AuctionId => uint256) internal settleStartTokenId;
-	
-	/// @notice Accumulated penalties per auction (for protocol collection)
-	mapping(AuctionId => uint256) public protocolPenalties;
-
-	function getBundle(AuctionId auctionId, BundleId bundleId) external view returns (AuctionId, bytes32, BundleId, uint256[] memory, uint256, uint256) {
-		return (
-			auctionId,
-			bundles[auctionId][bundleId].commitHash,
-			bundleId,
-			bundles[auctionId][bundleId].quantities,
-			bundles[auctionId][bundleId].value,
-			bundles[auctionId][bundleId].timestamp
-		);
-	}
-
-
-    ////////
-    // ALLOCATION PHASE
-    ////////
-    
-	/// @notice Top allocation storage
-	mapping(AuctionId => AuctionTypes.TopAllocation) public topAllocation;
-
-	/// @notice Winning bundle ids storage
-	/// commitHash -> bundleId
-	mapping(bytes32 => BundleId) public winningBundleIds;
-
-	/**
-	 * @notice Get top allocation
-	 * @param auctionId The auction ID
-	 * @return Top allocation
-	 */
-	function getTopAllocation(AuctionId auctionId) external view returns (AuctionTypes.TopAllocation memory) {
-		return topAllocation[auctionId];
-	}
-
-    ////////
-    // SETTLEMENT PHASE
-    ////////
-    /// @notice Revealed mappings. AuctionId -> CommitHash -> Bidder Address
-	mapping(AuctionId => mapping(bytes32 => address)) public revealedMappings;
-
-
-	/**
-	 * @notice Constructor
-	 * @param _cpaAuctionHookAddr The CPA auction hook address
-	 * @param _positionManager The PositionManager address for NFT position creation
-	 */
-	constructor(address _mathFacet, address _cpaAuctionHookAddr, IPositionManager _positionManager) {
-		mathFacet = _mathFacet;
-		cpaAuctionHookAddr = _cpaAuctionHookAddr;
-		positionManager = _positionManager;
-	}
+    constructor(address _mathFacet, address _protocolWallet, uint256 _protocolFeeBps) {
+        mathFacet = _mathFacet;
+        protocolWallet = _protocolWallet;
+        protocolFeeBps = _protocolFeeBps;
+    }
 }

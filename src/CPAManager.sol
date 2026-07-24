@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.24;
 
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -15,34 +13,23 @@ import { AuctionId } from "./types/AuctionId.sol";
 
 /**
  * @title CPAManager
- * @notice EIP-2535 diamond proxy. All protocol logic lives in the 25 facets under src/facets/.
- *         This contract holds all shared storage (via CPAStorage), routes calls to facets via
- *         delegatecall, and exposes the standard DiamondCut / DiamondLoupe interfaces.
+ * @notice EIP-2535 diamond proxy. All protocol logic lives in facets under src/facets/.
+ *         This contract holds all shared storage (via CPAStorage), routes calls to facets
+ *         via delegatecall, and exposes DiamondCut / DiamondLoupe interfaces.
  */
 contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamondLoupe, IErrorsAndEvents {
 
-    // ========================================
-    // CONSTRUCTOR
-    // ========================================
-
     constructor(
-        IPoolManager _poolManager,
         address _owner,
-        address _cpaAuctionHookAddr,
-        IPositionManager _positionManager,
         address _protocolWallet,
+        uint256 _protocolFeeBps,
         address _mathFacet
-    ) Ownable(_owner) CPAStorage(_mathFacet, _cpaAuctionHookAddr, _positionManager) {
-        manager = _poolManager;
-        protocolWallet = _protocolWallet;
-    }
+    ) Ownable(_owner) CPAStorage(_mathFacet, _protocolWallet, _protocolFeeBps) {}
 
     // ========================================
     // EIP-2535: DiamondCut
     // ========================================
 
-    // Register or replace facet selectors. Pass address(0) for _init to skip initialiser.
-    // Only Add and Replace are currently supported. Owner-only; renounce ownership to lock.
     function diamondCut(
         FacetCut[] calldata _diamondCut,
         address _init,
@@ -66,19 +53,6 @@ contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamo
             if (!ok) {
                 assembly { revert(add(err, 0x20), mload(err)) }
             }
-        }
-    }
-
-    // Register callback sub-facets used by CallbackRouterFacet.
-    // opTypes[i] maps to facets_[i]: operation type (0-9) => sub-facet address.
-    function setCallbackFacets(
-        uint8[] calldata opTypes,
-        address[] calldata facets_
-    ) external onlyOwner {
-        require(opTypes.length == facets_.length, "Length mismatch");
-        for (uint256 i = 0; i < opTypes.length; ) {
-            LibDiamond.setCallbackFacet(opTypes[i], facets_[i]);
-            unchecked { ++i; }
         }
     }
 
@@ -144,13 +118,11 @@ contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamo
     }
 
     // ========================================
-    // Native view helpers (not routed through fallback)
+    // Native view helpers
     // ========================================
 
-    // Nested-mapping auto-getter bids(bytes32,address,uint256) returns a single element;
-    // this explicit getter returns the full demand array without adding to any facet's bytecode.
     function getBidderDemands(AuctionId auctionId, address bidder) external view returns (uint256[] memory) {
-        return bids[auctionId][bidder];
+        return _clock[auctionId].bids[bidder];
     }
 
     // ========================================
@@ -161,11 +133,11 @@ contract CPAManager is Ownable, CPAStorage, ReentrancyGuard, IDiamondCut, IDiamo
         return
             interfaceId == type(IDiamondCut).interfaceId ||
             interfaceId == type(IDiamondLoupe).interfaceId ||
-            interfaceId == 0x01ffc9a7; // ERC-165 itself
+            interfaceId == 0x01ffc9a7;
     }
 
     // ========================================
-    // Fallback — routes all protocol calls to facets via delegatecall
+    // Fallback — routes all protocol calls to facets
     // ========================================
 
     fallback() external payable {

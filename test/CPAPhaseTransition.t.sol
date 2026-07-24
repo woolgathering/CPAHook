@@ -5,15 +5,6 @@ import { Test } from "forge-std/Test.sol";
 import { console } from "forge-std/console.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC721 } from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import { IERC6909Claims } from "@uniswap/v4-core/src/interfaces/external/IERC6909Claims.sol";
-import { Currency } from "@uniswap/v4-core/src/types/Currency.sol";
-import { PoolId } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { PoolKey } from "@uniswap/v4-core/src/types/PoolKey.sol";
-import { IPoolManager } from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import { Hooks } from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import { TickMath } from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import { PoolIdLibrary } from "@uniswap/v4-core/src/types/PoolId.sol";
-import { IPositionManager } from "@uniswap/v4-periphery/src/interfaces/IPositionManager.sol";
 
 import { CPAManager } from "../src/CPAManager.sol";
 import { AuctionTypes } from "../src/types/AuctionTypes.sol";
@@ -24,7 +15,6 @@ import { CommitReveal } from "../src/utils/CommitReveal.sol";
 import { CPATestBase } from "./base/CPATestBase.sol";
 
 contract CPAPhaseTransitionTest is CPATestBase {
-    using PoolIdLibrary for PoolKey;
 
     // Test participants
     address allocator1;
@@ -58,8 +48,8 @@ contract CPAPhaseTransitionTest is CPATestBase {
         approveTokens(address(asset2Token), address(cpaManager), 1000 * 10**18);
 
         // Move deposits to pools
-        moveDeposit(auctionId, asset1PoolKey, 100 * 10**18);
-        moveDeposit(auctionId, asset2PoolKey, 150 * 10**18);
+        moveDeposit(auctionId, address(asset1Token), 100 * 10**18);
+        moveDeposit(auctionId, address(asset2Token), 150 * 10**18);
 
         // Generate commit-reveal data
         saltA1 = keccak256("saltA1");
@@ -89,17 +79,12 @@ contract CPAPhaseTransitionTest is CPATestBase {
         vm.expectEmit(true, true, true, true);
         emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Clock);
 
-        // Deposit all and start clock
-        PoolKey[] memory poolKeys = new PoolKey[](2);
-        poolKeys[0] = asset1PoolKey;
-        poolKeys[1] = asset2PoolKey;
-        
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 50 * 10**18;
         amounts[1] = 75 * 10**18;
 
         vm.prank(auctioneer);
-        cpaManager.depositAllAndStartClock(auctionId, poolKeys, amounts);
+        cpaManager.depositAllAndStartClock(auctionId, amounts);
     }
 
     function test_EndClockPhaseEmitsAuctionPhaseChanged() public {
@@ -134,15 +119,12 @@ contract CPAPhaseTransitionTest is CPATestBase {
         setupProxyPhase();
         setupAllocationPhaseWithoutTransition();
 
-        // Settlement transition is a 3-step process; phase change happens in mintSettlementPositions
-        cpaManager.selectAuctionWinner(auctionId);
-        cpaManager.convertAuctionAssets(auctionId);
-
+        // Settlement transition is a 3-step process; phase change happens in selectAuctionWinner
         // Set up event expectation for Allocation -> Settlement transition
         vm.expectEmit(true, true, true, true);
         emit IErrorsAndEvents.AuctionPhaseChanged(auctionId, AuctionTypes.AuctionPhase.Settlement);
 
-        cpaManager.mintSettlementPositions(auctionId);
+        cpaManager.selectAuctionWinner(auctionId);
     }
 
     function test_TransitionToFinishedEmitsAuctionPhaseChanged() public {
@@ -187,14 +169,14 @@ contract CPAPhaseTransitionTest is CPATestBase {
         uint256[] memory demands1 = new uint256[](2);
         demands1[0] = 50 * 10**18;
         demands1[1] = 60 * 10**18;
-        
+
         uint256[] memory demands2 = new uint256[](2);
         demands2[0] = 40 * 10**18;
         demands2[1] = 50 * 10**18;
 
         vm.prank(bidder1);
         cpaManager.submitBid(auctionId, demands1, 1000 * 10**18);
-        
+
         vm.prank(bidder2);
         cpaManager.submitBid(auctionId, demands2, 1000 * 10**18);
 
@@ -226,14 +208,14 @@ contract CPAPhaseTransitionTest is CPATestBase {
         uint256[] memory demands1 = new uint256[](2);
         demands1[0] = 50 * 10**18;
         demands1[1] = 60 * 10**18;
-        
+
         uint256[] memory demands2 = new uint256[](2);
         demands2[0] = 40 * 10**18;
         demands2[1] = 50 * 10**18;
 
         vm.prank(bidder1);
         cpaManager.submitBid(auctionId, demands1, 1000 * 10**18);
-        
+
         vm.prank(bidder2);
         cpaManager.submitBid(auctionId, demands2, 1000 * 10**18);
 
@@ -245,7 +227,7 @@ contract CPAPhaseTransitionTest is CPATestBase {
         uint256[] memory quantities1 = new uint256[](2);
         quantities1[0] = 30 * 10**18;
         quantities1[1] = 20 * 10**18;
-        
+
         uint256[] memory quantities2 = new uint256[](2);
         quantities2[0] = 25 * 10**18;
         quantities2[1] = 15 * 10**18;
@@ -272,7 +254,7 @@ contract CPAPhaseTransitionTest is CPATestBase {
 
         vm.prank(proxy1);
         cpaManager.submitBundle(auctionId, commitHash1, bundle1);
-        
+
         vm.prank(proxy2);
         cpaManager.submitBundle(auctionId, commitHash2, bundle2);
 
@@ -290,7 +272,7 @@ contract CPAPhaseTransitionTest is CPATestBase {
         uint256[] memory quantities1 = new uint256[](2);
         quantities1[0] = 30 * 10**18;
         quantities1[1] = 20 * 10**18;
-        
+
         uint256[] memory quantities2 = new uint256[](2);
         quantities2[0] = 25 * 10**18;
         quantities2[1] = 15 * 10**18;
@@ -317,7 +299,7 @@ contract CPAPhaseTransitionTest is CPATestBase {
 
         vm.prank(proxy1);
         cpaManager.submitBundle(auctionId, commitHash1, bundle1);
-        
+
         vm.prank(proxy2);
         cpaManager.submitBundle(auctionId, commitHash2, bundle2);
 
@@ -386,14 +368,14 @@ contract CPAPhaseTransitionTest is CPATestBase {
         // Reveal identities
         vm.prank(bidder1);
         cpaManager.reveal(auctionId, proxy1, saltA1, saltB1);
-        
+
         vm.prank(bidder2);
         cpaManager.reveal(auctionId, proxy2, saltA2, saltB2);
 
         // Claim tokens
         vm.prank(bidder1);
         cpaManager.claimAllTokens(auctionId, commitHash1);
-        
+
         vm.prank(bidder2);
         cpaManager.claimAllTokens(auctionId, commitHash2);
 
@@ -410,14 +392,14 @@ contract CPAPhaseTransitionTest is CPATestBase {
         // Reveal identities
         vm.prank(bidder1);
         cpaManager.reveal(auctionId, proxy1, saltA1, saltB1);
-        
+
         vm.prank(bidder2);
         cpaManager.reveal(auctionId, proxy2, saltA2, saltB2);
 
         // Claim tokens
         vm.prank(bidder1);
         cpaManager.claimAllTokens(auctionId, commitHash1);
-        
+
         vm.prank(bidder2);
         cpaManager.claimAllTokens(auctionId, commitHash2);
 

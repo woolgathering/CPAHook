@@ -62,9 +62,9 @@ contract CPAAllocationPhaseTest is CPATestBase {
     }
     
     function setupAuctionForAllocationPhase() internal {
-        // Move deposits to pools
-        moveDeposit(auctionId, asset1PoolKey, 1000 * 10**18);
-        moveDeposit(auctionId, asset2PoolKey, 1000 * 10**18);
+        // Move deposits to assets
+        moveDeposit(auctionId, address(asset1Token), 1000 * 10**18);
+        moveDeposit(auctionId, address(asset2Token), 1000 * 10**18);
         
         // Set up proxy commitments
         vm.prank(proxy1);
@@ -512,7 +512,8 @@ contract CPAAllocationPhaseTest is CPATestBase {
         assertGt(auctionInfo.allocatorReward, 0, "Allocator reward should be greater than 0");
         
         // Verify that allocator1 is the winning allocator
-        (AuctionTypes.Allocation memory winnerAllocation, , ) = cpaManager.topAllocation(auctionId);
+        AuctionTypes.TopAllocation memory top = cpaManager.getTopAllocation(auctionId);
+        AuctionTypes.Allocation memory winnerAllocation = top.allocation;
         assertEq(winnerAllocation.allocator, allocator1, "Allocator1 should be the winning allocator");
         
         // Check allocator's balance before claiming
